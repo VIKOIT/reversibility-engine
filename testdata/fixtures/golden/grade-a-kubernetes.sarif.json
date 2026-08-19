@@ -1,0 +1,69 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "reversibility-engine",
+          "version": "1.0.0",
+          "informationUri": "https://github.com/abdo-s1/reversibility-engine",
+          "rules": [
+            {
+              "id": "K8S015",
+              "name": "K8S015",
+              "shortDescription": {
+                "text": "REVERSIBLE change with NONE lock hazard"
+              },
+              "fullDescription": {
+                "text": "Container \"api\" in Deployment web/api moves to a digest-pinned image, so the previous digest identifies the exact bytes to roll back to."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "reversibility": "REVERSIBLE",
+                "tags": [
+                  "reversibility",
+                  "rollback",
+                  "REVERSIBLE"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "K8S015",
+          "level": "note",
+          "message": {
+            "text": "REVERSIBLE: Container \"api\" in Deployment web/api moves to a digest-pinned image, so the previous digest identifies the exact bytes to roll back to. Undo: kubectl set image Deployment/api api=ghcr.io/acme/api@sha256:3f79bb7b435b05321651daefd374cdc681dc06faa65e374e38337b88ca046dea"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "deployment.yaml"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "exitCodeDescription": "grade A, AI merge gate PASS",
+          "properties": {
+            "grade": "A",
+            "aiGateStatus": "PASS",
+            "applicable": true,
+            "inputDigest": "b10cfa10960f1f66198e1ea86f4a7555ae112d13269f365cbf63ca311e4eeb96",
+            "certificateSchemaVersion": "1.0.0"
+          }
+        }
+      ]
+    }
+  ]
+}

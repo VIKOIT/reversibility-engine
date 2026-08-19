@@ -1,0 +1,91 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "reversibility-engine",
+          "version": "1.0.0",
+          "informationUri": "https://github.com/abdo-s1/reversibility-engine",
+          "rules": [
+            {
+              "id": "PG012",
+              "name": "PG012",
+              "shortDescription": {
+                "text": "COSTLY change with SHORT lock hazard"
+              },
+              "fullDescription": {
+                "text": "Renaming table orders to purchase_orders breaks the previous application version, so rolling the code back fails for as long as the schema stays renamed."
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "reversibility": "COSTLY",
+                "tags": [
+                  "reversibility",
+                  "rollback",
+                  "COSTLY"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "PG012",
+          "level": "warning",
+          "message": {
+            "text": "COSTLY: Renaming table orders to purchase_orders breaks the previous application version, so rolling the code back fails for as long as the schema stays renamed. Undo: ALTER TABLE purchase_orders RENAME TO orders;"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "migrations/0001_rename_orders.up.sql"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "PG012",
+          "level": "warning",
+          "message": {
+            "text": "COSTLY: Renaming column customers.name to full_name breaks the previous application version, so rolling the code back fails for as long as the schema stays renamed. Undo: ALTER TABLE customers RENAME COLUMN full_name TO name;"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "migrations/0001_rename_orders.up.sql"
+                },
+                "region": {
+                  "startLine": 2
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "exitCodeDescription": "grade B, AI merge gate FAIL",
+          "properties": {
+            "grade": "B",
+            "aiGateStatus": "FAIL",
+            "applicable": true,
+            "inputDigest": "160d9f861d205a505ad372b8134720cd1f81f3794078c9e6369981b81e1fd690",
+            "certificateSchemaVersion": "1.0.0"
+          }
+        }
+      ]
+    }
+  ]
+}

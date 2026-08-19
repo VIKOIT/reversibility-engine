@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0.0",
+  "grade": "F",
+  "aiGateStatus": "FAIL",
+  "applicable": true,
+  "inputDigest": "e83a6aad8b31bb8fb4ce922e1dddcccb1097283ce17935bf07dc58d96c807c17",
+  "findings": [
+    {
+      "ruleId": "K8S006",
+      "file": "crd.yaml",
+      "line": 0,
+      "statement": "CustomResourceDefinition widgets.acme.io",
+      "reversibility": "IRREVERSIBLE",
+      "lockHazard": "NONE",
+      "rationale": "Deleting CustomResourceDefinition widgets.acme.io cascades to every custom resource of that kind, which is among the largest blast radii in Kubernetes and is not undone by re-applying the manifest."
+    },
+    {
+      "ruleId": "K8S006",
+      "file": "namespace.yaml",
+      "line": 0,
+      "statement": "Namespace legacy",
+      "reversibility": "IRREVERSIBLE",
+      "lockHazard": "NONE",
+      "rationale": "Deleting Namespace legacy cascades to every object inside it, which is among the largest blast radii in Kubernetes and is not undone by re-applying the manifest."
+    }
+  ],
+  "undoPlan": [
+    "-- NO COMPLETE UNDO EXISTS. This changeset cannot be fully reversed.",
+    "-- The following changes have no reverse:",
+    "--   K8S006 at crd.yaml: CustomResourceDefinition widgets.acme.io — cannot be undone",
+    "--   K8S006 at namespace.yaml: Namespace legacy — cannot be undone"
+  ],
+  "blockers": [
+    "K8S006 at crd.yaml: irreversible — Deleting CustomResourceDefinition widgets.acme.io cascades to every custom resource of that kind, which is among the largest blast radii in Kubernetes and is not undone by re-applying the manifest.",
+    "K8S006 at namespace.yaml: irreversible — Deleting Namespace legacy cascades to every object inside it, which is among the largest blast radii in Kubernetes and is not undone by re-applying the manifest."
+  ],
+  "downMigrations": []
+}

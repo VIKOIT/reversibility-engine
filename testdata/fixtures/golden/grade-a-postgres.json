@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "1.0.0",
+  "grade": "A",
+  "aiGateStatus": "PASS",
+  "applicable": true,
+  "inputDigest": "e497c2c4438058df95ab087614e62b35563e249aca35e841fe285dae85a8e561",
+  "findings": [
+    {
+      "ruleId": "PG024",
+      "file": "migrations/0001_index_status.up.sql",
+      "line": 1,
+      "statement": "CREATE INDEX CONCURRENTLY idx_orders_status ON orders (status)",
+      "reversibility": "REVERSIBLE",
+      "lockHazard": "NONE",
+      "rationale": "Index idx_orders_status is built without blocking writes and is removed again by a single concurrent drop.",
+      "undoStep": "DROP INDEX CONCURRENTLY idx_orders_status;"
+    }
+  ],
+  "undoPlan": [
+    "DROP INDEX CONCURRENTLY idx_orders_status;"
+  ],
+  "blockers": [],
+  "downMigrations": [
+    {
+      "migration": "0001_index_status",
+      "upFile": "migrations/0001_index_status.up.sql",
+      "downFile": "migrations/0001_index_status.down.sql",
+      "exists": true,
+      "parses": true,
+      "symmetric": true
+    }
+  ]
+}

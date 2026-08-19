@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "1.0.0",
+  "grade": "F",
+  "aiGateStatus": "FAIL",
+  "applicable": true,
+  "inputDigest": "8f1b5f8e1fe0efd8c4ec1c3c3fba4e1fcd79b552facd55c88a93ff02b4b90ea6",
+  "findings": [
+    {
+      "ruleId": "PG027",
+      "file": "migrations/0001_unparseable.up.sql",
+      "line": 1,
+      "statement": "ALTER TABLE orders FLARBLE COLUMN quantity;",
+      "reversibility": "UNKNOWN",
+      "lockHazard": "EXCLUSIVE",
+      "rationale": "This migration could not be parsed, so nothing in it can be classified: parse: syntax error at or near \"FLARBLE\"."
+    },
+    {
+      "ruleId": "PG027",
+      "file": "migrations/0002_unrecognized.up.sql",
+      "line": 1,
+      "statement": "GRANT SELECT ON orders TO reporting_ro",
+      "reversibility": "UNKNOWN",
+      "lockHazard": "EXCLUSIVE",
+      "rationale": "this statement matches no rule in the PostgreSQL classification table, and an unclassified change is treated as unsafe"
+    }
+  ],
+  "undoPlan": [
+    "-- NO COMPLETE UNDO EXISTS. This changeset cannot be fully reversed.",
+    "-- The following changes have no reverse:",
+    "--   PG027 at migrations/0001_unparseable.up.sql:1: ALTER TABLE orders FLARBLE COLUMN quantity; — was not understood, so no undo can be written for it",
+    "--   PG027 at migrations/0002_unrecognized.up.sql:1: GRANT SELECT ON orders TO reporting_ro — was not understood, so no undo can be written for it"
+  ],
+  "blockers": [
+    "PG027 at migrations/0001_unparseable.up.sql:1: unknown — This migration could not be parsed, so nothing in it can be classified: parse: syntax error at or near \"FLARBLE\".",
+    "PG027 at migrations/0002_unrecognized.up.sql:1: unknown — this statement matches no rule in the PostgreSQL classification table, and an unclassified change is treated as unsafe"
+  ],
+  "downMigrations": [
+    {
+      "migration": "0001_unparseable",
+      "upFile": "migrations/0001_unparseable.up.sql",
+      "downFile": "migrations/0001_unparseable.down.sql",
+      "exists": true,
+      "parses": true,
+      "symmetric": false,
+      "symmetryNotes": [
+        "symmetry could not be checked because the up migration does not parse"
+      ]
+    },
+    {
+      "migration": "0002_unrecognized",
+      "upFile": "migrations/0002_unrecognized.up.sql",
+      "downFile": "migrations/0002_unrecognized.down.sql",
+      "exists": true,
+      "parses": true,
+      "symmetric": true
+    }
+  ]
+}
