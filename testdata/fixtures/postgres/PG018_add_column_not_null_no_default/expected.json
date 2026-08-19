@@ -1,0 +1,7 @@
+{
+  "rule": "PG018",
+  "note": "NOT NULL with no DEFAULT fails outright on a non-empty table, so this is COSTLY: the migration is likely to abort mid-deploy and leave the release wedged.",
+  "findings": [
+    {"ruleId":"PG018","file":"migrations/0001_add_tenant.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"EXCLUSIVE","wantUndoStep":true}
+  ]
+}

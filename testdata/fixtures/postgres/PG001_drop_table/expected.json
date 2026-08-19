@@ -1,0 +1,7 @@
+{
+  "rule": "PG001",
+  "note": "Dropping a table destroys every row. Recreating the shape in down.sql does not bring the data back, so this is IRREVERSIBLE and carries no undo step.",
+  "findings": [
+    {"ruleId":"PG001","file":"migrations/0001_drop_legacy_orders.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false}
+  ]
+}

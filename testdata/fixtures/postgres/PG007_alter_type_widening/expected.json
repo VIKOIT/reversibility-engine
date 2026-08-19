@@ -1,0 +1,8 @@
+{
+  "rule": "PG007",
+  "note": "Widening loses no values, so it is reversible in principle -- but only until a value too large for the old type is written. COSTLY, and the rewrite locks the table.",
+  "findings": [
+    {"ruleId":"PG025","file":"migrations/0001_create_orders.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true},
+    {"ruleId":"PG007","file":"migrations/0002_widen_quantity.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"TABLE_REWRITE","wantUndoStep":true}
+  ]
+}

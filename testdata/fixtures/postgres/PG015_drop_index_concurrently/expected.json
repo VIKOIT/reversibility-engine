@@ -1,0 +1,7 @@
+{
+  "rule": "PG015",
+  "note": "Identical cost to PG014 but CONCURRENTLY takes no blocking lock. The pair PG014/PG015 is the reason a regex is not good enough: one keyword changes the lock hazard from EXCLUSIVE to NONE.",
+  "findings": [
+    {"ruleId":"PG015","file":"migrations/0001_drop_status_index.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

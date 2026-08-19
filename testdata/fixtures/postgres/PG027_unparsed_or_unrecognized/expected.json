@@ -1,0 +1,8 @@
+{
+  "rule": "PG027",
+  "note": "THE FAIL-CLOSED FIXTURE. Two distinct paths reach PG027: SQL the parser rejects, and SQL that parses cleanly but matches no rule in the table. Both are UNKNOWN, both grade F. A parse failure is scoped to its file, so each file yields one finding. If this fixture ever produces REVERSIBLE, the product is broken.",
+  "findings": [
+    {"ruleId":"PG027","file":"migrations/0001_unparseable.up.sql","line":1,"reversibility":"UNKNOWN","lockHazard":"EXCLUSIVE","wantUndoStep":false},
+    {"ruleId":"PG027","file":"migrations/0002_unrecognized.up.sql","line":1,"reversibility":"UNKNOWN","lockHazard":"EXCLUSIVE","wantUndoStep":false}
+  ]
+}

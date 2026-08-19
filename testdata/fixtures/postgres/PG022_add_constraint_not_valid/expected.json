@@ -1,0 +1,7 @@
+{
+  "rule": "PG022",
+  "note": "NOT VALID skips the scan of existing rows, which is exactly the pattern this tool should reward: same reversibility as PG021, far lower lock hazard.",
+  "findings": [
+    {"ruleId":"PG022","file":"migrations/0001_add_check_not_valid.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

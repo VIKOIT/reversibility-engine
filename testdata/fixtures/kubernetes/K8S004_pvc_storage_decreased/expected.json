@@ -1,0 +1,7 @@
+{
+  "rule": "K8S004",
+  "note": "Kubernetes cannot shrink a volume. The request is either rejected or satisfied by a replacement volume, and the data on the original is not migrated. Comparing 20Gi to 10Gi means parsing quantity suffixes, not comparing strings.",
+  "findings": [
+    {"ruleId":"K8S004","file":"pvc.yaml","line":0,"reversibility":"IRREVERSIBLE","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

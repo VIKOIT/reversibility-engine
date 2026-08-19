@@ -1,0 +1,7 @@
+{
+  "rule": "PG010",
+  "note": "The previous sequence position is recorded nowhere, so it cannot be restored; later inserts collide with existing keys.",
+  "findings": [
+    {"ruleId":"PG010","file":"migrations/0001_restart_orders_seq.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"SHORT","wantUndoStep":false}
+  ]
+}

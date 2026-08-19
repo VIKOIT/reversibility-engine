@@ -1,0 +1,7 @@
+{
+  "rule": "K8S003",
+  "note": "reclaimPolicy Delete means removing the claim destroys the underlying volume. The StorageClass is included in the fixture because the verdict depends on it -- an analyzer that only reads the PVC cannot reach this answer, and per fail-closed an unresolvable StorageClass is treated exactly the same as Delete.",
+  "findings": [
+    {"ruleId":"K8S003","file":"pvc.yaml","line":0,"reversibility":"IRREVERSIBLE","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

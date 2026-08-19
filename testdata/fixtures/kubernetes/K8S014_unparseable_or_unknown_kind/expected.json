@@ -1,0 +1,8 @@
+{
+  "rule": "K8S014",
+  "note": "THE FAIL-CLOSED FIXTURE. broken.yaml has bad indentation and an unterminated flow sequence; unknown-kind.yaml is valid YAML of a kind with no classification rule. A custom resource can own anything, so UNKNOWN is the only honest verdict for it. Both grade F. If this fixture ever produces REVERSIBLE, the product is broken.",
+  "findings": [
+    {"ruleId":"K8S014","file":"broken.yaml","line":0,"reversibility":"UNKNOWN","lockHazard":"NONE","wantUndoStep":false},
+    {"ruleId":"K8S014","file":"unknown-kind.yaml","line":0,"reversibility":"UNKNOWN","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

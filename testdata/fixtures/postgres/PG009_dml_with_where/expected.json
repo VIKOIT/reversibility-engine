@@ -1,0 +1,8 @@
+{
+  "rule": "PG009",
+  "note": "A WHERE clause bounds the lock, but the affected rows are still gone. Still IRREVERSIBLE -- only the lock hazard improves.",
+  "findings": [
+    {"ruleId":"PG009","file":"migrations/0001_expire_sessions.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"SHORT","wantUndoStep":false},
+    {"ruleId":"PG009","file":"migrations/0001_expire_sessions.up.sql","line":2,"reversibility":"IRREVERSIBLE","lockHazard":"SHORT","wantUndoStep":false}
+  ]
+}

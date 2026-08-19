@@ -1,0 +1,7 @@
+{
+  "rule": "K8S011",
+  "note": "Removing the readiness probe means traffic reaches pods that are not ready. Restoring the probe is one line, but it also removes the signal a rollout would have used to notice it was failing -- which is what makes this costly rather than free.",
+  "findings": [
+    {"ruleId":"K8S011","file":"deployment.yaml","line":0,"reversibility":"COSTLY","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

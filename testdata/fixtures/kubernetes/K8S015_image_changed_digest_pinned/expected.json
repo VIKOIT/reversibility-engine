@@ -1,0 +1,7 @@
+{
+  "rule": "K8S015",
+  "note": "The ordinary deploy, and the reason the tool is usable at all. A digest is content-addressed, so the previous digest identifies the exact bytes to roll back to -- this is the one image reference static analysis can prove is immutable. Contrast K8S008: any tag, semver included, is a mutable pointer the registry operator can move, so it stays COSTLY. Nothing but the image changes here, so K8S012 must not fire alongside.",
+  "findings": [
+    {"ruleId":"K8S015","file":"deployment.yaml","line":0,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

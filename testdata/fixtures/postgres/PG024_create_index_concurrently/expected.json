@@ -1,0 +1,7 @@
+{
+  "rule": "PG024",
+  "note": "The gold standard: reversible and lock-free. This is the fixture that proves an A grade is actually reachable.",
+  "findings": [
+    {"ruleId":"PG024","file":"migrations/0001_index_status.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

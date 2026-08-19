@@ -1,0 +1,7 @@
+{
+  "rule": "PG014",
+  "note": "The index can be rebuilt, so no data is lost -- but rebuilding is slow and the non-concurrent form blocks the table both directions.",
+  "findings": [
+    {"ruleId":"PG014","file":"migrations/0001_drop_customer_index.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"EXCLUSIVE","wantUndoStep":true}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "rule": "PG019",
+  "note": "Dropping the new column undoes this completely, so it is REVERSIBLE -- but a volatile default must be materialised for every existing row, which rewrites the table. Reversibility and lock hazard are independent axes, and this rule proves it.",
+  "findings": [
+    {"ruleId":"PG019","file":"migrations/0001_add_external_ref.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"TABLE_REWRITE","wantUndoStep":true}
+  ]
+}

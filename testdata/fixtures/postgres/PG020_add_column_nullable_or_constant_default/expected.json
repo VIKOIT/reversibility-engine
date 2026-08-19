@@ -1,0 +1,8 @@
+{
+  "rule": "PG020",
+  "note": "The safest schema change there is. A constant default is stored in the catalog rather than written to every row, so no rewrite occurs.",
+  "findings": [
+    {"ruleId":"PG020","file":"migrations/0001_add_notes.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true},
+    {"ruleId":"PG020","file":"migrations/0001_add_notes.up.sql","line":2,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

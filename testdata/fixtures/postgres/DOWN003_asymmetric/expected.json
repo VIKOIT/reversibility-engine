@@ -1,0 +1,10 @@
+{
+  "rule": "DOWN003",
+  "note": "Level 3 failure, ADVISORY ONLY. The up migration creates a table the down migration never drops. Levels 1 and 2 pass, so this must NOT cap the grade and must NOT produce F on its own -- CLAUDE.md 9 is explicit. Symmetry is a heuristic and heuristics do not get to fail builds.",
+  "findings": [
+    {"ruleId":"PG025","file":"migrations/0001_create_shipments.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ],
+  "downMigrations": [
+    {"migration":"0001_create_shipments","exists":true,"parses":true,"symmetric":false}
+  ]
+}

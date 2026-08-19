@@ -1,0 +1,7 @@
+{
+  "rule": "PG023",
+  "note": "Fully reversible by dropping the index, but the non-concurrent build blocks writes for the whole build.",
+  "findings": [
+    {"ruleId":"PG023","file":"migrations/0001_index_created_at.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":true}
+  ]
+}

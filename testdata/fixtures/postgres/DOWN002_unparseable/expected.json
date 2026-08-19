@@ -1,0 +1,10 @@
+{
+  "rule": "DOWN002",
+  "note": "Level 2 failure. A down migration that exists but does not parse is worse than none, because it looks like safety. Level 1 passes, level 2 fails, and level 3 cannot be evaluated so it fails closed.",
+  "findings": [
+    {"ruleId":"PG020","file":"migrations/0001_add_notes.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ],
+  "downMigrations": [
+    {"migration":"0001_add_notes","exists":true,"parses":false,"symmetric":false}
+  ]
+}

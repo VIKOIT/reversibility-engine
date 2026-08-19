@@ -1,0 +1,8 @@
+{
+  "rule": "PG004",
+  "note": "The schema and database variants classify identically. Two statements, two findings.",
+  "findings": [
+    {"ruleId":"PG004","file":"migrations/0001_drop_reporting.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false},
+    {"ruleId":"PG004","file":"migrations/0001_drop_reporting.up.sql","line":2,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false}
+  ]
+}

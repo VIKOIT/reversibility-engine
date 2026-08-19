@@ -1,0 +1,7 @@
+{
+  "rule": "K8S013",
+  "note": "Adding a workload that did not exist takes nothing away. The undo is a delete of an object nothing else depended on yet.",
+  "findings": [
+    {"ruleId":"K8S013","file":"deployment.yaml","line":0,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

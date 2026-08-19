@@ -1,0 +1,7 @@
+{
+  "rule": "K8S010",
+  "note": "Recreate tears down every pod before starting the replacement, so the rollback itself is a second full outage. The change is undoable; the downtime it already caused is not.",
+  "findings": [
+    {"ruleId":"K8S010","file":"deployment.yaml","line":0,"reversibility":"COSTLY","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

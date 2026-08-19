@@ -1,0 +1,9 @@
+{
+  "rule": "PG026",
+  "note": "Catalog-only changes. Note the asymmetry with PG017: relaxing NOT NULL is cheap, re-imposing it costs a full scan.",
+  "findings": [
+    {"ruleId":"PG026","file":"migrations/0001_relax_column.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true},
+    {"ruleId":"PG026","file":"migrations/0001_relax_column.up.sql","line":2,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true},
+    {"ruleId":"PG026","file":"migrations/0001_relax_column.up.sql","line":3,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}
