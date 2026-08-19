@@ -29,6 +29,13 @@ func (p *PgQuery) Parse(ctx context.Context, sql string) ([]Statement, error) {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 
+	// Structure is checked before the bytes reach cgo. The PostgreSQL grammar is recursive
+	// descent on a C stack, and a long enough chain of operators overflows it — a hard process
+	// crash that no recover() can catch. This is the only defence that works, so it runs first.
+	if err := guardComplexity(sql); err != nil {
+		return nil, err
+	}
+
 	result, err := pg.Parse(sql)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
