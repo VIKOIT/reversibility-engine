@@ -1,0 +1,9 @@
+{
+  "rule": "PG025",
+  "note": "Creating an object that did not exist destroys nothing. Dropping it again returns the schema to its prior state exactly.",
+  "findings": [
+    {"ruleId":"PG025","file":"migrations/0001_create_shipments.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true},
+    {"ruleId":"PG025","file":"migrations/0001_create_shipments.up.sql","line":2,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true},
+    {"ruleId":"PG025","file":"migrations/0001_create_shipments.up.sql","line":3,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

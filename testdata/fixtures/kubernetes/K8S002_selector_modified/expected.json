@@ -1,0 +1,7 @@
+{
+  "rule": "K8S002",
+  "note": "spec.selector is immutable. The apply is rejected outright, or on a recreate the old ReplicaSet is orphaned and no longer owned by anything that can roll it back. Deliberately minimal: only the selector changes, so K8S012 cannot fire alongside it.",
+  "findings": [
+    {"ruleId":"K8S002","file":"deployment.yaml","line":0,"reversibility":"IRREVERSIBLE","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

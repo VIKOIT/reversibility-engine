@@ -1,0 +1,8 @@
+{
+  "rule": "PG008",
+  "note": "An unqualified DELETE or UPDATE rewrites every row with no record of the prior values.",
+  "findings": [
+    {"ruleId":"PG008","file":"migrations/0001_purge_sessions.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false},
+    {"ruleId":"PG008","file":"migrations/0001_purge_sessions.up.sql","line":2,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false}
+  ]
+}

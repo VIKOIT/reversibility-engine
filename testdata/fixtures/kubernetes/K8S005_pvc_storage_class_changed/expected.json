@@ -1,0 +1,7 @@
+{
+  "rule": "K8S005",
+  "note": "storageClassName is immutable on a bound PVC. Changing it means a new volume, and the data on the old one does not follow.",
+  "findings": [
+    {"ruleId":"K8S005","file":"pvc.yaml","line":0,"reversibility":"IRREVERSIBLE","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

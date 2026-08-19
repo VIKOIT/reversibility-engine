@@ -1,0 +1,7 @@
+{
+  "rule": "PG017",
+  "note": "Dropping the constraint again is trivial, but Postgres must scan every row to add it, so the table is locked for the duration of the scan.",
+  "findings": [
+    {"ruleId":"PG017","file":"migrations/0001_region_not_null.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"FULL_SCAN","wantUndoStep":true}
+  ]
+}

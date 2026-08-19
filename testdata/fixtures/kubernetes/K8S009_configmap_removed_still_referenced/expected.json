@@ -1,0 +1,7 @@
+{
+  "rule": "K8S009",
+  "note": "The Deployment is byte-for-byte unchanged and still references api-config, which the changeset deletes. Every pod that restarts afterwards fails to start. The finding is attributed to the removed ConfigMap, and reaching it requires a cross-object reference walk rather than a per-file diff.",
+  "findings": [
+    {"ruleId":"K8S009","file":"configmap.yaml","line":0,"reversibility":"COSTLY","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

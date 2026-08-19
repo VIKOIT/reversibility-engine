@@ -1,0 +1,7 @@
+{
+  "rule": "PG003",
+  "note": "TRUNCATE is not logged row by row; nothing in a down migration can restore the rows.",
+  "findings": [
+    {"ruleId":"PG003","file":"migrations/0001_truncate_audit_log.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false}
+  ]
+}

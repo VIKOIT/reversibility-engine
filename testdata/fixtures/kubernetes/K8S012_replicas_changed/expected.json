@@ -1,0 +1,8 @@
+{
+  "rule": "K8S012",
+  "note": "The ordinary case, and the one that must not be over-reported: scaling and resource tuning are stateless and fully reversible by re-applying the old manifest. Two changed fields on one object; whether that is one finding or two is settled by the S3 implementation, and this fixture asserts one per changed field.",
+  "findings": [
+    {"ruleId":"K8S012","file":"deployment.yaml","line":0,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true},
+    {"ruleId":"K8S012","file":"deployment.yaml","line":0,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

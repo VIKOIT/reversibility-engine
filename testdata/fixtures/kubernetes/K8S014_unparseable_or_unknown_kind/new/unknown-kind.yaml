@@ -1,0 +1,8 @@
+apiVersion: acme.io/v1
+kind: FlurbleWidget
+metadata:
+  name: flurble
+  namespace: web
+spec:
+  mode: aggressive
+  retains: everything

@@ -1,0 +1,7 @@
+{
+  "rule": "K8S007",
+  "note": "Reverting the type releases the load balancer and its address. The manifest returns to its old state, but the external IP does not, and DNS pointing at it is now wrong.",
+  "findings": [
+    {"ruleId":"K8S007","file":"service.yaml","line":0,"reversibility":"COSTLY","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

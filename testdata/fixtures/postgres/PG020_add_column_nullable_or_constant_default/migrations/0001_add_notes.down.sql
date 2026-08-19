@@ -1,0 +1,2 @@
+ALTER TABLE orders DROP COLUMN notes;
+ALTER TABLE orders DROP COLUMN currency;

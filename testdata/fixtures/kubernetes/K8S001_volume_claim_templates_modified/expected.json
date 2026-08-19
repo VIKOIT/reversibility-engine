@@ -1,0 +1,7 @@
+{
+  "rule": "K8S001",
+  "note": "volumeClaimTemplates is immutable on a live StatefulSet. Applying this does not resize anything; it forces a recreate that orphans or destroys the existing volumes, and rolling the manifest back does not bring them home.",
+  "findings": [
+    {"ruleId":"K8S001","file":"statefulset.yaml","line":0,"reversibility":"IRREVERSIBLE","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

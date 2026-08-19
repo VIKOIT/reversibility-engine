@@ -1,0 +1,8 @@
+{
+  "rule": "K8S006",
+  "note": "Deleting a Namespace cascades to every object inside it; deleting a CRD deletes every custom resource of that kind. Both are among the largest blast radii in Kubernetes and neither is undone by re-applying the manifest. Two removals, two findings.",
+  "findings": [
+    {"ruleId":"K8S006","file":"crd.yaml","line":0,"reversibility":"IRREVERSIBLE","lockHazard":"NONE","wantUndoStep":false},
+    {"ruleId":"K8S006","file":"namespace.yaml","line":0,"reversibility":"IRREVERSIBLE","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

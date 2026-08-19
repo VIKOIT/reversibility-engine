@@ -1,0 +1,9 @@
+{
+  "rule": "PG011",
+  "note": "All three variants classify identically. Recreating a sequence loses its position; recreating an extension cannot restore the dependents that were dropped with it.",
+  "findings": [
+    {"ruleId":"PG011","file":"migrations/0001_drop_objects.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false},
+    {"ruleId":"PG011","file":"migrations/0001_drop_objects.up.sql","line":2,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false},
+    {"ruleId":"PG011","file":"migrations/0001_drop_objects.up.sql","line":3,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false}
+  ]
+}

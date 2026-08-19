@@ -1,0 +1,9 @@
+{
+  "rule": "PG016",
+  "note": "These objects hold no data of their own, so restoring them is a matter of replaying their definition. COSTLY rather than REVERSIBLE because the definition must be recovered from somewhere.",
+  "findings": [
+    {"ruleId":"PG016","file":"migrations/0001_drop_derived_objects.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":true},
+    {"ruleId":"PG016","file":"migrations/0001_drop_derived_objects.up.sql","line":2,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":true},
+    {"ruleId":"PG016","file":"migrations/0001_drop_derived_objects.up.sql","line":3,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

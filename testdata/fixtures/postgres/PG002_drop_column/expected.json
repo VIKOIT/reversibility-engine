@@ -1,0 +1,7 @@
+{
+  "rule": "PG002",
+  "note": "Re-adding the column restores the schema but not the values it held.",
+  "findings": [
+    {"ruleId":"PG002","file":"migrations/0001_drop_legacy_note.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false}
+  ]
+}

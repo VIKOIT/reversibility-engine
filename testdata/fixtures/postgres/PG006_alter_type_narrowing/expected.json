@@ -1,0 +1,8 @@
+{
+  "rule": "PG006",
+  "note": "SCHEMA-TRACKING FIXTURE (CLAUDE.md 16.3, ASSUMED). Narrowing is undetectable from the ALTER alone: the prior type bigint is knowable only from the CREATE TABLE earlier in the same changeset. Values above 2^31 are truncated and unrecoverable.",
+  "findings": [
+    {"ruleId":"PG025","file":"migrations/0001_create_orders.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true},
+    {"ruleId":"PG006","file":"migrations/0002_narrow_quantity.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"TABLE_REWRITE","wantUndoStep":false}
+  ]
+}

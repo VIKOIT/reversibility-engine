@@ -1,0 +1,7 @@
+{
+  "rule": "K8S008",
+  "note": "MANDATED RATIONALE (CLAUDE.md 10): a rollback target that cannot be identified is not a rollback target. Re-applying the old manifest re-pulls whatever :latest resolves to today, which is not what was running. Every other Kubernetes fixture pins by digest precisely so this rule cannot fire in them by accident.",
+  "findings": [
+    {"ruleId":"K8S008","file":"deployment.yaml","line":0,"reversibility":"COSTLY","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}
