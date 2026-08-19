@@ -1,0 +1,9 @@
+# LF everywhere. Fixtures are hashed into InputDigest, and CRLF would silently change a
+# certificate between Windows and Linux — determinism is a hard requirement, so line endings
+# are not left to chance.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+
+testdata/** linguist-vendored

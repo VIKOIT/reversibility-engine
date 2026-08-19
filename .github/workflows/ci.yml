@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Non-negotiable. The Postgres analyzer links the real PostgreSQL parser through cgo;
+  # a CGO_ENABLED=0 build would drop it silently. See ADR/0001-parser-choice.md.
+  CGO_ENABLED: "1"
+  GO_VERSION: "1.22"
+
+jobs:
+  # Rule 1 of CLAUDE.md §6 is mechanically checkable, so it is checked mechanically
+  # rather than trusted to review.
+  architecture:
+    name: Architecture rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: internal/domain must import only stdlib
+        run: sh scripts/check-domain-imports.sh
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - run: go build ./...
+      - name: go vet
+        run: go vet ./...
+      - name: go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+
+  test:
+    name: Test (race)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - run: go test -race -count=1 ./...
+
+  fuzz:
+    name: Fuzz (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+
+      # A short burst per target on every pull request. This is a smoke test, not a campaign:
+      # it re-runs the committed seed corpus and explores a little further, which is what catches
+      # a regression in the parser's complexity guard before it reaches a server. Long campaigns
+      # belong on a schedule, not in the merge path.
+      - name: Fuzz every target briefly
+        run: sh scripts/fuzz.sh 20s
+
+      # A crasher Go writes under testdata/fuzz is a reproducer worth keeping, so it is surfaced
+      # rather than discarded with the runner.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-crashers
+          path: "**/testdata/fuzz/**"
+          if-no-files-found: ignore
+
+  coverage:
+    name: Coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - name: Cover internal/analyzer and internal/engine
+        run: |
+          go test -race -count=1 -covermode=atomic -coverprofile=coverage.out \
+            ./internal/analyzer/... ./internal/engine/...
+      - name: Enforce 85% gate
+        run: sh scripts/coverage.sh coverage.out 85
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-profile
+          path: coverage.out
+          if-no-files-found: ignore

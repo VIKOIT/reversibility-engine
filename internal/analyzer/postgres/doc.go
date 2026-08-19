@@ -1,0 +1,9 @@
+// Package postgres classifies PostgreSQL migration statements against the authoritative
+// PG001-PG027 table in CLAUDE.md, and validates that a down migration exists for each up
+// migration.
+//
+// Classification is driven by a real AST, never by regex: the difference between
+// "DROP TABLE users" and a string literal containing those words is the difference between a
+// correct verdict and a fabricated one. Anything the table does not name is PG027/UNKNOWN,
+// which fails closed.
+package postgres
