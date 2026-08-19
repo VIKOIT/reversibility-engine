@@ -1,0 +1,55 @@
+# golangci-lint v2 configuration.
+#
+# The linter set is chosen to enforce CLAUDE.md §12 mechanically: explicit error handling,
+# wrapped errors, and no panics in library code.
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint       # §12: errors wrapped with %w
+    - forbidigo       # §12: no panic in library code
+    - gocritic
+    - misspell
+    - nilerr          # fail-closed: never return nil after observing an error
+    - noctx           # §12: context.Context on anything that blocks
+    - nolintlint
+    - revive
+    - unconvert
+    - wrapcheck       # §12: errors carry context across package boundaries
+
+  settings:
+    forbidigo:
+      forbid:
+        - pattern: ^panic$
+          msg: "no panic in library code (CLAUDE.md §12); return an error instead"
+    revive:
+      rules:
+        - name: exported    # §12: every exported symbol documented
+        - name: context-as-argument
+        - name: error-strings
+        - name: error-return
+        - name: indent-error-flow
+
+  exclusions:
+    rules:
+      # The engine orchestrator owns the single recover() boundary, and cmd/ mains are
+      # allowed to abort the process. Neither is library code.
+      - path: internal/engine/
+        linters: [forbidigo]
+      - path: ^cmd/
+        linters: [forbidigo, wrapcheck]
+      - path: _test\.go$
+        linters: [forbidigo, wrapcheck, noctx]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

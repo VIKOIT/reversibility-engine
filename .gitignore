@@ -1,0 +1,18 @@
+# Build output
+/bin/
+*.exe
+
+# Coverage
+coverage.out
+coverage.html
+
+# Local environment — GitHub App private keys and webhook secrets must never be committed
+.env
+.env.local
+*.pem
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
