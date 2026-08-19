@@ -1,0 +1,91 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "reversibility-engine",
+          "version": "1.0.0",
+          "informationUri": "https://github.com/abdo-s1/reversibility-engine",
+          "rules": [
+            {
+              "id": "PG027",
+              "name": "PG027",
+              "shortDescription": {
+                "text": "UNKNOWN change with EXCLUSIVE lock hazard"
+              },
+              "fullDescription": {
+                "text": "This migration could not be parsed, so nothing in it can be classified: parse: syntax error at or near \"FLARBLE\"."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "reversibility": "UNKNOWN",
+                "tags": [
+                  "reversibility",
+                  "rollback",
+                  "UNKNOWN"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "PG027",
+          "level": "error",
+          "message": {
+            "text": "UNKNOWN: This migration could not be parsed, so nothing in it can be classified: parse: syntax error at or near \"FLARBLE\". No undo step exists for this change."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "migrations/0001_unparseable.up.sql"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "PG027",
+          "level": "error",
+          "message": {
+            "text": "UNKNOWN: this statement matches no rule in the PostgreSQL classification table, and an unclassified change is treated as unsafe No undo step exists for this change."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "migrations/0002_unrecognized.up.sql"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "exitCodeDescription": "grade F, AI merge gate FAIL",
+          "properties": {
+            "grade": "F",
+            "aiGateStatus": "FAIL",
+            "applicable": true,
+            "inputDigest": "8f1b5f8e1fe0efd8c4ec1c3c3fba4e1fcd79b552facd55c88a93ff02b4b90ea6",
+            "certificateSchemaVersion": "1.0.0"
+          }
+        }
+      ]
+    }
+  ]
+}

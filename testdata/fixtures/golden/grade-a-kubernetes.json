@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0.0",
+  "grade": "A",
+  "aiGateStatus": "PASS",
+  "applicable": true,
+  "inputDigest": "b10cfa10960f1f66198e1ea86f4a7555ae112d13269f365cbf63ca311e4eeb96",
+  "findings": [
+    {
+      "ruleId": "K8S015",
+      "file": "deployment.yaml",
+      "line": 0,
+      "statement": "Deployment web/api",
+      "reversibility": "REVERSIBLE",
+      "lockHazard": "NONE",
+      "rationale": "Container \"api\" in Deployment web/api moves to a digest-pinned image, so the previous digest identifies the exact bytes to roll back to.",
+      "undoStep": "kubectl set image Deployment/api api=ghcr.io/acme/api@sha256:3f79bb7b435b05321651daefd374cdc681dc06faa65e374e38337b88ca046dea"
+    }
+  ],
+  "undoPlan": [
+    "kubectl set image Deployment/api api=ghcr.io/acme/api@sha256:3f79bb7b435b05321651daefd374cdc681dc06faa65e374e38337b88ca046dea"
+  ],
+  "blockers": [],
+  "downMigrations": []
+}

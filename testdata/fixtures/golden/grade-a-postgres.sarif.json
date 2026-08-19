@@ -1,0 +1,72 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "reversibility-engine",
+          "version": "1.0.0",
+          "informationUri": "https://github.com/abdo-s1/reversibility-engine",
+          "rules": [
+            {
+              "id": "PG024",
+              "name": "PG024",
+              "shortDescription": {
+                "text": "REVERSIBLE change with NONE lock hazard"
+              },
+              "fullDescription": {
+                "text": "Index idx_orders_status is built without blocking writes and is removed again by a single concurrent drop."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "reversibility": "REVERSIBLE",
+                "tags": [
+                  "reversibility",
+                  "rollback",
+                  "REVERSIBLE"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "PG024",
+          "level": "note",
+          "message": {
+            "text": "REVERSIBLE: Index idx_orders_status is built without blocking writes and is removed again by a single concurrent drop. Undo: DROP INDEX CONCURRENTLY idx_orders_status;"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "migrations/0001_index_status.up.sql"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "exitCodeDescription": "grade A, AI merge gate PASS",
+          "properties": {
+            "grade": "A",
+            "aiGateStatus": "PASS",
+            "applicable": true,
+            "inputDigest": "e497c2c4438058df95ab087614e62b35563e249aca35e841fe285dae85a8e561",
+            "certificateSchemaVersion": "1.0.0"
+          }
+        }
+      ]
+    }
+  ]
+}

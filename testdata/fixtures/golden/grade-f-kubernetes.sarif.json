@@ -1,0 +1,85 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "reversibility-engine",
+          "version": "1.0.0",
+          "informationUri": "https://github.com/abdo-s1/reversibility-engine",
+          "rules": [
+            {
+              "id": "K8S006",
+              "name": "K8S006",
+              "shortDescription": {
+                "text": "IRREVERSIBLE change with NONE lock hazard"
+              },
+              "fullDescription": {
+                "text": "Deleting CustomResourceDefinition widgets.acme.io cascades to every custom resource of that kind, which is among the largest blast radii in Kubernetes and is not undone by re-applying the manifest."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "reversibility": "IRREVERSIBLE",
+                "tags": [
+                  "reversibility",
+                  "rollback",
+                  "IRREVERSIBLE"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "K8S006",
+          "level": "error",
+          "message": {
+            "text": "IRREVERSIBLE: Deleting CustomResourceDefinition widgets.acme.io cascades to every custom resource of that kind, which is among the largest blast radii in Kubernetes and is not undone by re-applying the manifest. No undo step exists for this change."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "crd.yaml"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "K8S006",
+          "level": "error",
+          "message": {
+            "text": "IRREVERSIBLE: Deleting Namespace legacy cascades to every object inside it, which is among the largest blast radii in Kubernetes and is not undone by re-applying the manifest. No undo step exists for this change."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "namespace.yaml"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "exitCodeDescription": "grade F, AI merge gate FAIL",
+          "properties": {
+            "grade": "F",
+            "aiGateStatus": "FAIL",
+            "applicable": true,
+            "inputDigest": "e83a6aad8b31bb8fb4ce922e1dddcccb1097283ce17935bf07dc58d96c807c17",
+            "certificateSchemaVersion": "1.0.0"
+          }
+        }
+      ]
+    }
+  ]
+}
