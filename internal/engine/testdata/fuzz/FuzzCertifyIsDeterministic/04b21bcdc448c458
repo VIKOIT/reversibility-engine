@@ -1,0 +1,2 @@
+go test fuzz v1
+string("ALTER TABLE A ALTER A TYPE A")
