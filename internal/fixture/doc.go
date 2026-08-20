@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 // Package fixture loads the expectation files that accompany every fixture in testdata.
 //
 // It is a layout addition beyond CLAUDE.md §5, made because the analyzer tests, the engine

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 // Package parser isolates the PostgreSQL SQL parser behind a narrow SQLParser interface.
 //
 // The concrete implementation wraps github.com/pganalyze/pg_query_go/v5, which is cgo and

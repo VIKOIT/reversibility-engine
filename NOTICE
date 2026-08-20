@@ -1,0 +1,32 @@
+Reversibility Engine
+Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
+This product includes software developed by Abdul Ghani (VIKOIT).
+
+Licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only).
+See the LICENSE file for the full terms.
+
+A separate commercial license is available for organizations that cannot comply
+with the AGPL-3.0. See COMMERCIAL.md, or contact vikoit07@gmail.com.
+
+--------------------------------------------------------------------------------
+Third-party components
+
+This software links against the following third-party libraries, each governed
+by its own license. Their terms are not altered by the license above.
+
+  github.com/pganalyze/pg_query_go   BSD-3-Clause
+      Embeds the PostgreSQL server parser, which is distributed under the
+      PostgreSQL License.
+  github.com/google/go-github        BSD-3-Clause
+  github.com/google/go-cmp           BSD-3-Clause
+  github.com/google/go-querystring   BSD-3-Clause
+  github.com/spf13/cobra             Apache-2.0
+  github.com/spf13/pflag             BSD-3-Clause
+  github.com/inconshreveable/mousetrap  Apache-2.0
+  google.golang.org/protobuf         BSD-3-Clause
+  gopkg.in/yaml.v3                   MIT and Apache-2.0
+  go.yaml.in/yaml/v2                 Apache-2.0
+  sigs.k8s.io/yaml                   MIT and BSD-3-Clause
+
+Run `go list -m all` for the authoritative, versioned dependency list.

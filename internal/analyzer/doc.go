@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 // Package analyzer defines the Analyzer contract that every language- or platform-specific
 // checker implements.
 //

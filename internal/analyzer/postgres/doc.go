@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 // Package postgres classifies PostgreSQL migration statements against the authoritative
 // PG001-PG027 table in CLAUDE.md, and validates that a down migration exists for each up
 // migration.

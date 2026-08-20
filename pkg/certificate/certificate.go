@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 // Package certificate is the public, versioned wire schema of the ReversibilityCertificate.
 //
 // It exists so that external consumers — CI gates, dashboards, autonomous merge bots — can

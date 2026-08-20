@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 // Command revsrv is the Reversibility Engine GitHub App server.
 //
 // It listens for pull_request webhooks, analyzes the changed files, and posts a reversibility
