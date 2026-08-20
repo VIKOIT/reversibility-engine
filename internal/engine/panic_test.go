@@ -121,7 +121,9 @@ func TestRuntimeFaultsAreRecovered(t *testing.T) {
 	t.Parallel()
 
 	faults := map[string]func(){
-		"nil map write":      func() { var m map[string]string; m["boom"] = "x" },
+		// The nil map write is the subject of this case, not a mistake in it.
+		"nil map write": func() { var m map[string]string; m["boom"] = "x" }, //nolint:staticcheck // the fault is deliberate
+
 		"index out of range": func() { s := []int{}; _ = s[5] },
 		"nil dereference":    func() { var p *customPanic; _ = p.detail },
 		"divide by zero":     func() { zero := 0; _ = 1 / zero },

@@ -27,13 +27,31 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/delivery/github"
 )
 
+// exit codes: 2 means the server could not start, 1 means it stopped with an error.
+const (
+	exitStartupFailed = 2
+	exitRuntimeFailed = 1
+)
+
 func main() {
+	code, err := run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "revsrv: %v\n", err)
+	}
+	os.Exit(code)
+}
+
+// run holds everything that needs a deferred cleanup.
+//
+// os.Exit does not run deferred functions, so calling it from main alongside a defer would
+// silently skip the signal handler's teardown. Keeping the exit call in main and the defers
+// here is the only arrangement where both actually happen.
+func run() (int, error) {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	cfg, err := github.ConfigFromEnv()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "revsrv: %v\n", err)
-		os.Exit(2)
+		return exitStartupFailed, err
 	}
 
 	// Analysis continues after the HTTP response, so shutdown is given a chance to finish work
@@ -42,7 +60,7 @@ func main() {
 	defer stop()
 
 	if err := github.Run(ctx, cfg, log); err != nil {
-		fmt.Fprintf(os.Stderr, "revsrv: %v\n", err)
-		os.Exit(1)
+		return exitRuntimeFailed, err
 	}
+	return 0, nil
 }

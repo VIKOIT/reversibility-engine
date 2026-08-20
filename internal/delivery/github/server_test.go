@@ -206,7 +206,7 @@ func TestRunReportsAListenFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listening: %v", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

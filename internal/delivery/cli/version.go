@@ -17,8 +17,10 @@ func newVersionCommand() *cobra.Command {
 			"breaking field change, so it is more useful to a pipeline than a build number.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "certificate schema %s\n", certificate.SchemaVersion)
-			return err
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "certificate schema %s\n", certificate.SchemaVersion); err != nil {
+				return fmt.Errorf("writing the version: %w", err)
+			}
+			return nil
 		},
 	}
 }

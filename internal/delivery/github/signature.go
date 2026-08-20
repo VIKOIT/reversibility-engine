@@ -54,7 +54,9 @@ func verifyPayload(r *http.Request, secret []byte) ([]byte, error) {
 
 	body, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxPayloadBytes))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrMalformedBody, err)
+		// Both are wrapped: callers match on ErrMalformedBody, and the underlying cause
+		// distinguishes a client that hung up from one that exceeded the size cap.
+		return nil, fmt.Errorf("%w: %w", ErrMalformedBody, err)
 	}
 
 	if !validSignature(body, signature, secret) {

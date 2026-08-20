@@ -102,7 +102,11 @@ func (p *CertificateProcessor) certify(ctx context.Context, client *gh.Client, j
 		return engine.UnavailableCertificate(domain.RuleProviderError, err), err
 	}
 
-	return p.engine.Certify(ctx, files)
+	cert, err := p.engine.Certify(ctx, files)
+	if err != nil {
+		return cert, fmt.Errorf("certifying %s: %w", job.target, err)
+	}
+	return cert, nil
 }
 
 // report posts the rendered certificate, replacing this app's previous comment.

@@ -60,7 +60,9 @@ func Execute(opts Options) int {
 		return ExitGateFailed
 
 	default:
-		fmt.Fprintf(opts.Stderr, "revctl: %v\n", err)
+		// A failed write to stderr cannot be reported anywhere better, and must not change the
+		// exit code the caller relies on.
+		_, _ = fmt.Fprintf(opts.Stderr, "revctl: %v\n", err)
 		return ExitError
 	}
 }

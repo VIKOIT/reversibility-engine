@@ -65,7 +65,7 @@ func newCheckCommand(opts Options) *cobra.Command {
 func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []string) error {
 	renderer, err := render.For(flags.format)
 	if err != nil {
-		return err
+		return fmt.Errorf("selecting output format: %w", err)
 	}
 
 	minGrade, err := resolveMinGrade(flags)
@@ -80,7 +80,7 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	files, err := provider.NewFS(flags.before, paths, eng.Supports).
 		ChangedFiles(cmd.Context(), "")
 	if err != nil {
-		return err
+		return fmt.Errorf("reading the changeset: %w", err)
 	}
 
 	// A failing certificate is still a certificate, and it is the thing the user asked for. The
@@ -94,11 +94,13 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	defer closeOut()
 
 	if err := renderer.Render(out, cert); err != nil {
-		return err
+		return fmt.Errorf("writing the %s certificate: %w", flags.format, err)
 	}
 
 	if analysisErr != nil {
-		fmt.Fprintf(opts.Stderr, "revctl: analysis reported errors, grade forced to F: %v\n", analysisErr)
+		// Writing to stderr cannot meaningfully fail, and failing to report a diagnostic is
+		// not a reason to change the command's outcome.
+		_, _ = fmt.Fprintf(opts.Stderr, "revctl: analysis reported errors, grade forced to F: %v\n", analysisErr)
 	}
 
 	return applyGate(opts.Stderr, cert, minGrade)
@@ -132,9 +134,9 @@ func applyGate(stderr io.Writer, cert domain.ReversibilityCertificate, minGrade 
 		return nil
 	}
 
-	fmt.Fprintf(stderr, "revctl: gate failed — grade %s is below the required minimum %s\n", cert.Grade, minGrade)
+	_, _ = fmt.Fprintf(stderr, "revctl: gate failed — grade %s is below the required minimum %s\n", cert.Grade, minGrade)
 	for _, blocker := range cert.Blockers {
-		fmt.Fprintf(stderr, "  - %s\n", blocker)
+		_, _ = fmt.Fprintf(stderr, "  - %s\n", blocker)
 	}
 
 	return errGateFailed
