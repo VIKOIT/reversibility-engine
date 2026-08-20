@@ -38,7 +38,7 @@ func (a *Analyzer) Supports(path string) bool {
 // Analyze diffs the manifests in a changeset object by object.
 //
 // Objects are matched across the two sides by apiVersion, kind, namespace, and name, per
-// CLAUDE.md §10. Files whose content is byte-identical on both sides are still indexed but
+// docs/RULES.md §2. Files whose content is byte-identical on both sides are still indexed but
 // generate no findings of their own: they are context that rules such as K8S003 and K8S009
 // need, not changes to grade.
 func (a *Analyzer) Analyze(ctx context.Context, files []domain.ChangedFile) ([]domain.Finding, error) {

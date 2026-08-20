@@ -157,7 +157,7 @@ func TestFixtureAssertionsAreWellFormed(t *testing.T) {
 						t.Errorf("finding %d is IRREVERSIBLE yet expects an undo step", i)
 					}
 
-					// CLAUDE.md §15.2: Kubernetes findings never hold database locks.
+					// docs/RULES.md §4.2: Kubernetes findings never hold database locks.
 					if group == "kubernetes" && f.LockHazard != "NONE" {
 						t.Errorf("finding %d: Kubernetes lockHazard is %q, but the owner ruled it is strictly NONE", i, f.LockHazard)
 					}

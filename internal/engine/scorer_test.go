@@ -35,7 +35,7 @@ func downOK(migration string) domain.DownMigrationStatus {
 	return domain.DownMigrationStatus{Migration: migration, Exists: true, Parses: true, Symmetric: true}
 }
 
-// The authoritative scoring table from CLAUDE.md §11, case by case.
+// The authoritative scoring table from docs/RULES.md §3, case by case.
 func TestScore(t *testing.T) {
 	t.Parallel()
 
@@ -93,7 +93,7 @@ func TestScore(t *testing.T) {
 			want: domain.GradeF,
 		},
 
-		// CLAUDE.md §15.1, the owner's ruling: a cap overrides an assignment.
+		// docs/RULES.md §4.1, the owner's ruling: a cap overrides an assignment.
 		{
 			name: "missing down.sql caps an otherwise perfect changeset at C",
 			in: scoreInput{

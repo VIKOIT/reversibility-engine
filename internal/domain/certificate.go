@@ -8,7 +8,7 @@ package domain
 const SchemaVersion = "1.0.0"
 
 // DownMigrationStatus records the outcome of down-migration validation for one migration pair,
-// at the three levels defined in CLAUDE.md §9.
+// at the three levels defined in docs/RULES.md §1.
 //
 // The levels are reported separately rather than collapsed into a single boolean because they
 // carry very different authority: levels 1 and 2 are facts, level 3 is a guess.

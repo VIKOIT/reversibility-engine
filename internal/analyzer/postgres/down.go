@@ -21,7 +21,7 @@ import (
 // the scorer's cap rules. Keeping it stateless means the analyzer holds no per-run state and
 // stays safe to share across goroutines. Resolves CLAUDE.md §16.1.
 //
-// The three levels are reported independently, and level 3 is advisory: per CLAUDE.md §9 it
+// The three levels are reported independently, and level 3 is advisory: per docs/RULES.md §1 it
 // must never on its own produce grade F.
 func ValidateDownMigrations(ctx context.Context, p parser.SQLParser, files []domain.ChangedFile) ([]domain.DownMigrationStatus, error) {
 	if p == nil {
@@ -93,7 +93,7 @@ func ValidateDownMigrations(ctx context.Context, p parser.SQLParser, files []dom
 //
 // It is a heuristic and is labelled as one. A migration can be perfectly reversible without
 // textual symmetry — a data backfill has nothing to create or drop — which is exactly why
-// CLAUDE.md §9 forbids this check from producing grade F on its own.
+// docs/RULES.md §1 forbids this check from producing grade F on its own.
 func checkSymmetry(up, down []parser.Statement) (bool, []string) {
 	downDrops := objectSet(down, parser.Statement.Drops)
 	downCreates := objectSet(down, parser.Statement.Creates)

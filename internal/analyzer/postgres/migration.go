@@ -11,7 +11,7 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
-// Two migration layouts are recognised, per CLAUDE.md §9.
+// Two migration layouts are recognised, per docs/RULES.md §1.
 const (
 	upSuffix   = ".up.sql"
 	downSuffix = ".down.sql"

@@ -165,7 +165,7 @@ not semantic ones; the JSON wire format is unchanged.
 | --- | --- | --- | --- |
 | `Finding.UndoStep` | `string` | `UndoStep` | `UndoPlan []UndoStep` is assembled directly from these fields, so they must share a type. |
 | `AIGateStatus` | `string` | `GateStatus` | The gate is derived in exactly one place, `Grade.Gate()`. A named type means a typo'd `"Pass"` cannot compile. |
-| — | — | `DownMigrations []DownMigrationStatus` | §9 requires recording which of the three validation levels passed, and the certificate is the only output artifact. See §16.1. |
+| — | — | `DownMigrations []DownMigrationStatus` | `docs/RULES.md` §1 requires recording which of the three validation levels passed, and the certificate is the only output artifact. See §16.1. |
 
 The domain package also carries enum algebra: `Valid()`, `Severity()`, `LockHazard.AtLeast()`,
 `Grade.Rank()`, `Grade.Cap()`, `Grade.Gate()`, and `SortFindings()`. These are properties of the
@@ -176,224 +176,25 @@ stdlib-only.
 above `EXCLUSIVE`, and an unset `Grade` ranks below `F` and gates `FAIL`. A finding nobody
 classified must never read as harmless. `TestZeroValuesAreNeverSafe` enforces this.
 
-## 9. AUTHORITATIVE Classification — PostgreSQL
+## 9-11, 15. Classification and scoring — moved
 
-**Do not infer, extend, or soften this table. Anything not listed is `UNKNOWN`.**
+**The rule tables, the scoring procedure, and the owner rulings now live in
+[`docs/RULES.md`](docs/RULES.md).** They are the product specification and are read by
+contributors who are not working through this file, so they were given a document of their own.
 
-| Rule | Statement | Reversibility | LockHazard |
-| --- | --- | --- | --- |
-| PG001 | `DROP TABLE` | IRREVERSIBLE | EXCLUSIVE |
-| PG002 | `DROP COLUMN` | IRREVERSIBLE | EXCLUSIVE |
-| PG003 | `TRUNCATE` | IRREVERSIBLE | EXCLUSIVE |
-| PG004 | `DROP SCHEMA` / `DROP DATABASE` | IRREVERSIBLE | EXCLUSIVE |
-| PG005 | any statement containing `CASCADE` | IRREVERSIBLE | EXCLUSIVE |
-| PG006 | `ALTER COLUMN TYPE` narrowing (bigint→int, text→varchar(n), numeric precision reduced, timestamptz→date) | IRREVERSIBLE | TABLE_REWRITE |
-| PG007 | `ALTER COLUMN TYPE` widening | COSTLY | TABLE_REWRITE |
-| PG008 | `DELETE` / `UPDATE` without `WHERE` | IRREVERSIBLE | EXCLUSIVE |
-| PG009 | `DELETE` / `UPDATE` with `WHERE` | IRREVERSIBLE | SHORT |
-| PG010 | `ALTER SEQUENCE ... RESTART` | IRREVERSIBLE | SHORT |
-| PG011 | `DROP TYPE` / `DROP SEQUENCE` / `DROP EXTENSION` | IRREVERSIBLE | EXCLUSIVE |
-| PG012 | `RENAME TABLE` / `RENAME COLUMN` | COSTLY | SHORT |
-| PG013 | `DROP CONSTRAINT` (any) | COSTLY | SHORT |
-| PG014 | `DROP INDEX` (non-concurrent) | COSTLY | EXCLUSIVE |
-| PG015 | `DROP INDEX CONCURRENTLY` | COSTLY | NONE |
-| PG016 | `DROP VIEW` / `DROP FUNCTION` / `DROP TRIGGER` | COSTLY | SHORT |
-| PG017 | `ALTER COLUMN SET NOT NULL` | COSTLY | FULL_SCAN |
-| PG018 | `ADD COLUMN NOT NULL` without `DEFAULT` | COSTLY | EXCLUSIVE |
-| PG019 | `ADD COLUMN` with volatile `DEFAULT` | REVERSIBLE | TABLE_REWRITE |
-| PG020 | `ADD COLUMN` nullable / constant `DEFAULT` | REVERSIBLE | NONE |
-| PG021 | `ADD FOREIGN KEY` / `ADD CHECK` without `NOT VALID` | REVERSIBLE | FULL_SCAN |
-| PG022 | `ADD ... NOT VALID` | REVERSIBLE | SHORT |
-| PG023 | `CREATE INDEX` non-concurrent | REVERSIBLE | EXCLUSIVE |
-| PG024 | `CREATE INDEX CONCURRENTLY` | REVERSIBLE | NONE |
-| PG025 | `CREATE TABLE` / `CREATE VIEW` / `CREATE TYPE` | REVERSIBLE | NONE |
-| PG026 | `ALTER COLUMN DROP NOT NULL` / `SET DEFAULT` / `DROP DEFAULT` | REVERSIBLE | SHORT |
-| PG027 | unparsed or unrecognized statement | UNKNOWN | EXCLUSIVE |
+| Was | Now |
+| --- | --- |
+| §9 AUTHORITATIVE Classification — PostgreSQL | [`docs/RULES.md` §1](docs/RULES.md#1-postgresql--pg001-to-pg027) |
+| §10 AUTHORITATIVE Classification — Kubernetes | [`docs/RULES.md` §2](docs/RULES.md#2-kubernetes--k8s001-to-k8s015) |
+| §11 AUTHORITATIVE Scoring | [`docs/RULES.md` §3](docs/RULES.md#3-scoring) |
+| §15 Owner rulings | [`docs/RULES.md` §4](docs/RULES.md#4-owner-rulings) |
 
-**Rationale notes that must be embedded in output:**
+Nothing about them changed in the move except the section numbers, and every code comment that
+cited the old numbering was rewritten in the same commit. **Those tables remain authoritative:
+do not infer, extend, or soften them, and do not invent a rule that is not written there.**
 
-- **PG012** (rename) is COSTLY because it breaks the previous application version — rollback of
-  code fails while the schema is renamed.
-- **PG013** is COSTLY because rows violating the dropped constraint may be inserted before
-  rollback, making re-adding it impossible.
-
-### Parser directive
-
-Use `github.com/pganalyze/pg_query_go/v5` — a **real AST**, not regex. It is **cgo**. Isolate it
-behind an internal `SQLParser` interface in `internal/analyzer/postgres/parser` so it can be
-swapped. CI must build with `CGO_ENABLED=1`.
-
-**musl / Alpine constraint.** `pg_query_go` vendors the PostgreSQL C parser and links against
-libc. It is built and tested against glibc. On Alpine/musl the build needs `apk add build-base`,
-and even then the parser's recursive descent can exhaust musl's default 128 KiB thread stack
-(glibc allows 8 MiB), so deeply nested SQL may fault on musl where it succeeds on glibc.
-**Ship the server image on a glibc base** (`debian-slim` or `distroless/base`), not Alpine. If an
-Alpine build ever becomes a requirement, raise the thread stack explicitly and add a
-deep-nesting fixture to CI. See `ADR/0001-parser-choice.md`.
-
-**Never fall back to regex.** If the parser is unavailable, that is an analyzer error → **F**.
-
-### Down-migration validation
-
-For each `NNN_name.up.sql` require `NNN_name.down.sql`. Also accept the directory form
-`migrations/NNN/up.sql` + `migrations/NNN/down.sql`.
-
-Validate three levels and **record which passed**:
-
-1. File exists.
-2. File is non-empty and parses.
-3. Every `CREATE X` in up has a matching `DROP X` in down, and vice versa.
-
-**Level 3 is a heuristic — mark it advisory. It must never alone produce grade F.**
-
-### As built in S2
-
-- **`internal/analyzer/postgres/parser` is the only package that imports `pg_query`.** It lifts
-  the parse tree into a neutral `parser.Statement`; no parser type crosses the `SQLParser`
-  interface. Classification in `rules.go` therefore runs with no cgo in the path, and is tested
-  against a stub parser as well as the real one.
-- **Only up migrations are classified.** A down migration describes the rollback, not the change
-  being assessed — classifying it would report the undo of a safe change as destructive. Down
-  files are read solely by `ValidateDownMigrations`. A `.sql` file that is not recognisably a
-  down migration is treated as an up migration, which is the safe direction.
-- **A multi-command `ALTER TABLE` is flattened into one finding per command.** Collapsing them
-  would hide the destructive half of `ALTER TABLE t ADD COLUMN a int, DROP COLUMN b`. This does
-  not contradict §16.2: that rule is about overlapping rules on one *command*.
-- **A file that fails to parse yields one PG027 finding for that file, not an analyzer error.**
-  One malformed migration must not erase the findings of the others; the certificate should show
-  everything that is wrong at once. A parse failure still grades F via UNKNOWN.
-- **Removed files are not classified.** Statements in a deleted migration are not going to run.
-- **Undo steps are real commands.** Where the engine cannot reconstruct part of one — the body of
-  a dropped view, the definition of a dropped constraint — it emits the command with the missing
-  part marked by the SQL comment `/* original definition unavailable: ... */`, so the result
-  stays a statement an operator can paste, complete, and run. Never prose.
-- **`Finding.Statement` excludes the trailing semicolon**, because that is the extent the parser
-  reports, and it is whitespace-normalized so reformatting a migration cannot change a digest.
-
-## 10. AUTHORITATIVE Classification — Kubernetes
-
-Compare old vs new manifest by `apiVersion` / `kind` / `namespace` / `name`.
-
-| Rule | Change | Reversibility |
-| --- | --- | --- |
-| K8S001 | `StatefulSet.spec.volumeClaimTemplates` modified | IRREVERSIBLE |
-| K8S002 | `spec.selector` modified on Deployment/StatefulSet/DaemonSet | IRREVERSIBLE |
-| K8S003 | PVC removed while its StorageClass `reclaimPolicy` is `Delete` or unknown | IRREVERSIBLE |
-| K8S004 | PVC storage request decreased | IRREVERSIBLE |
-| K8S005 | `storageClassName` changed on a PVC | IRREVERSIBLE |
-| K8S006 | Namespace or CRD removed | IRREVERSIBLE |
-| K8S007 | `Service.spec.clusterIP` or `.type` changed | COSTLY |
-| K8S008 | container image not pinned by digest or immutable tag (`latest`, floating tags) | COSTLY |
-| K8S009 | ConfigMap/Secret removed while still referenced by a workload | COSTLY |
-| K8S010 | `Deployment.strategy` changed to `Recreate` | COSTLY |
-| K8S011 | probe (readiness/liveness) removed | COSTLY |
-| K8S012 | replicas / resources / env / labels changed | REVERSIBLE |
-| K8S013 | new workload added | REVERSIBLE |
-| K8S014 | manifest fails to parse or kind unrecognized | UNKNOWN |
-| K8S015 | container image changed, new image explicitly pinned by a cryptographic digest (`@sha256:...`) | REVERSIBLE |
-
-**K8S008 exists because a rollback target that cannot be identified is not a rollback target.**
-
-**K8S008 vs K8S015 — the digest rule (owner ruling).** Only a cryptographic digest pins an image.
-Static analysis cannot prove that a tag — semver included — still points at the same bytes on the
-remote registry, because tags are mutable by design. **Any tag without a digest is K8S008/COSTLY.**
-K8S015 applies only when the new image carries an explicit `@sha256:` (or `@sha512:`) digest.
-
-### As built in S3
-
-- **Document boundaries come from a real YAML stream decoder**, never from splitting bytes on
-  `---`. `gopkg.in/yaml.v3`'s `Decoder` yields one document node at a time; each is then decoded
-  through `sigs.k8s.io/yaml` for JSON-compatible types. **Do not replace this with string
-  splitting.** Byte splitting cannot tell whether a separator-looking line sits inside a scalar,
-  and it does not understand the `...` end-of-document marker at all — both silently change which
-  objects the engine sees. Used alone, `sigs.k8s.io/yaml` decodes only the *first* document of a
-  stream and returns a **nil error**, which would hide every object after the first in any
-  `helm template` output. `TestParseManifestDocumentBoundaries` guards both failure modes.
-- **Objects are decoded into `map[string]any`, not typed structs.** Typed structs would need the
-  full `k8s.io/api` dependency and would silently drop fields the vendored version does not know,
-  which is fatal when the question is "did anything change".
-- **A file whose content is byte-identical on both sides is context, not change.** Its objects are
-  indexed so K8S003 can find a StorageClass and K8S009 can find a referencing workload, but it
-  generates no findings. Without this, every run would indict the whole cluster.
-- **A changed object matching no rule yields K8S014/UNKNOWN** — the Kubernetes analogue of PG027.
-  Silence about a change the engine does not understand is indistinguishable from a safe change,
-  and the product rests on those two never being confused. See the consequence in §16.5.
-- **Only an explicit `reclaimPolicy: Retain` prevents K8S003.** Absent, empty, or unresolvable is
-  treated exactly like `Delete`, as §10 requires.
-- **Quantities are compared numerically with correct scales.** `1Gi` (2^30) is not `1G` (10^9); a
-  string comparison would call that shrink a growth. A quantity that cannot be parsed is
-  K8S014/UNKNOWN, never assumed unchanged.
-- **K8S008 treats a tag as pinned only if it contains a digit and no floating word.** A digest
-  always pins. No tag at all means `:latest`. A registry port (`registry:5000/app`) is not a tag.
-- **K8S012 emits one finding per changed *category*** (replicas, resources, env, labels), not per
-  changed leaf, so adjusting cpu and memory together is one decision, not two.
-- **All Kubernetes findings carry `LockHazard: NONE` and `Line: 0`.** A structural diff has no
-  single line to blame, and inventing one sends readers to the wrong place.
-
-## 11. AUTHORITATIVE Scoring
-
-```
-Any IRREVERSIBLE  -> F
-Any UNKNOWN       -> F        (fail-closed, no exceptions)
-Any analyzer error -> F       (never degrade to a passing grade)
-
-Otherwise:
-  missing or unparseable down.sql            -> cap at C
-  >= 3 COSTLY findings                       -> C
-  1-2 COSTLY findings                        -> B
-  LockHazard >= TABLE_REWRITE present        -> cap at B
-  all REVERSIBLE, lock <= SHORT, down.sql ok -> A
-```
-
-```
-AIGateStatus = PASS  <=>  Grade == A
-AIGateStatus = FAIL   otherwise
-```
-
-Empty changeset with zero relevant files → grade **A**, `Applicable: false`, gate **PASS**.
-
-### UndoPlan
-
-Generated **only** from the `UndoStep` fields of findings, in **reverse order of application**.
-
-If any finding is `IRREVERSIBLE`, the plan is **replaced** by an explicit statement that no
-complete undo exists, listing what cannot be undone.
-
-### Determinism
-
-**Hard requirement.** Identical input must produce a **byte-identical** certificate.
-
-- No timestamps. No UUIDs. No hostnames.
-- No map-iteration order anywhere inside the certificate.
-- Sort everything explicitly.
-- A test must run the engine **100×** over a fixture and assert identical SHA256 output.
-
-### As built in S4
-
-- **`Engine.Certify` returns `(certificate, error)` and the certificate is ALWAYS valid**, error
-  or not. On any failure it is a fully populated grade F with the reason in `Blockers`. The error
-  exists so operators can tell a broken toolchain from a dangerous migration — never so a caller
-  can treat the certificate as missing.
-- **The single `recover()` boundary lives in `Certify`.** A panic discards whatever the run had
-  concluded and produces the `ENGINE_PANIC` certificate: grade F, UNKNOWN, no undo step. A
-  partial conclusion from a broken run is not evidence.
-- **Grade assembly is: assign, then cap, worst wins** (§15.1). Assignment is `>=3 COSTLY → C`,
-  `1–2 COSTLY → B`, else A. Caps are applied unconditionally so order cannot matter.
-- **The A row is read as a set of necessary conditions.** Failing any of them
-  (`all REVERSIBLE`, `lock <= SHORT`, `down.sql ok`) caps the grade at B — B being the highest
-  grade below A, the least punitive reading consistent with the table. This is what decides
-  `FULL_SCAN`, which fails "lock <= SHORT" but does not reach the `TABLE_REWRITE` cap.
-- **Down-migration status travels through the optional `analyzer.DownMigrationValidator`
-  interface**, type-asserted by the orchestrator. The engine never imports an analyzer package;
-  the delivery layer wires them (§16.1 resolved).
-- **`Blockers` are populated only for grade F**, per §8. Findings explain B and C.
-- **`InputDigest` hashes length-prefixed fields over both sides of every change** — path,
-  previous path, status, previous content, current content — sorted by path. Length prefixing
-  stops `"ab"+"c"` from colliding with `"a"+"bc"`; hashing the previous side keeps two changesets
-  that reach the same final state from different starting points distinguishable.
-- **Every certificate slice is normalized to empty, never nil.** `encoding/json` renders nil as
-  `null` and empty as `[]`, so a nil would make two certificates of identical meaning serialize
-  differently — determinism has to survive the renderers.
+The section numbers below are unchanged, so §12, §13, §14, §16, and §17 still mean what every
+existing reference to them means.
 
 ## 11b. Renderers and CLI — as built in S5
 
@@ -564,19 +365,6 @@ does not move.
 - Do not build anything listed under "Out of scope" (§3).
 - Do not let any code path turn an error, a panic, or an unknown into a passing grade.
 
-## 15. Owner rulings — authoritative, same weight as the tables above
-
-Resolved by the owner. Treat these as spec.
-
-1. **A cap overrides an assignment.** Caps are not tie-breakers, they are ceilings. Zero COSTLY
-   findings, everything REVERSIBLE, but a missing `down.sql` → final grade **C**. Formally: a
-   grade is assigned, then every active cap is applied, and the worst result wins.
-2. **Kubernetes findings never hold database locks.** Their `LockHazard` is strictly `NONE`.
-   Never any other value.
-3. **`type ChangeRef string`** — a commit SHA or PR ref.
-   **`type UndoStep string`** — the exact command to run (an SQL statement or a `kubectl`
-   invocation), not prose.
-
 ## 16. Open questions — resolve with the owner, do not guess
 
 A future session must **ask**, never decide alone. Items marked ASSUMED are encoded in the S1
@@ -610,9 +398,9 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    S6 whether `ChangedFiles` returns context files or `FileProvider` grows a second method.
    Until then, **a rule that needs context it cannot get must return UNKNOWN, not REVERSIBLE.**
 5. ~~**No Kubernetes rule covers a container image change.**~~ **RESOLVED: K8S015 is now in the
-   §10 table**, constrained by the owner to digests only. A tag, however version-like, cannot be
+   `docs/RULES.md` §2 table**, constrained by the owner to digests only. A tag, however version-like, cannot be
    proven immutable by static analysis and stays K8S008/COSTLY.
-6. **UNKNOWN findings also replace the undo plan.** §11 says the plan is replaced by a statement
+6. **UNKNOWN findings also replace the undo plan.** `docs/RULES.md` §3 says the plan is replaced by a statement
    that no complete undo exists "if any finding is IRREVERSIBLE". S4 applies the same to UNKNOWN.
 
    The reason is §2: an UNKNOWN finding is a change nobody understood, so a plan that lists steps
