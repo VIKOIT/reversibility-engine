@@ -2,9 +2,9 @@
 # Copyright (c) 2026 Abdul Ghani (VIKOIT)
 
 name: 'Reversibility Engine'
-description: >-
-  Grade a pull request on whether its database migrations and Kubernetes changes can be
-  rolled back, and block the merge when they cannot. Fail-closed: unknown means unsafe.
+# The Marketplace caps this at 125 characters, so it stays a single short line. The longer
+# statement of what the action does lives in the README, which has no such limit.
+description: 'Evaluate if PR database migrations and Kubernetes changes can be safely rolled back.'
 author: 'VIKOIT'
 
 branding:
