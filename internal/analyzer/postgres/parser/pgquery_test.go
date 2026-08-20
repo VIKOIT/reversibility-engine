@@ -474,3 +474,90 @@ func TestParseHandlesLargeInput(t *testing.T) {
 		t.Errorf("last statement reported line %d, want 500", got[499].Line)
 	}
 }
+
+// bom is U+FEFF, built from its code point so that no invisible byte appears in this file:
+// Go rejects a byte order mark anywhere but position 0, and an invisible literal is unreadable.
+var bom = string(rune(0xFEFF))
+
+// A UTF-8 BOM is what Windows editors and PowerShell redirection put at the front of a file.
+// PostgreSQL has no production for it, so before it was stripped it made every Windows-authored
+// migration report "could not be parsed" — grade F for the wrong reason, naming no rule and
+// describing nothing the migration actually does.
+func TestParseStripsUTF8BOM(t *testing.T) {
+	t.Parallel()
+
+	got := parseOne(t, bom+"ALTER TABLE users DROP COLUMN email;")
+
+	if got.Kind != parser.KindDropColumn {
+		t.Errorf("Kind = %q, want %q", got.Kind, parser.KindDropColumn)
+	}
+	if got.Relation != "users" || got.Object != "email" {
+		t.Errorf("got %s.%s, want users.email", got.Relation, got.Object)
+	}
+	// The BOM must not survive into the certificate: Statement.SQL is rendered to a reviewer.
+	if strings.Contains(got.SQL, bom) {
+		t.Errorf("SQL %q still carries the BOM", got.SQL)
+	}
+	if got.SQL != "ALTER TABLE users DROP COLUMN email" {
+		t.Errorf("SQL = %q, want the statement without the BOM", got.SQL)
+	}
+}
+
+// Stripping the BOM shifts every byte offset in the file by three. Line numbers and captured
+// text are derived from those offsets, so this guards the arithmetic rather than the parse:
+// a strip applied after the offsets were computed would report each statement a line late.
+func TestParseBOMDoesNotShiftOffsets(t *testing.T) {
+	t.Parallel()
+
+	sql := bom + "DROP TABLE a;\nDROP TABLE b;\n\n\nTRUNCATE c;"
+
+	got, err := parser.NewPgQuery().Parse(context.Background(), sql)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d statements, want 3", len(got))
+	}
+
+	for i, want := range []struct {
+		line int
+		text string
+	}{
+		{1, "DROP TABLE a"},
+		{2, "DROP TABLE b"},
+		{5, "TRUNCATE c"},
+	} {
+		if got[i].Line != want.line {
+			t.Errorf("statement %d reported line %d, want %d", i, got[i].Line, want.line)
+		}
+		if got[i].SQL != want.text {
+			t.Errorf("statement %d SQL = %q, want %q", i, got[i].SQL, want.text)
+		}
+	}
+}
+
+// Only a leading BOM is a decoding artifact. One in the middle of a file is corruption, and
+// corruption must still fail closed — this is the line between decoding the input and repairing
+// it, and the engine does not repair.
+func TestParseRejectsInteriorBOM(t *testing.T) {
+	t.Parallel()
+
+	_, err := parser.NewPgQuery().Parse(context.Background(), "DROP TABLE a;\n"+bom+"DROP TABLE b;")
+	if err == nil {
+		t.Fatal("Parse accepted a BOM in the middle of the file, want an error")
+	}
+}
+
+// A file containing nothing but a BOM holds no statements. It must not error, for the same
+// reason empty input does not: there is nothing there to misjudge.
+func TestParseBOMOnlyInput(t *testing.T) {
+	t.Parallel()
+
+	got, err := parser.NewPgQuery().Parse(context.Background(), bom)
+	if err != nil {
+		t.Fatalf("Parse(BOM only): %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d statements, want 0", len(got))
+	}
+}

@@ -22,6 +22,16 @@ type PgQuery struct{}
 // NewPgQuery returns a parser backed by the PostgreSQL grammar.
 func NewPgQuery() *PgQuery { return &PgQuery{} }
 
+// utf8BOM is the byte-order mark that Windows editors and PowerShell redirection prepend to
+// UTF-8 files.
+//
+// PostgreSQL's grammar has no production for it, so three invisible bytes make an otherwise
+// ordinary migration unparseable. Fail-closed still grades that F, so nothing unsafe merges —
+// but the reviewer is told "this file could not be parsed" when the truth is "this file drops a
+// column". A verdict that misdescribes the change is a worse artifact than one that names the
+// rule, and on Windows-authored migrations it would be the common case rather than the rare one.
+const utf8BOM = "\uFEFF"
+
 // Parse implements SQLParser.
 //
 // A failure to parse is returned as an error, never as an empty statement list. The caller
@@ -31,6 +41,16 @@ func (p *PgQuery) Parse(ctx context.Context, sql string) ([]Statement, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
+
+	// Removing the BOM is a decoding step, not a parsing concession: it drops a marker that
+	// encodes no SQL and leaves every token untouched. It happens before the complexity guard
+	// and before any offset is computed, so statement locations and line numbers are measured
+	// against the same string the grammar sees.
+	//
+	// Only the UTF-8 BOM is handled. A UTF-16 file — what PowerShell 5.1's ">" produces — is
+	// left to fail, because recovering it means transcoding the whole input, and guessing at an
+	// encoding is exactly the kind of inference this engine does not make.
+	sql = strings.TrimPrefix(sql, utf8BOM)
 
 	// Structure is checked before the bytes reach cgo. The PostgreSQL grammar is recursive
 	// descent on a C stack, and a long enough chain of operators overflows it — a hard process

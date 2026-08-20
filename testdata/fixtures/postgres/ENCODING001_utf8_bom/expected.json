@@ -1,0 +1,10 @@
+{
+  "rule": "ENCODING001",
+  "note": "Both migration files carry a UTF-8 BOM, which is what Windows editors and PowerShell redirection prepend. The BOM is a decoding artifact, not SQL, so it must be transparent: this fixture asserts the PG002 that the statement actually deserves rather than the PG027 the parser used to report. It also asserts the down migration, because a BOM stripped only from the up file would leave level 2 failing and cap the grade for a reason no reviewer could see. Not a row in either rule table -- it pins the decoding seam, the way the DOWN* fixtures pin down-migration validation.",
+  "findings": [
+    {"ruleId":"PG002","file":"migrations/0001_drop_email.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false}
+  ],
+  "downMigrations": [
+    {"migration":"0001_drop_email","exists":true,"parses":true,"symmetric":true}
+  ]
+}

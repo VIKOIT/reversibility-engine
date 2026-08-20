@@ -20,6 +20,7 @@ postgres/DOWN001_missing                             grade=C gate=FAIL applicabl
 postgres/DOWN002_unparseable                         grade=C gate=FAIL applicable=true  findings=1  undo=1  blockers=0  digest=7299fc898ac99b81
 postgres/DOWN003_asymmetric                          grade=A gate=PASS applicable=true  findings=1  undo=1  blockers=0  digest=7edf498cffacd9f8
 postgres/DOWN004_directory_form                      grade=A gate=PASS applicable=true  findings=1  undo=1  blockers=0  digest=4e6d9333f12a6bb9
+postgres/ENCODING001_utf8_bom                        grade=F gate=FAIL applicable=true  findings=1  undo=3  blockers=1  digest=e4549a317947be4f
 postgres/PG001_drop_table                            grade=F gate=FAIL applicable=true  findings=1  undo=3  blockers=1  digest=7404433e87050328
 postgres/PG002_drop_column                           grade=F gate=FAIL applicable=true  findings=1  undo=3  blockers=1  digest=f8ad53fadba76a31
 postgres/PG003_truncate                              grade=F gate=FAIL applicable=true  findings=1  undo=3  blockers=1  digest=426d374fcb4438b5
