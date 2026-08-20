@@ -128,13 +128,13 @@ func FuzzCertifyIsDeterministic(f *testing.F) {
 		// Reversing the input order must not change anything either: order is an accident of
 		// the provider, not a property of the change.
 		reversed := []domain.ChangedFile{files[1], files[0]}
-		if hashCertificate(t, first) != hashCertificate(t, mustCertify(t, e, ctx, reversed)) {
+		if hashCertificate(t, first) != hashCertificate(t, mustCertify(ctx, t, e, reversed)) {
 			t.Fatalf("certificate depends on the order files arrived in")
 		}
 	})
 }
 
-func mustCertify(t *testing.T, e *engine.Engine, ctx context.Context, files []domain.ChangedFile) domain.ReversibilityCertificate {
+func mustCertify(ctx context.Context, t *testing.T, e *engine.Engine, files []domain.ChangedFile) domain.ReversibilityCertificate {
 	t.Helper()
 	cert, _ := e.Certify(ctx, files)
 	return cert

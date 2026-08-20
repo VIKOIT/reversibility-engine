@@ -215,7 +215,7 @@ func skipDollarQuoted(sql string, i int) (int, bool) {
 
 	// A tag must be an identifier: $$ or $name$, never $1$ (a positional parameter).
 	for _, r := range tag[1 : len(tag)-1] {
-		if !(r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+		if r != '_' && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
 			return 0, false
 		}
 	}

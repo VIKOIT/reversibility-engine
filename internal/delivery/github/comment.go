@@ -31,14 +31,22 @@ type issueCommentService struct {
 	client *github.Client
 }
 
+// The three methods below are pure delegation, existing only so the concrete client satisfies
+// CommentPoster. Their errors are wrapped by upsertComment and findOwnComment with the pull
+// request they concern; wrapping again here would produce "listing comments on acme/widgets#42:
+// listing comments on acme/widgets#42: ..." and tell a reader nothing extra.
+
+//nolint:wrapcheck // delegation only; the caller wraps with the pull request identity.
 func (s issueCommentService) ListComments(ctx context.Context, owner, repo string, number int, opts *github.IssueListCommentsOptions) ([]*github.IssueComment, *github.Response, error) {
 	return s.client.Issues.ListComments(ctx, owner, repo, number, opts)
 }
 
+//nolint:wrapcheck // delegation only; the caller wraps with the pull request identity.
 func (s issueCommentService) CreateComment(ctx context.Context, owner, repo string, number int, comment *github.IssueComment) (*github.IssueComment, *github.Response, error) {
 	return s.client.Issues.CreateComment(ctx, owner, repo, number, comment)
 }
 
+//nolint:wrapcheck // delegation only; the caller wraps with the pull request identity.
 func (s issueCommentService) EditComment(ctx context.Context, owner, repo string, commentID int64, comment *github.IssueComment) (*github.IssueComment, *github.Response, error) {
 	return s.client.Issues.EditComment(ctx, owner, repo, commentID, comment)
 }

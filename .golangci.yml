@@ -9,6 +9,16 @@ run:
   timeout: 5m
   tests: true
 
+# Report everything, every time.
+#
+# The defaults cap each linter at 50 issues and the same message at 3, which silently hides
+# work: a run reporting "18 issues" while holding back a fourth identical errcheck teaches you
+# to trust a number that is not the truth. A partial report is the same failure mode as a
+# partial analysis, and this repository does not accept it anywhere else either.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
 linters:
   default: standard
   enable:

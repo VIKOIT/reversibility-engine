@@ -103,7 +103,6 @@ func (s *stubGitHub) serveChangeset(files map[string]string) {
 	})
 
 	for name, content := range files {
-		name, content := name, content
 		s.mux.HandleFunc("GET /repos/acme/widgets/contents/"+name, func(w http.ResponseWriter, _ *http.Request) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"type": "file", "name": name, "path": name, "size": len(content),
