@@ -1,8 +1,15 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 name: Reversibility
 
-# The gate exists to run on pull requests. Note: a PR from a fork gets a read-only
-# GITHUB_TOKEN, so the comment step cannot post. Use pull_request_target only if you
-# have read the security implications — it runs the BASE workflow with write access.
+# This repository gates itself with its own published action rather than with a local build.
+# Dogfooding is the only way the packaged path -- image pull, container entrypoint, two-tree
+# staging, comment posting -- gets exercised before a consumer exercises it for us.
+#
+# A pull request from a fork receives a read-only GITHUB_TOKEN, so the gate still runs but the
+# certificate cannot be posted. pull_request_target would fix that and is deliberately not used:
+# it runs the base branch's workflow with write access to untrusted code.
 on:
   pull_request:
     branches: [main]
@@ -15,12 +22,6 @@ concurrency:
   group: reversibility-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # The Postgres analyzer links the real PostgreSQL parser through cgo. Same constraint
-  # as ci.yml: a CGO_ENABLED=0 build drops the analyzer silently.
-  CGO_ENABLED: "1"
-  GO_VERSION: "1.22"
-
 jobs:
   certify:
     name: Reversibility certificate
@@ -28,96 +29,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The base commit must be reachable to reconstruct the "before" tree.
+          # The action diffs against the pull request's base commit, which a shallow clone
+          # does not contain.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - id: certify
+        uses: VIKOIT/reversibility-engine@v1
         with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+          min-grade: B
 
-      - name: Build revctl
-        run: go build -o revctl ./cmd/revctl
-
-      # revctl compares paths, not revisions (CLAUDE.md §11b), so the two trees are
-      # staged here. Only files the PR actually touched are staged, which keeps
-      # testdata fixtures out of the certificate.
-      - name: Stage the changed supported files as two trees
-        id: stage
-        run: |
-          BASE='${{ github.event.pull_request.base.sha }}'
-          HEAD='${{ github.event.pull_request.head.sha }}'
-
-          # --diff-filter=d drops deletions: there is no head-side file to stage.
+          # testdata holds deliberately destructive fixtures -- 27 Postgres rules and 15
+          # Kubernetes rules, most of which are meant to grade F. Analyzing them would gate
+          # this repository on its own test corpus.
           #
-          # The exclusions are scope, not leniency. This repository's own YAML — workflows,
-          # action.yml — is not Kubernetes, but the analyzer cannot tell "not a manifest" from
-          # "a manifest I could not read" and correctly reports K8S014/UNKNOWN for both. The
-          # answer is to stop handing it files that were never manifests, not to soften a rule
-          # into treating an unreadable manifest as safe.
-          CHANGED=$(git diff --name-only --diff-filter=d "$BASE" "$HEAD" \
-            -- '*.sql' '*.yaml' '*.yml' \
-               ':!testdata/**' ':!.github/**' ':!action.yml')
+          # .github and action.yml are YAML that was never a Kubernetes manifest. The analyzer
+          # cannot tell that from a manifest it failed to read and reports K8S014/UNKNOWN for
+          # both, which is the correct fail-closed answer and the reason to scope what it sees.
+          exclude: 'testdata/** .github/** action.yml'
 
-          if [ -z "$CHANGED" ]; then
-            echo "applicable=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "applicable=true" >> "$GITHUB_OUTPUT"
-
-          mkdir -p _rev/head _rev/base
-          for f in $CHANGED; do
-            mkdir -p "_rev/head/$(dirname "$f")" "_rev/base/$(dirname "$f")"
-            cp "$f" "_rev/head/$f"
-            # A file added by this PR has no base side; leaving it absent is what
-            # makes the analyzers see it as ADDED.
-            git show "$BASE:$f" > "_rev/base/$f" 2>/dev/null || rm -f "_rev/base/$f"
-          done
-
-          echo "Staged:"; echo "$CHANGED"
-
-      - name: Analyze
-        if: steps.stage.outputs.applicable == 'true'
-        id: analyze
-        run: |
-          set +e
-          ./revctl check --before _rev/base _rev/head \
-            --format markdown --output certificate.md --min-grade B
-          echo "exit=$?" >> "$GITHUB_OUTPUT"
-          set -e
-
-      # The certificate is posted whether or not the gate passed. Silence is the one
-      # unacceptable outcome: a PR with no certificate looks identical to one that was
-      # never analyzed.
-      - name: Post or update the certificate comment
-        if: steps.stage.outputs.applicable == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          MARKER='<!-- reversibility-engine:certificate -->'
-          { echo "$MARKER"; cat certificate.md; } > body.md
-
-          # Find this app's own comment by its invisible marker, so the certificate's
-          # wording can change without the workflow losing track of its comment.
-          # --paginate applies --jq per page, so the filter emits ids rather than picking
-          # one: taking .[0] inside the filter would yield one id per page.
-          ID=$(gh api --paginate "repos/${{ github.repository }}/issues/$PR/comments" \
-                 --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -n 1)
-          if [ -n "$ID" ]; then
-            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$ID" \
-              -F body=@body.md
-          else
-            gh api -X POST "repos/${{ github.repository }}/issues/$PR/comments" \
-              -F body=@body.md
-          fi
-
-      - name: Enforce the gate
-        if: steps.stage.outputs.applicable == 'true'
-        run: |
-          # 0 success, 1 gate not met, 2 the run did not complete (CLAUDE.md §11b).
-          case "${{ steps.analyze.outputs.exit }}" in
-            0) echo "Gate met." ;;
-            1) echo "::error::Grade below the minimum. See the certificate comment."; exit 1 ;;
-            *) echo "::error::revctl did not complete."; exit 1 ;;
-          esac
+      # The certificate is kept even when the gate fails: it is the artifact that explains why.
+      - if: always() && steps.certify.outputs.certificate != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: reversibility-certificate
+          path: reversibility-certificate.md
+          if-no-files-found: ignore
