@@ -80,12 +80,14 @@ runs:
   # neither. The cost is that this action runs only on Linux runners.
   using: 'docker'
 
-  # Building from the Dockerfile makes every consumer pay for the cgo compile on every run.
-  # Swap to the published image once .github/workflows/publish-image.yml has pushed one, and
-  # keep the tag here in step with the git tag consumers write after the @:
+  # The published image, not a local build. `image: Dockerfile` makes every consumer compile
+  # pg_query's C sources on every run; this pulls a layer instead.
   #
-  #   image: 'docker://ghcr.io/vikoit/reversibility-engine:v1'
+  # The tag tracks the major version so it keeps pace with the git tag consumers write after
+  # the @. That does mean the reference is mutable: a later v1.x image becomes what this pulls.
+  # It is the usual trade for a marketplace action — pin by digest instead if a build has to be
+  # reproducible years from now.
   #
-  # The swap has to be committed *before* the tag that publishes that image, and the GHCR
-  # package has to be made public, or every consumer gets a pull failure instead of a gate.
-  image: 'Dockerfile'
+  # Published by .github/workflows/publish-image.yml. The GHCR package must stay public, or
+  # consumers get a pull failure rather than a gate.
+  image: 'docker://ghcr.io/vikoit/reversibility-engine:v1'

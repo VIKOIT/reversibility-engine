@@ -8,7 +8,11 @@ name: Publish action image
 # uses this action. Publishing the image once per release moves that cost here.
 on:
   push:
-    tags: ['v*']
+    # Full versions only. A moving major tag like v1 is not a semver string, so the tag
+    # derivation below would produce nothing and the push would fail on an empty tag list —
+    # and there would be nothing to build anyway: the release that moved v1 already published
+    # the image, including its own moving v1 image tag.
+    tags: ['v*.*.*']
   workflow_dispatch:
 
 permissions:
