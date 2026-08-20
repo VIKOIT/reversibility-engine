@@ -111,7 +111,7 @@ func TestGradeCap(t *testing.T) {
 		{"F cannot be lifted by a cap", domain.GradeF, domain.GradeA, domain.GradeF},
 		{"F cap floors everything", domain.GradeA, domain.GradeF, domain.GradeF},
 
-		// CLAUDE.md §15.1: zero COSTLY findings, everything REVERSIBLE, but a missing
+		// docs/RULES.md §4.1: zero COSTLY findings, everything REVERSIBLE, but a missing
 		// down.sql caps the grade at C. This is the case the owner ruled on explicitly.
 		{"missing down.sql caps a clean changeset", domain.GradeA, domain.GradeC, domain.GradeC},
 	}

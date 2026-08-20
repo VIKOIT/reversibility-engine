@@ -10,7 +10,7 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
-// This file is the executable form of the authoritative PostgreSQL table in CLAUDE.md §9.
+// This file is the executable form of the authoritative PostgreSQL table in docs/RULES.md §1.
 //
 // Every branch corresponds to exactly one row. Nothing here may be softened, extended, or
 // inferred: a statement that matches no row is PG027/UNKNOWN, which grades F. If a rule seems
@@ -106,7 +106,7 @@ func classify(s parser.Statement, sch *schema) classification {
 		return classifyRename(s)
 
 	case parser.KindDropConstraint:
-		// The mandated rationale from CLAUDE.md §9.
+		// The mandated rationale from docs/RULES.md §1.
 		return classification{
 			ruleID:        "PG013",
 			reversibility: domain.ReversibilityCostly,
@@ -265,7 +265,7 @@ func classifyDML(s parser.Statement) classification {
 	}
 }
 
-// The mandated rationale from CLAUDE.md §9: a rename breaks the previous application version.
+// The mandated rationale from docs/RULES.md §1: a rename breaks the previous application version.
 func classifyRename(s parser.Statement) classification {
 	if s.Kind == parser.KindRenameTable {
 		return classification{

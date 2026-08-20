@@ -10,7 +10,7 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
-// This file is the executable form of the authoritative scoring rules in CLAUDE.md §11:
+// This file is the executable form of the authoritative scoring rules in docs/RULES.md §3:
 //
 //	Any IRREVERSIBLE   -> F
 //	Any UNKNOWN        -> F        (fail-closed, no exceptions)
@@ -57,7 +57,7 @@ func score(in scoreInput) (domain.Grade, []string) {
 	}
 
 	// An empty changeset has nothing to say. Inventing an opinion would train users to ignore
-	// the gate; per CLAUDE.md §11 it grades A with Applicable false.
+	// the gate; per docs/RULES.md §3 it grades A with Applicable false.
 	if !in.applicable {
 		return domain.GradeA, nil
 	}
@@ -144,7 +144,7 @@ func blockingFindings(findings []domain.Finding) []string {
 // downMigrationsAreSound reports whether every migration has a down migration that exists and
 // parses.
 //
-// Symmetry — level 3 — is deliberately excluded. CLAUDE.md §9 marks it advisory and forbids it
+// Symmetry — level 3 — is deliberately excluded. docs/RULES.md §1 marks it advisory and forbids it
 // from producing grade F on its own, and a migration can be perfectly reversible without textual
 // symmetry: a data backfill has nothing to create or drop.
 func downMigrationsAreSound(statuses []domain.DownMigrationStatus) bool {

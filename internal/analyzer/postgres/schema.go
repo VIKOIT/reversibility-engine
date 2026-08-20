@@ -93,7 +93,7 @@ func key(s string) string { return strings.ToLower(s) }
 type widthChange int
 
 const (
-	// widthUnknown means the conversion is outside the cases CLAUDE.md §9 enumerates. It
+	// widthUnknown means the conversion is outside the cases docs/RULES.md §1 enumerates. It
 	// grades UNKNOWN. Extending this set would be inventing a classification rule.
 	widthUnknown widthChange = iota
 	widthNarrowing

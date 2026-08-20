@@ -83,7 +83,7 @@ func FuzzAnalyze(f *testing.F) {
 				t.Errorf("%s has invalid reversibility %q", finding.RuleID, finding.Reversibility)
 			}
 
-			// CLAUDE.md §15.2, the owner's ruling: Kubernetes findings never hold database
+			// docs/RULES.md §4.2, the owner's ruling: Kubernetes findings never hold database
 			// locks. It must hold for hostile input too, not only for the fixtures.
 			if finding.LockHazard != domain.LockNone {
 				t.Errorf("%s has lock hazard %q, want NONE", finding.RuleID, finding.LockHazard)

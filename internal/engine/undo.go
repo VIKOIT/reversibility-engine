@@ -21,7 +21,7 @@ const noCompleteUndo = "-- NO COMPLETE UNDO EXISTS. This changeset cannot be ful
 // Steps come back in reverse order of application, because undoing a sequence means unwinding
 // it: the last change applied is the first that has to come off.
 //
-// Per CLAUDE.md §11, if any finding is IRREVERSIBLE the plan is replaced by an explicit
+// Per docs/RULES.md §3, if any finding is IRREVERSIBLE the plan is replaced by an explicit
 // statement that no complete undo exists, listing what cannot be undone. UNKNOWN findings
 // trigger the same replacement — see the note below.
 func buildUndoPlan(findings []domain.Finding) []domain.UndoStep {

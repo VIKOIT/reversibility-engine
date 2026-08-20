@@ -15,7 +15,7 @@ var digestSeparators = []string{"@sha256:", "@sha512:"}
 // mutable pointers by design, and a registry operator can move one at any time. A digest is the
 // only reference that guarantees bit-for-bit rollback determinism.
 //
-// Everything else falls under K8S008/COSTLY, per the owner's ruling recorded in CLAUDE.md §10.
+// Everything else falls under K8S008/COSTLY, per the owner's ruling recorded in docs/RULES.md §2.
 func isPinned(image string) bool {
 	image = strings.TrimSpace(image)
 	if image == "" {

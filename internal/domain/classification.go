@@ -154,7 +154,7 @@ func (g Grade) Rank() int {
 
 // Cap applies a ceiling, returning whichever of g and limit is worse.
 //
-// Per the owner's ruling in CLAUDE.md §15, a cap overrides an assignment rather than competing
+// Per the owner's ruling in docs/RULES.md §4, a cap overrides an assignment rather than competing
 // with it: a changeset with no COSTLY findings but a missing down migration is capped to C.
 func (g Grade) Cap(limit Grade) Grade {
 	if limit.Rank() < g.Rank() {
@@ -172,7 +172,7 @@ const (
 	GateFail GateStatus = "FAIL"
 )
 
-// Gate returns PASS if and only if the grade is A, per CLAUDE.md §11.
+// Gate returns PASS if and only if the grade is A, per docs/RULES.md §3.
 //
 // This is the single definition of the gate. No caller may re-derive it, because a second
 // definition is a second chance to get it wrong in the permissive direction.

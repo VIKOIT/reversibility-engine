@@ -159,7 +159,7 @@ func TestUnchangedObjectsProduceNoFindings(t *testing.T) {
 	}
 }
 
-// Only an explicit Retain is safe. CLAUDE.md §10 treats an unknown reclaim policy as Delete.
+// Only an explicit Retain is safe. docs/RULES.md §2 treats an unknown reclaim policy as Delete.
 func TestPVCRemovedWithRetainPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -374,7 +374,7 @@ metadata:
 	}
 }
 
-// Every Kubernetes finding carries LockHazard NONE, per the owner's ruling in CLAUDE.md §15.2.
+// Every Kubernetes finding carries LockHazard NONE, per the owner's ruling in docs/RULES.md §4.2.
 // The fixtures assert it for the paths they cover; this covers the synthesized ones.
 func TestSynthesizedFindingsCarryNoLockHazard(t *testing.T) {
 	t.Parallel()

@@ -61,20 +61,35 @@ unsafe. A tool that sells trust cannot afford to guess.
 
 ## Install
 
-```bash
-# Go toolchain
-go install github.com/VIKOIT/reversibility-engine/cmd/revctl@latest
+Requires **Go 1.22+ and a C toolchain**. The Postgres analyzer links the real
+PostgreSQL parser through cgo, so `CGO_ENABLED=1` is mandatory — a
+`CGO_ENABLED=0` build fails rather than silently dropping the parser, which is
+the correct behaviour. See [ADR/0001](ADR/0001-parser-choice.md).
 
-# Docker — recommended if you are on Alpine or musl (see ADR/0001)
-docker run --rm -v "$PWD:/src" ghcr.io/VIKOIT/revctl:latest check /src/migrations
+```bash
+# Install with the Go toolchain
+go install github.com/VIKOIT/reversibility-engine/cmd/revctl@latest
+go install github.com/VIKOIT/reversibility-engine/cmd/revsrv@latest
 ```
 
-Prebuilt binaries for Linux, macOS, and Windows are on the
-[releases page](https://github.com/VIKOIT/reversibility-engine/releases).
+Or build from a clone:
 
-Building from source requires **Go 1.22+ and a C toolchain** — the Postgres
-analyzer links the real PostgreSQL parser through cgo, so `CGO_ENABLED=1` is
-mandatory.
+```bash
+git clone https://github.com/VIKOIT/reversibility-engine.git
+cd reversibility-engine
+
+make build          # binaries land in ./bin
+make verify         # everything CI runs: build, vet, lint, tests, coverage gate
+
+# or without make:
+CGO_ENABLED=1 go build -o bin/revctl ./cmd/revctl
+CGO_ENABLED=1 go build -o bin/revsrv ./cmd/revsrv
+```
+
+> **Not yet published:** there are no tagged releases, prebuilt binaries, or
+> container images. Install from source using either method above. A glibc base
+> image is required when one is published — see
+> [ADR/0001](ADR/0001-parser-choice.md) for the musl constraint.
 
 ---
 
@@ -113,7 +128,7 @@ must run under.
 | PostgreSQL `.sql` migrations | 27 classified rules (PG001–PG027) over a real PostgreSQL AST — dropped tables and columns, truncation, `CASCADE`, narrowing type changes, unqualified `DELETE`/`UPDATE`, lock hazards, and down-migration presence |
 | Rendered Kubernetes `.yaml` | 15 classified rules (K8S001–K8S015) over a structural diff — volume claim templates, selector mutations, PVC and storage-class changes, digest-pinned vs. floating images, removed probes, and workload strategy changes |
 
-The full, authoritative rule tables live in [`CLAUDE.md`](CLAUDE.md) §9 and §10.
+The full, authoritative rule tables live in [`docs/RULES.md`](docs/RULES.md).
 They are the specification, not documentation of the code — the code is written
 to match them.
 
@@ -125,6 +140,26 @@ to match them.
 | **B** | One or two costly-to-reverse changes, or a lock heavier than SHORT | ❌ FAIL |
 | **C** | Three or more costly changes, or a missing/unparseable down migration | ❌ FAIL |
 | **F** | Irreversible data loss, an unknown construct, or an analyzer failure | ❌ FAIL |
+
+---
+
+## Rules Specification
+
+Every grade this engine emits traces back to one table.
+**[`docs/RULES.md`](docs/RULES.md)** is that specification — the code is written
+to match it, and where the two disagree, the code is the bug.
+
+| Section | Covers |
+| --- | --- |
+| [§1 PostgreSQL](docs/RULES.md#1-postgresql--pg001-to-pg027) | PG001–PG027: what each statement does to reversibility and lock hazard, the AST parser directive, and the three levels of down-migration validation |
+| [§2 Kubernetes](docs/RULES.md#2-kubernetes--k8s001-to-k8s015) | K8S001–K8S015: volume claim templates, selector immutability, PVC and storage-class changes, digest pinning, dangling config references |
+| [§3 Scoring](docs/RULES.md#3-scoring) | how findings become A/B/C/F, how the undo plan is assembled, and the determinism requirement |
+| [§4 Owner rulings](docs/RULES.md#4-owner-rulings) | the decisions that resolved genuine ambiguities in the tables above |
+
+Two rules govern changing any of it: **a rule with no fixture does not exist**,
+and **no code path may turn an error, a panic, or an unknown into a passing
+grade.** Disagreement about a classification is the most valuable contribution
+there is — open an issue arguing the case.
 
 ---
 

@@ -31,7 +31,7 @@ type object struct {
 	doc map[string]any
 }
 
-// objectKey identifies an object across the old and new sides of a change, per CLAUDE.md §10.
+// objectKey identifies an object across the old and new sides of a change, per docs/RULES.md §2.
 type objectKey struct {
 	apiVersion string
 	kind       string

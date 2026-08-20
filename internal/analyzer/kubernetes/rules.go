@@ -9,7 +9,7 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
-// This file is the executable form of the authoritative Kubernetes table in CLAUDE.md §10.
+// This file is the executable form of the authoritative Kubernetes table in docs/RULES.md §2.
 //
 // Per the owner's ruling in §15.2, every finding here carries LockHazard NONE: Kubernetes
 // changes do not hold database locks. That is asserted by the tests, not just intended.
@@ -157,7 +157,7 @@ func rulePVCRemoved(c change, oldIndex, _ index) []domain.Finding {
 	className := stringAt(c.old.doc, "spec", "storageClassName")
 	policy, resolved := reclaimPolicy(oldIndex, className)
 
-	// Per CLAUDE.md §10 the rule fires when the policy is Delete *or unknown*. Only an
+	// Per docs/RULES.md §2 the rule fires when the policy is Delete *or unknown*. Only an
 	// explicit Retain is safe; an unresolvable StorageClass is treated exactly like Delete.
 	if resolved && policy == "Retain" {
 		return nil
@@ -497,7 +497,7 @@ func probesByContainer(obj *object) map[string]map[string]bool {
 	return out
 }
 
-// tuningFields are the four categories CLAUDE.md §10 names for K8S012. One finding per changed
+// tuningFields are the four categories docs/RULES.md §2 names for K8S012. One finding per changed
 // category, not per changed leaf: a request that adjusts both cpu and memory is one decision.
 var tuningFields = []struct {
 	name string

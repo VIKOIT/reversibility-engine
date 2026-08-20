@@ -37,7 +37,7 @@ func certificateHash(t *testing.T, cert domain.ReversibilityCertificate) string 
 	return hex.EncodeToString(sum[:])
 }
 
-// A merge gate whose answer shuffles between runs is a gate nobody trusts. CLAUDE.md §11 makes
+// A merge gate whose answer shuffles between runs is a gate nobody trusts. docs/RULES.md §3 makes
 // this a hard requirement and specifies the 100-run check.
 func TestCertificateIsByteIdenticalAcrossRuns(t *testing.T) {
 	t.Parallel()

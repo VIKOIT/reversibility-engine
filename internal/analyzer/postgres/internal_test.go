@@ -10,7 +10,7 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
-// compareTypes implements exactly the conversions CLAUDE.md §9 enumerates. Everything else must
+// compareTypes implements exactly the conversions docs/RULES.md §1 enumerates. Everything else must
 // come back widthUnknown, because a conversion the table does not describe is one the engine
 // has no authority to grade.
 func TestCompareTypes(t *testing.T) {

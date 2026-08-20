@@ -40,7 +40,7 @@ type Analyzer interface {
 // to know which analyzer happens to care about migrations.
 type DownMigrationValidator interface {
 	// ValidateDownMigrations reports, per migration, which of the three validation levels in
-	// CLAUDE.md §9 passed.
+	// docs/RULES.md §1 passed.
 	ValidateDownMigrations(ctx context.Context, files []domain.ChangedFile) ([]domain.DownMigrationStatus, error)
 }
 

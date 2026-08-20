@@ -65,7 +65,7 @@ func TestAnalyzeFixtures(t *testing.T) {
 					t.Errorf("%s at %s has no rationale", f.RuleID, f.File)
 				}
 
-				// CLAUDE.md §15.2, the owner's ruling: Kubernetes findings never hold
+				// docs/RULES.md §4.2, the owner's ruling: Kubernetes findings never hold
 				// database locks.
 				if f.LockHazard != domain.LockNone {
 					t.Errorf("%s at %s has LockHazard %q; Kubernetes findings are strictly NONE",
