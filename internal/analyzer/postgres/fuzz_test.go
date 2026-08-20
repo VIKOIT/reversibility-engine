@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/postgres"
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/postgres/parser"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres/parser"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // seedCorpus covers the shapes most likely to break a parser wrapper: valid SQL, truncated SQL,

@@ -7,7 +7,7 @@
         "driver": {
           "name": "reversibility-engine",
           "version": "1.0.0",
-          "informationUri": "https://github.com/abdo-s1/reversibility-engine",
+          "informationUri": "https://github.com/VIKOIT/reversibility-engine",
           "rules": [
             {
               "id": "PG024",

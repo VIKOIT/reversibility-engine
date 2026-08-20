@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	gh "github.com/abdo-s1/reversibility-engine/internal/delivery/github"
+	gh "github.com/VIKOIT/reversibility-engine/internal/delivery/github"
 )
 
 // FuzzWebhookRejection is the security fuzz target.

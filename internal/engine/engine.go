@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // Engine orchestrates analyzers and turns their findings into a certificate.

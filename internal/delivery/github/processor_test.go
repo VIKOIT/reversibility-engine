@@ -14,7 +14,7 @@ import (
 
 	ghapi "github.com/google/go-github/v66/github"
 
-	gh "github.com/abdo-s1/reversibility-engine/internal/delivery/github"
+	gh "github.com/VIKOIT/reversibility-engine/internal/delivery/github"
 )
 
 // stubGitHub is a stand-in GitHub covering both halves of a run: the files the provider fetches

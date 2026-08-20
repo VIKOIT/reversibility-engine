@@ -10,13 +10,13 @@ import (
 
 	gh "github.com/google/go-github/v66/github"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer"
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/kubernetes"
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/postgres"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
-	"github.com/abdo-s1/reversibility-engine/internal/engine"
-	"github.com/abdo-s1/reversibility-engine/internal/provider"
-	"github.com/abdo-s1/reversibility-engine/internal/render"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/kubernetes"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/engine"
+	"github.com/VIKOIT/reversibility-engine/internal/provider"
+	"github.com/VIKOIT/reversibility-engine/internal/render"
 )
 
 // processingTimeout bounds one analysis, including every API call it makes.

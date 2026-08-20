@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // Analyzer classifies the changes in a changeset against one authoritative rule table.

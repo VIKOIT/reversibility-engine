@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/abdo-s1/reversibility-engine/internal/fixture"
-	"github.com/abdo-s1/reversibility-engine/internal/provider"
+	"github.com/VIKOIT/reversibility-engine/internal/fixture"
+	"github.com/VIKOIT/reversibility-engine/internal/provider"
 )
 
 // updateGolden regenerates the verdict snapshot. Run: go test ./internal/engine -update

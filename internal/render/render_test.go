@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
-	"github.com/abdo-s1/reversibility-engine/internal/render"
-	"github.com/abdo-s1/reversibility-engine/pkg/certificate"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/render"
+	"github.com/VIKOIT/reversibility-engine/pkg/certificate"
 )
 
 func renderTo(t *testing.T, format string, cert domain.ReversibilityCertificate) string {

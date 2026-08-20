@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/go-github/v66/github"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
-	"github.com/abdo-s1/reversibility-engine/internal/provider"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/provider"
 )
 
 // fakeAPI is a stand-in GitHub, so the provider is exercised over real HTTP with real JSON

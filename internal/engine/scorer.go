@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // This file is the executable form of the authoritative scoring rules in CLAUDE.md §11:

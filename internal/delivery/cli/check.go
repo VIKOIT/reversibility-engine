@@ -8,13 +8,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer"
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/kubernetes"
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/postgres"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
-	"github.com/abdo-s1/reversibility-engine/internal/engine"
-	"github.com/abdo-s1/reversibility-engine/internal/provider"
-	"github.com/abdo-s1/reversibility-engine/internal/render"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/kubernetes"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/engine"
+	"github.com/VIKOIT/reversibility-engine/internal/provider"
+	"github.com/VIKOIT/reversibility-engine/internal/render"
 )
 
 // checkFlags holds the parsed command line for one invocation. Keeping it a value rather than

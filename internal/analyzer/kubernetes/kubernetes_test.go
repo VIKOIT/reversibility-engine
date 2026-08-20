@@ -7,10 +7,10 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/kubernetes"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
-	"github.com/abdo-s1/reversibility-engine/internal/fixture"
-	"github.com/abdo-s1/reversibility-engine/internal/provider"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/kubernetes"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/fixture"
+	"github.com/VIKOIT/reversibility-engine/internal/provider"
 )
 
 // TestAnalyzeFixtures drives the analyzer over every Kubernetes fixture.

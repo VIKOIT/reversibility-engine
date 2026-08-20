@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // Two migration layouts are recognised, per CLAUDE.md §9.

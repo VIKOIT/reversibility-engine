@@ -3,8 +3,8 @@ package postgres
 import (
 	"testing"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/postgres/parser"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres/parser"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // compareTypes implements exactly the conversions CLAUDE.md §9 enumerates. Everything else must

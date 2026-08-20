@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/postgres/parser"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres/parser"
 )
 
 // parseOne is the common case: one statement in, one statement out.

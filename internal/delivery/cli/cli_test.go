@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abdo-s1/reversibility-engine/internal/delivery/cli"
-	"github.com/abdo-s1/reversibility-engine/pkg/certificate"
+	"github.com/VIKOIT/reversibility-engine/internal/delivery/cli"
+	"github.com/VIKOIT/reversibility-engine/pkg/certificate"
 )
 
 // run executes the command tree in-process and returns its streams and exit code.

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
-	"github.com/abdo-s1/reversibility-engine/internal/engine"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/engine"
 )
 
 // panickingAnalyzer detonates at a chosen point in the analyzer contract.

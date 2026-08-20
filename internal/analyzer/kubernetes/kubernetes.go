@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // Name is the stable identifier for this analyzer.

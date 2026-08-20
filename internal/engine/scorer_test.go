@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // finding builds a finding with just the fields scoring reads.

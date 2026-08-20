@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/postgres/parser"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres/parser"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // ValidateDownMigrations checks, for every migration in the changeset, whether a down migration

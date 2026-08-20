@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"sort"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // InputDigest returns the SHA-256 over the analyzed changeset.
