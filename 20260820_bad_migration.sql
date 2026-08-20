@@ -1,0 +1,2 @@
+﻿ALTER TABLE users DROP COLUMN email;
+ALTER TABLE transactions ALTER COLUMN amount TYPE TEXT;
