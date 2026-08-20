@@ -1,6 +1,6 @@
 # Reversibility Engine
 
-# Reversibility Engine
+
 
 [![CI](https://github.com/YOUR-USERNAME/reversibility-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR-USERNAME/reversibility-engine/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/YOUR-USERNAME/reversibility-engine.svg)](https://pkg.go.dev/github.com/YOUR-USERNAME/reversibility-engine)
