@@ -1,7 +1,7 @@
 # Reversibility Engine
 ![Go 1.22+](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go&logoColor=white)
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-663366)
-![Status](https://img.shields.io/badge/status-v0.1.0%20%C2%B7%20API%20may%20change-orange)
+![Status](https://img.shields.io/badge/status-v1.0.0-brightgreen)
 ![Policy](https://img.shields.io/badge/policy-fail--closed-critical)
 ![Rules](https://img.shields.io/badge/rules-27%20PG%20%C2%B7%2015%20K8S-blue)
 
@@ -53,13 +53,20 @@ The engine is **fail-closed by construction**. An unparseable file, an
 unrecognized statement, an analyzer error, or a panic all grade F. Unknown means
 unsafe. A tool that sells trust cannot afford to guess.
 
-> **Status: v0.1.0.** Usable end to end; the certificate schema and CLI flags may
-> still change before v1. Every rule ID has a fixture pair in `testdata/` — a rule
-> with no fixture does not exist.
+> **Status: v1.0.0.** Usable end to end, and packaged as a GitHub Action. Every
+> certificate carries its own `schemaVersion`, currently `1.0.0`, which bumps on
+> any breaking field change — so a consumer can pin against the schema rather than
+> against the tool. Every rule ID has a fixture pair in `testdata/`: a rule with no
+> fixture does not exist.
 
 ---
 
 ## Install
+
+**Most people should not install anything.** If the goal is to gate pull
+requests, use the [GitHub Action](#github-action) — it carries the cgo build so
+you do not have to. Install locally to run `revctl` by hand, to self-host
+`revsrv`, or to develop the engine.
 
 Requires **Go 1.22+ and a C toolchain**. The Postgres analyzer links the real
 PostgreSQL parser through cgo, so `CGO_ENABLED=1` is mandatory — a
@@ -86,38 +93,47 @@ CGO_ENABLED=1 go build -o bin/revctl ./cmd/revctl
 CGO_ENABLED=1 go build -o bin/revsrv ./cmd/revsrv
 ```
 
-> **Not yet published:** there are no tagged releases, prebuilt binaries, or
-> container images. Install from source using either method above. A glibc base
-> image is required when one is published — see
-> [ADR/0001](ADR/0001-parser-choice.md) for the musl constraint.
+> **No prebuilt binaries.** Releases are tagged, but the only published artifact
+> is the action's container image. Install from source using either method above.
+> Any image must be glibc-based; musl cannot load the binary — see
+> [ADR/0001](ADR/0001-parser-choice.md).
 
 ---
 
 ## Quickstart — gate a pull request
 
-Add this workflow and every PR gets graded. The build fails unless the change is
-provably reversible.
+Add this workflow and every pull request gets graded, with the certificate posted
+as a comment that is replaced in place rather than appended to.
 
 ```yaml
 # .github/workflows/reversibility.yml
 name: Reversibility
 
-on: [pull_request]
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write     # without this the certificate cannot be posted
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  certify:
+    runs-on: ubuntu-latest   # Docker actions run on Linux runners only
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-      - run: go install github.com/VIKOIT/reversibility-engine/cmd/revctl@latest
-      - run: revctl check ./migrations --gate
+          fetch-depth: 0     # the base commit must be reachable to diff against
+
+      - uses: VIKOIT/reversibility-engine@v1
+        with:
+          min-grade: B
 ```
 
-`--gate` exits `1` unless the grade is A. This is the setting autonomous agents
-must run under.
+That is the whole setup. There is no Go toolchain to install and no C compiler to
+configure: the action ships the cgo build inside its image.
+
+`min-grade` is the worst grade that still passes. Autonomous agents must run at
+`A` — grade A is the only verdict that permits an agent to merge.
 
 ---
 
@@ -187,7 +203,56 @@ That gap is the entire product.
 
 ## Usage
 
-Two interfaces over one decoupled core.
+Three interfaces over one decoupled core. The engine itself knows about none of
+them.
+
+### GitHub Action
+
+The packaged form of `revctl`. It reconstructs the two trees the engine compares,
+grades the change, posts the certificate, and fails the job when the grade is
+below `min-grade`.
+
+```yaml
+- uses: VIKOIT/reversibility-engine@v1
+  with:
+    min-grade: A                       # A, B, C, or F
+    include: 'db/migrations/*.sql k8s/**/*.yaml'
+    comment: true
+```
+
+**Inputs**
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `github-token` | `${{ github.token }}` | Reads the pull request and posts the comment. |
+| `min-grade` | `B` | Worst grade that still passes. `F` accepts everything, turning the action into a reporter. |
+| `include` | `*.sql *.yaml *.yml` | Space-separated git pathspecs selecting what to analyze. |
+| `exclude` | `.github/** action.yml` | Pathspecs to skip, applied on top of `include`. |
+| `comment` | `true` | Post the certificate to the pull request. |
+| `fail-on-gate` | `true` | Fail the job when the grade is below `min-grade`. |
+
+**Outputs:** `grade`, `gate`, `applicable`, and `certificate` (path to the
+rendered Markdown, also written to the workspace as
+`reversibility-certificate.md`).
+
+**Narrow `include` to where your migrations and manifests actually live.** The
+defaults claim every `.sql` and `.yaml` in the repository, and the Kubernetes
+analyzer cannot distinguish a file that is not a manifest from a manifest it
+could not read — it reports `K8S014`/UNKNOWN for both, which is the correct
+fail-closed answer and the reason to be deliberate about what it is shown. The
+`exclude` defaults cover this repository's own YAML; no default can cover yours.
+
+A run that could not complete fails the job even with `fail-on-gate: false`. A
+broken analysis is not a passing one.
+
+The action's image is published to `ghcr.io/vikoit/reversibility-engine`, so
+`revctl` can be run outside Actions without a Go toolchain:
+
+```bash
+docker run --rm --entrypoint revctl \
+  -v "$PWD:/repo" -w /repo \
+  ghcr.io/vikoit/reversibility-engine:v1 check ./migrations
+```
 
 ### CLI — `revctl`
 
@@ -275,6 +340,17 @@ none.
 - **Down migrations are checked structurally, not semantically.** The engine
   verifies that a down migration exists, parses, and roughly inverts the up. It
   cannot prove the two are true inverses.
+- **The action runs on Linux runners only.** It is a Docker container action;
+  `windows-latest` and `macos-latest` cannot run it.
+- **The action cannot comment on a pull request from a fork.** A fork receives a
+  read-only `GITHUB_TOKEN`. The gate still fails correctly, but the certificate
+  cannot be posted. `pull_request_target` would fix it and is deliberately not
+  the default — it runs the base branch's workflow with write access to a pull
+  request containing untrusted code.
+- **A YAML file that is not a Kubernetes manifest grades UNKNOWN.** The analyzer
+  has no way to tell it apart from a manifest it failed to read, and guessing in
+  the permissive direction is the one thing this engine will not do. Scope it
+  with `include` and `exclude`.
 
 ---
 
