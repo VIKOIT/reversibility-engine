@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	gh "github.com/abdo-s1/reversibility-engine/internal/delivery/github"
+	gh "github.com/VIKOIT/reversibility-engine/internal/delivery/github"
 )
 
 // prEvent builds a pull_request payload.

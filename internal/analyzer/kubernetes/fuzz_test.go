@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/kubernetes"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/kubernetes"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // FuzzAnalyze asserts that the Kubernetes analyzer never panics and never calls a manifest it

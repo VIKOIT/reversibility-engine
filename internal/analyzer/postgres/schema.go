@@ -3,7 +3,7 @@ package postgres
 import (
 	"strings"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/postgres/parser"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres/parser"
 )
 
 // schema tracks column types declared earlier in the same changeset.

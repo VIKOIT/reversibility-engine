@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/go-github/v66/github"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // Limits on what a single pull request may drag in.

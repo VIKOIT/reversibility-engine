@@ -24,7 +24,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/abdo-s1/reversibility-engine/internal/delivery/github"
+	"github.com/VIKOIT/reversibility-engine/internal/delivery/github"
 )
 
 func main() {

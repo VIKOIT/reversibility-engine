@@ -6,7 +6,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // SARIF renders the certificate as SARIF 2.1.0, the format GitHub code scanning ingests.
@@ -29,7 +29,7 @@ const (
 	sarifSchema  = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
 
 	toolName    = "reversibility-engine"
-	toolURI     = "https://github.com/abdo-s1/reversibility-engine"
+	toolURI     = "https://github.com/VIKOIT/reversibility-engine"
 	toolVersion = domain.SchemaVersion
 )
 

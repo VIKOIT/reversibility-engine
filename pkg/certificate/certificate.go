@@ -10,7 +10,7 @@
 package certificate
 
 import (
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // SchemaVersion is the version of this wire format.

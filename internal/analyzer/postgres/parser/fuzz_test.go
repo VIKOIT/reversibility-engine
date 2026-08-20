@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/postgres/parser"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres/parser"
 )
 
 // FuzzParse targets the cgo boundary directly.

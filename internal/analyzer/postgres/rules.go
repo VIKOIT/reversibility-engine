@@ -3,8 +3,8 @@ package postgres
 import (
 	"fmt"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/postgres/parser"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres/parser"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // This file is the executable form of the authoritative PostgreSQL table in CLAUDE.md §9.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/abdo-s1/reversibility-engine/internal/fixture"
+	"github.com/VIKOIT/reversibility-engine/internal/fixture"
 )
 
 // CLAUDE.md §13: a rule with no fixture does not exist. This file is where that is enforced.

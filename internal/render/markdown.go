@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // Markdown renders the certificate for a human reading a pull request.

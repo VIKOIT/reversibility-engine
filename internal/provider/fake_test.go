@@ -5,9 +5,9 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
-	"github.com/abdo-s1/reversibility-engine/internal/fixture"
-	"github.com/abdo-s1/reversibility-engine/internal/provider"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/fixture"
+	"github.com/VIKOIT/reversibility-engine/internal/provider"
 )
 
 func fixtureRoot(t *testing.T) string {

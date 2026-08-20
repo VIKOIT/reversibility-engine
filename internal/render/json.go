@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
-	"github.com/abdo-s1/reversibility-engine/pkg/certificate"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/pkg/certificate"
 )
 
 // JSON renders the certificate as the public wire schema.

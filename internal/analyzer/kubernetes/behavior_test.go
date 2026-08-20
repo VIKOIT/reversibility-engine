@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/abdo-s1/reversibility-engine/internal/analyzer/kubernetes"
-	"github.com/abdo-s1/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/kubernetes"
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // modified builds a ChangedFile from two manifest strings.

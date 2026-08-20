@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	gh "github.com/abdo-s1/reversibility-engine/internal/delivery/github"
+	gh "github.com/VIKOIT/reversibility-engine/internal/delivery/github"
 )
 
 func writePEMKey(t *testing.T) string {

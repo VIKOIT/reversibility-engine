@@ -1,4 +1,4 @@
-module github.com/abdo-s1/reversibility-engine
+module github.com/VIKOIT/reversibility-engine
 
 go 1.22
 

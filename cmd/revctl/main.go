@@ -10,7 +10,7 @@ package main
 import (
 	"os"
 
-	"github.com/abdo-s1/reversibility-engine/internal/delivery/cli"
+	"github.com/VIKOIT/reversibility-engine/internal/delivery/cli"
 )
 
 func main() {

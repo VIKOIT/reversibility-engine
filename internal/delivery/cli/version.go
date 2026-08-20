@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/abdo-s1/reversibility-engine/pkg/certificate"
+	"github.com/VIKOIT/reversibility-engine/pkg/certificate"
 )
 
 func newVersionCommand() *cobra.Command {
