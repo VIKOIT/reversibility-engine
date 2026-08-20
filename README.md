@@ -444,4 +444,3 @@ license your contribution under both licenses above.
 **You keep the copyright in your work** — it is a license grant, not an
 assignment. A bot checks it on your first pull request; signing is one comment,
 and you only do it once.
-
