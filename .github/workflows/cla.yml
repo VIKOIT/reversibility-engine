@@ -1,0 +1,68 @@
+name: CLA
+
+on:
+  # The signature is given as a pull request comment, so comments are a trigger.
+  issue_comment:
+    types: [created]
+
+  # pull_request_target runs in the context of the BASE repository, which is what gives this
+  # job a token able to write the signature file and set a status on a fork's pull request.
+  # That elevation is only safe because nothing below checks out or executes the contributor's
+  # code — this job reads comments and writes a JSON file, nothing more. Do not add a checkout
+  # of `github.event.pull_request.head.sha` to this workflow.
+  pull_request_target:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+# One check per pull request. A contributor pushing three times in a minute should not race
+# three copies of the action against the same signature file.
+concurrency:
+  group: cla-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  cla:
+    name: Check CLA signature
+    runs-on: ubuntu-latest
+
+    # Only react to the signature phrase or a recheck request — not to every comment on every
+    # issue in the repository.
+    if: >
+      github.event_name == 'pull_request_target' ||
+      (github.event.issue.pull_request != null &&
+       (github.event.comment.body == 'recheck' ||
+        github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
+
+    steps:
+      - name: Check or record the contributor's signature
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          # The default workflow token is enough: signatures live in this repository.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-document: https://github.com/VIKOIT/reversibility-engine/blob/main/CLA.md
+          path-to-signatures: signatures/cla.json
+          branch: main
+
+          # The maintainer holds the copyright already, and dependabot cannot agree to a
+          # contract. Everyone else signs.
+          allowlist: VIKOIT,dependabot[bot]
+
+          custom-notsigned-prcomment: >
+            Thank you for this pull request.
+
+
+            This project is dual-licensed (AGPL-3.0-only, plus a commercial license), which
+            means the maintainer needs your permission to license your contribution under
+            both. Please read the [CLA](https://github.com/VIKOIT/reversibility-engine/blob/main/CLA.md)
+            — you keep the copyright in your work — and then post a comment containing
+            exactly:
+          custom-pr-sign-comment: I have read the CLA Document and I hereby sign the CLA
+          custom-allsigned-prcomment: >
+            All contributors have signed the CLA. Thank you — this pull request is clear to
+            review.

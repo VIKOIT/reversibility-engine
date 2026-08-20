@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 // Package kubernetes classifies structural differences between rendered Kubernetes manifests
 // against the authoritative K8S001-K8S014 table in CLAUDE.md.
 //

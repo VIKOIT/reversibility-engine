@@ -5,9 +5,9 @@
 ![Policy](https://img.shields.io/badge/policy-fail--closed-critical)
 ![Rules](https://img.shields.io/badge/rules-27%20PG%20%C2%B7%2015%20K8S-blue)
 
-[![CI](https://github.com/USER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/USER/REPO/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/USER/REPO)](https://github.com/USER/REPO/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/USER/REPO)](https://goreportcard.com/report/github.com/USER/REPO)
+[![CI](https://github.com/VIKOIT/reversibility-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/VIKOIT/reversibility-engine/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/VIKOIT/reversibility-engine)](https://github.com/VIKOIT/reversibility-engine/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/VIKOIT/reversibility-engine)](https://goreportcard.com/report/github.com/VIKOIT/reversibility-engine)
 
 
 
@@ -63,14 +63,14 @@ unsafe. A tool that sells trust cannot afford to guess.
 
 ```bash
 # Go toolchain
-go install github.com/YOUR-USERNAME/reversibility-engine/cmd/revctl@latest
+go install github.com/VIKOIT/reversibility-engine/cmd/revctl@latest
 
 # Docker — recommended if you are on Alpine or musl (see ADR/0001)
-docker run --rm -v "$PWD:/src" ghcr.io/YOUR-USERNAME/revctl:latest check /src/migrations
+docker run --rm -v "$PWD:/src" ghcr.io/VIKOIT/revctl:latest check /src/migrations
 ```
 
 Prebuilt binaries for Linux, macOS, and Windows are on the
-[releases page](https://github.com/YOUR-USERNAME/reversibility-engine/releases).
+[releases page](https://github.com/VIKOIT/reversibility-engine/releases).
 
 Building from source requires **Go 1.22+ and a C toolchain** — the Postgres
 analyzer links the real PostgreSQL parser through cgo, so `CGO_ENABLED=1` is
@@ -97,7 +97,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-      - run: go install github.com/YOUR-USERNAME/reversibility-engine/cmd/revctl@latest
+      - run: go install github.com/VIKOIT/reversibility-engine/cmd/revctl@latest
       - run: revctl check ./migrations --gate
 ```
 
@@ -299,7 +299,7 @@ Disagreement about a classification is the most valuable contribution there is �
 open an issue arguing the case. The tables are the product; the code is an
 implementation detail.
 
-Issues labelled [`good first issue`](https://github.com/YOUR-USERNAME/reversibility-engine/labels/good%20first%20issue)
+Issues labelled [`good first issue`](https://github.com/VIKOIT/reversibility-engine/labels/good%20first%20issue)
 are scoped for a first contribution.
 
 ---
@@ -307,5 +307,30 @@ are scoped for a first contribution.
 
 ## License
 
-GNU Affero General Public License v3.0 — see [LICENSE](LICENSE).
+Copyright (c) 2026 Abdul Ghani (VIKOIT). This project is **dual-licensed** — use
+it under whichever fits you:
+
+| | |
+| --- | --- |
+| **[AGPL-3.0-only](LICENSE)** | Free for everyone. Note section 13: if you modify the engine and expose it to users **over a network** — which is exactly what `revsrv` is for — you must offer those users your modified source. |
+| **[Commercial license](COMMERCIAL.md)** | For organizations that cannot meet that obligation: embedding the engine in a proprietary product, running a modified copy as a hosted service, or working under a policy that excludes AGPL code. |
+
+The AGPL was chosen deliberately. A merge gate whose rules cannot be inspected is
+a gate that should not be trusted, and section 13 guarantees that anyone whose
+pull requests are being graded by a modified copy of this engine can read the
+rules it is grading them by.
+
+Not sure which applies? [COMMERCIAL.md](COMMERCIAL.md) has a plain checklist, or
+email **vikoit07@gmail.com**. Third-party dependency licenses are in
+[NOTICE](NOTICE).
+
+### Contributor License Agreement
+
+Pull requests require a signed [**CLA**](CLA.md). Dual licensing only works if the
+maintainer holds sufficient rights over every line, so the CLA grants the right to
+license your contribution under both licenses above.
+
+**You keep the copyright in your work** — it is a license grant, not an
+assignment. A bot checks it on your first pull request; signing is one comment,
+and you only do it once.
 

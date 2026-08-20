@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 // Package domain holds the vocabulary of the Reversibility Engine: the change model, the
 // classification enums, findings, and the certificate.
 //

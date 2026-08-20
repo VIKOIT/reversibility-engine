@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 // Package provider fetches changesets. It is the only place in the engine permitted to perform
 // I/O.
 //

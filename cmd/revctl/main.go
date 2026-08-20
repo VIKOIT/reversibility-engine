@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
 // Command revctl is the Reversibility Engine command-line interface.
 //
 // It analyzes a changeset of PostgreSQL migrations and rendered Kubernetes manifests and emits
