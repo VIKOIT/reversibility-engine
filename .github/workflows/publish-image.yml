@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
+name: Publish action image
+
+# A Docker action with `image: Dockerfile` rebuilds itself on every consumer run, and
+# pg_query_go compiles a large C library — minutes of every pull request, in every repo that
+# uses this action. Publishing the image once per release moves that cost here.
+on:
+  push:
+    # Full versions only. A moving major tag like v1 is not a semver string, so the tag
+    # derivation below would produce nothing and the push would fail on an empty tag list —
+    # and there would be nothing to build anyway: the release that moved v1 already published
+    # the image, including its own moving v1 image tag.
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and push to GHCR
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The v-prefix is kept on the moving tags so an image tag reads the same as the git tag
+      # a consumer writes after the @. ghcr.io/<owner>/<repo>:v1 pairs with @v1; a bare "1"
+      # would be one more thing to translate at the moment someone is debugging a pin.
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+          # linux/amd64 only, and deliberately so. Every GitHub-hosted Linux runner is amd64,
+          # and cgo under QEMU turns the pg_query build into a half-hour emulated compile.
+          # Adding linux/arm64 means a second native runner and a manifest merge — worth doing
+          # when someone actually needs it, not before.
+          platforms: linux/amd64
+
+          # A Docker action pulls this reference directly. Provenance would turn it into a
+          # manifest list carrying an attestation entry, which is a shape the plain image
+          # reference does not need and some registry tooling mis-reports.
+          provenance: false
+
+      # The image is the product now, so it is checked the way the build stage checks itself:
+      # if the published artifact cannot classify a DROP TABLE, it lost its cgo parser and
+      # would grade every migration as unanalyzed.
+      - name: Verify the published image still classifies SQL
+        run: |
+          set -euo pipefail
+          image="$(printf '%s' '${{ steps.meta.outputs.tags }}' | head -n 1)"
+          echo "Verifying $image"
+          printf 'DROP TABLE t;\n' > probe.sql
+          docker run --rm --entrypoint revctl \
+            --volume "$PWD:/probe" --workdir /probe \
+            "$image" check probe.sql --format json | tee /dev/stderr | grep -q '"PG001"'
+          echo "Image classifies SQL correctly."
+
+      - name: Summarise
+        run: |
+          {
+            echo "### Published"
+            echo
+            echo '```'
+            printf '%s\n' '${{ steps.meta.outputs.tags }}'
+            echo '```'
+            echo
+            echo "Digest: \`${{ steps.build.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

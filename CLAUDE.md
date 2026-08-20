@@ -412,8 +412,21 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
 
 ## 17. Fixture conventions
 
-45 fixture directories under `testdata/fixtures/`: 27 Postgres rules, 14 Kubernetes rules, and
-4 `DOWN*` fixtures for the three down-migration validation levels plus the directory form.
+47 fixture directories under `testdata/fixtures/`: 27 Postgres rules, 15 Kubernetes rules,
+4 `DOWN*` fixtures for the three down-migration validation levels plus the directory form, and
+1 `ENCODING*` fixture pinning the decoding seam.
+
+**Two fixtures may not claim the same rule** — `TestEveryRuleHasAFixture` rejects it, so a
+fixture proving something *about* an existing rule takes a non-table rule ID, as `DOWN*` and
+`ENCODING*` both do. A non-table rule ID additionally has to assert `downMigrations`, which is
+what stops that escape hatch from becoming a way to assert nothing.
+
+`ENCODING001_utf8_bom` carries a UTF-8 BOM on both its up and down migrations and asserts the
+PG002 the statement deserves. Before the strip in `parser.PgQuery.Parse` it reported PG027
+"could not be parsed": still F, so nothing unsafe merged, but the certificate named no rule and
+described nothing the migration did. Fail-closed guarantees the grade, not that the grade is
+explicable — and on Windows-authored migrations the inexplicable one was the common case.
+Only a *leading* BOM is stripped; an interior one is corruption and still fails.
 
 Two shapes, both resolved by `provider.Fake`:
 

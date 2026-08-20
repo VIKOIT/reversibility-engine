@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
+name: 'Reversibility Engine'
+description: >-
+  Grade a pull request on whether its database migrations and Kubernetes changes can be
+  rolled back, and block the merge when they cannot. Fail-closed: unknown means unsafe.
+author: 'VIKOIT'
+
+branding:
+  icon: 'rotate-ccw'
+  color: 'purple'
+
+inputs:
+  github-token:
+    description: >-
+      Token used to read the pull request and post the certificate comment. The default
+      GITHUB_TOKEN is enough, but the job must grant `pull-requests: write`, and a pull
+      request from a fork receives a read-only token that cannot comment.
+    required: false
+    default: ${{ github.token }}
+
+  min-grade:
+    description: >-
+      The worst grade that still passes: A, B, C, or F. The job fails if the certificate
+      grades below it. Autonomous agents must use A, which is what `revctl --gate` means.
+      F accepts everything and turns this action into a reporter rather than a gate.
+    required: false
+    default: 'B'
+
+  include:
+    description: >-
+      Space-separated git pathspecs selecting the changed files to analyze. The defaults
+      are every extension the engine's analyzers claim. Narrowing this to the directories
+      that actually hold migrations and manifests is the cheapest way to cut noise.
+    required: false
+    default: '*.sql *.yaml *.yml'
+
+  exclude:
+    description: >-
+      Space-separated git pathspecs to skip, applied on top of `include`. The defaults are
+      YAML that is configuration for tooling rather than a Kubernetes manifest. The analyzer
+      cannot tell "not a manifest" from "a manifest I could not read", and reports
+      K8S014/UNKNOWN for both — which is the correct fail-closed answer and the reason to
+      scope what it is shown. No default can cover every such file, so a repository whose
+      manifests live in known directories is better served by narrowing `include` than by
+      extending this.
+    required: false
+    default: '.github/** action.yml'
+
+  comment:
+    description: >-
+      Post the certificate as a pull request comment, replacing this action's previous one.
+      Set to false to run the gate silently, keeping the certificate as a job artifact only.
+    required: false
+    default: 'true'
+
+  fail-on-gate:
+    description: >-
+      Fail the job when the grade is below `min-grade`. Set to false to report without
+      blocking. A run that could not complete fails the job either way — a broken analysis
+      is never a pass.
+    required: false
+    default: 'true'
+
+outputs:
+  grade:
+    description: 'The certificate grade: A, B, C, or F.'
+  gate:
+    description: 'PASS or FAIL — whether an autonomous agent may merge. Independent of min-grade.'
+  applicable:
+    description: 'true when the pull request changed at least one file an analyzer claims.'
+  certificate:
+    description: 'Path to the rendered Markdown certificate inside the workspace.'
+
+runs:
+  # Docker rather than a composite action: the Postgres analyzer links the real PostgreSQL
+  # parser through cgo, so a consumer would otherwise need a Go toolchain and a C compiler
+  # on their runner. The image carries both outcomes of that build and the consumer carries
+  # neither. The cost is that this action runs only on Linux runners.
+  using: 'docker'
+
+  # The published image, not a local build. `image: Dockerfile` makes every consumer compile
+  # pg_query's C sources on every run; this pulls a layer instead.
+  #
+  # The tag tracks the major version so it keeps pace with the git tag consumers write after
+  # the @. That does mean the reference is mutable: a later v1.x image becomes what this pulls.
+  # It is the usual trade for a marketplace action — pin by digest instead if a build has to be
+  # reproducible years from now.
+  #
+  # Published by .github/workflows/publish-image.yml. The GHCR package must stay public, or
+  # consumers get a pull failure rather than a gate.
+  image: 'docker://ghcr.io/vikoit/reversibility-engine:v1'
