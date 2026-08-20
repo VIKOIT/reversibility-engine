@@ -49,8 +49,15 @@ jobs:
           HEAD='${{ github.event.pull_request.head.sha }}'
 
           # --diff-filter=d drops deletions: there is no head-side file to stage.
+          #
+          # The exclusions are scope, not leniency. This repository's own YAML — workflows,
+          # action.yml — is not Kubernetes, but the analyzer cannot tell "not a manifest" from
+          # "a manifest I could not read" and correctly reports K8S014/UNKNOWN for both. The
+          # answer is to stop handing it files that were never manifests, not to soften a rule
+          # into treating an unreadable manifest as safe.
           CHANGED=$(git diff --name-only --diff-filter=d "$BASE" "$HEAD" \
-            -- '*.sql' '*.yaml' '*.yml' ':!testdata/**')
+            -- '*.sql' '*.yaml' '*.yml' \
+               ':!testdata/**' ':!.github/**' ':!action.yml')
 
           if [ -z "$CHANGED" ]; then
             echo "applicable=false" >> "$GITHUB_OUTPUT"
