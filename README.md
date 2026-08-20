@@ -1,11 +1,16 @@
 # Reversibility Engine
+![Go 1.22+](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go&logoColor=white)
+![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-663366)
+![Status](https://img.shields.io/badge/status-v0.1.0%20%C2%B7%20API%20may%20change-orange)
+![Policy](https://img.shields.io/badge/policy-fail--closed-critical)
+![Rules](https://img.shields.io/badge/rules-27%20PG%20%C2%B7%2015%20K8S-blue)
+
+[![CI](https://github.com/USER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/USER/REPO/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/USER/REPO)](https://github.com/USER/REPO/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/USER/REPO)](https://goreportcard.com/report/github.com/USER/REPO)
 
 
 
-[![CI](https://github.com/YOUR-USERNAME/reversibility-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR-USERNAME/reversibility-engine/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/YOUR-USERNAME/reversibility-engine.svg)](https://pkg.go.dev/github.com/YOUR-USERNAME/reversibility-engine)
-[![Go Report Card](https://goreportcard.com/badge/github.com/YOUR-USERNAME/reversibility-engine)](https://goreportcard.com/report/github.com/YOUR-USERNAME/reversibility-engine)
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 **"We can always roll back" is an assumption. This measures it.**
 
@@ -299,6 +304,8 @@ are scoped for a first contribution.
 
 ---
 
+
 ## License
-AGPL3.0
+
+GNU Affero General Public License v3.0 — see [LICENSE](LICENSE).
 
