@@ -1,10 +1,12 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "grade": "A",
+  "effectiveGrade": "A",
   "aiGateStatus": "PASS",
   "applicable": false,
   "inputDigest": "fcc5feb8bb9243c71d87a4e66b27fedaa26a1cbf54651d4324ce333b2493f88e",
   "findings": [],
+  "waived": [],
   "undoPlan": [],
   "blockers": [],
   "downMigrations": []

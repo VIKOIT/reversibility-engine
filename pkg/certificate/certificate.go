@@ -86,6 +86,24 @@ type Finding struct {
 	UndoStep string `json:"undoStep,omitempty"`
 }
 
+// WaivedFinding is a finding a policy waiver downgraded to advisory.
+//
+// It carries the whole finding, not a summary. A reader can only judge whether an accepted risk
+// still holds if the thing that was accepted is in front of them.
+type WaivedFinding struct {
+	Finding Finding `json:"finding"`
+
+	// Reason is why the risk was accepted. A waiver cannot exist without one.
+	Reason string `json:"reason"`
+
+	// Expires is the last day the waiver applies, as YYYY-MM-DD. After it the finding returns
+	// on its own, with no edit to the policy.
+	Expires string `json:"expires"`
+
+	// ApprovedBy is who accepted the risk, if the policy recorded it.
+	ApprovedBy string `json:"approvedBy,omitempty"`
+}
+
 // DownMigrationStatus records down-migration validation for one migration pair.
 //
 // The three levels are reported separately because they carry different authority: Exists and
@@ -111,9 +129,16 @@ type DownMigrationStatus struct {
 type Certificate struct {
 	SchemaVersion string `json:"schemaVersion"`
 
+	// Grade is what the evidence says about the change. No policy setting moves it.
 	Grade Grade `json:"grade"`
 
-	// AIGateStatus is PASS if and only if Grade is A.
+	// EffectiveGrade is Grade with waived findings set aside — the one to compare against a CI
+	// threshold. With no policy in play it equals Grade, so this is always the right field to
+	// gate on and a consumer never has to know whether a policy existed.
+	EffectiveGrade Grade `json:"effectiveGrade"`
+
+	// AIGateStatus is PASS if and only if Grade is A. It follows Grade rather than
+	// EffectiveGrade: a waiver may unblock a human's pipeline, never an agent's merge.
 	AIGateStatus GateStatus `json:"aiGateStatus"`
 
 	// Applicable is false when the changeset contained no files the engine understands. Such a
@@ -124,8 +149,15 @@ type Certificate struct {
 	// attributable to an exact input.
 	InputDigest string `json:"inputDigest"`
 
-	// Findings is sorted by File, then Line, then RuleID.
+	// Findings is sorted by File, then Line, then RuleID. Waived findings are in Waived.
 	Findings []Finding `json:"findings"`
+
+	// Waived lists findings a policy waiver downgraded to advisory, each with the reason it was
+	// accepted and the day the waiver lapses. They are reported, never suppressed.
+	Waived []WaivedFinding `json:"waived"`
+
+	// PolicyDigest is the SHA-256 over the resolved policy, or "" when none applied.
+	PolicyDigest string `json:"policyDigest,omitempty"`
 
 	// UndoPlan is the rollback script, in reverse order of application. When any finding is
 	// irreversible or unknown it is replaced by a statement that no complete undo exists.
@@ -151,25 +183,28 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 	out := Certificate{
 		SchemaVersion:  in.SchemaVersion,
 		Grade:          Grade(in.Grade),
+		EffectiveGrade: Grade(in.EffectiveGrade),
 		AIGateStatus:   GateStatus(in.AIGateStatus),
 		Applicable:     in.Applicable,
 		InputDigest:    in.InputDigest,
+		PolicyDigest:   in.PolicyDigest,
 		Findings:       make([]Finding, 0, len(in.Findings)),
+		Waived:         make([]WaivedFinding, 0, len(in.Waived)),
 		UndoPlan:       make([]string, 0, len(in.UndoPlan)),
 		Blockers:       make([]string, 0, len(in.Blockers)),
 		DownMigrations: make([]DownMigrationStatus, 0, len(in.DownMigrations)),
 	}
 
 	for _, f := range in.Findings {
-		out.Findings = append(out.Findings, Finding{
-			RuleID:        f.RuleID,
-			File:          f.File,
-			Line:          f.Line,
-			Statement:     f.Statement,
-			Reversibility: Reversibility(f.Reversibility),
-			LockHazard:    LockHazard(f.LockHazard),
-			Rationale:     f.Rationale,
-			UndoStep:      string(f.UndoStep),
+		out.Findings = append(out.Findings, fromDomainFinding(f))
+	}
+
+	for _, w := range in.Waived {
+		out.Waived = append(out.Waived, WaivedFinding{
+			Finding:    fromDomainFinding(w.Finding),
+			Reason:     w.Reason,
+			Expires:    w.Expires,
+			ApprovedBy: w.ApprovedBy,
 		})
 	}
 
@@ -192,4 +227,17 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 	}
 
 	return out
+}
+
+func fromDomainFinding(f domain.Finding) Finding {
+	return Finding{
+		RuleID:        f.RuleID,
+		File:          f.File,
+		Line:          f.Line,
+		Statement:     f.Statement,
+		Reversibility: Reversibility(f.Reversibility),
+		LockHazard:    LockHazard(f.LockHazard),
+		Rationale:     f.Rationale,
+		UndoStep:      string(f.UndoStep),
+	}
 }

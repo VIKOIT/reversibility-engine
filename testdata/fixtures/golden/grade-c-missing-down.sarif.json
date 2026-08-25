@@ -6,7 +6,7 @@
       "tool": {
         "driver": {
           "name": "reversibility-engine",
-          "version": "1.0.0",
+          "version": "1.1.0",
           "informationUri": "https://github.com/VIKOIT/reversibility-engine",
           "rules": [
             {
@@ -60,10 +60,11 @@
           "exitCodeDescription": "grade C, AI merge gate FAIL",
           "properties": {
             "grade": "C",
+            "effectiveGrade": "C",
             "aiGateStatus": "FAIL",
             "applicable": true,
             "inputDigest": "900c272e7e264d22031f0b8b00deb44425ebe2f9290670f11c9067a69677ba12",
-            "certificateSchemaVersion": "1.0.0"
+            "certificateSchemaVersion": "1.1.0"
           }
         }
       ]

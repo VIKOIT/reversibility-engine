@@ -1,6 +1,7 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "grade": "B",
+  "effectiveGrade": "B",
   "aiGateStatus": "FAIL",
   "applicable": true,
   "inputDigest": "160d9f861d205a505ad372b8134720cd1f81f3794078c9e6369981b81e1fd690",
@@ -26,6 +27,7 @@
       "undoStep": "ALTER TABLE customers RENAME COLUMN full_name TO name;"
     }
   ],
+  "waived": [],
   "undoPlan": [
     "ALTER TABLE customers RENAME COLUMN full_name TO name;",
     "ALTER TABLE purchase_orders RENAME TO orders;"

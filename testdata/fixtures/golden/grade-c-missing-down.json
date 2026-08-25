@@ -1,6 +1,7 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "grade": "C",
+  "effectiveGrade": "C",
   "aiGateStatus": "FAIL",
   "applicable": true,
   "inputDigest": "900c272e7e264d22031f0b8b00deb44425ebe2f9290670f11c9067a69677ba12",
@@ -16,6 +17,7 @@
       "undoStep": "ALTER TABLE orders DROP COLUMN notes;"
     }
   ],
+  "waived": [],
   "undoPlan": [
     "ALTER TABLE orders DROP COLUMN notes;"
   ],

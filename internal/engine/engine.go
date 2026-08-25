@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"time"
 
 	"github.com/VIKOIT/reversibility-engine/internal/analyzer"
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
+	"github.com/VIKOIT/reversibility-engine/internal/policy"
 )
 
 // Engine orchestrates analyzers and turns their findings into a certificate.
@@ -20,10 +22,28 @@ import (
 type Engine struct {
 	analyzers []analyzer.Analyzer
 	log       *slog.Logger
+	policy    *policy.Policy
+	today     time.Time
 }
 
 // Option configures an Engine.
 type Option func(*Engine)
+
+// WithPolicy sets the resolved policy. A nil policy means none, which is the default and must
+// behave exactly as it did before policies existed.
+func WithPolicy(p *policy.Policy) Option {
+	return func(e *Engine) { e.policy = p }
+}
+
+// WithToday fixes the day waiver expiry is measured against.
+//
+// It exists so that expiry is testable and so a past run can be reproduced. It defaults to the
+// system date, which is the only value in this codebase that is not derived from the input —
+// hence it is injected rather than read at the point of use, where it would be untestable and
+// invisible.
+func WithToday(t time.Time) Option {
+	return func(e *Engine) { e.today = t }
+}
 
 // WithLogger sets the logger. Logging is diagnostic only: nothing the engine logs affects a
 // grade, and a certificate never contains anything that varies between runs.
@@ -43,6 +63,7 @@ func New(analyzers []analyzer.Analyzer, opts ...Option) *Engine {
 	e := &Engine{
 		analyzers: append([]analyzer.Analyzer(nil), analyzers...),
 		log:       slog.New(slog.NewTextHandler(discard{}, nil)),
+		today:     time.Now(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -67,7 +88,13 @@ func New(analyzers []analyzer.Analyzer, opts ...Option) *Engine {
 // This method owns the single recover boundary in the codebase. A panic anywhere beneath it
 // becomes grade F with RuleID ENGINE_PANIC — never a pass, never a silent success.
 func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert domain.ReversibilityCertificate, err error) {
+	// The policy is an input to the verdict, so it is part of what the digest attributes the
+	// verdict to. It is mixed in only when a policy exists, which keeps every digest ever
+	// produced without one exactly as it was.
 	digest := InputDigest(files)
+	if e.policy != nil {
+		digest = combineDigests(digest, e.policy.Digest)
+	}
 
 	defer func() {
 		r := recover()
@@ -92,23 +119,49 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 
 	domain.SortFindings(findings)
 
-	in := scoreInput{
-		findings:       findings,
-		downMigrations: downMigrations,
-		analyzerErrors: analyzerErrors,
-		applicable:     e.applicable(files),
+	// A policy that cannot be resolved is a broken run, not a run without a policy. Continuing
+	// would enforce something nobody configured.
+	decision, err := e.policy.Apply(findings, e.today)
+	if err != nil {
+		wrapped := fmt.Errorf("engine: %w", err)
+		return failedCertificate(digest, wrapped), wrapped
 	}
 
-	grade, blockers := score(in)
+	applicable := e.applicable(files)
+
+	// Grade is computed from every finding, waived ones included. It states what the evidence
+	// says about the change, and no configuration may move it: a waiver accepts a risk, it does
+	// not make a DROP TABLE reversible.
+	grade, blockers := score(scoreInput{
+		findings:       decision.All,
+		downMigrations: downMigrations,
+		analyzerErrors: analyzerErrors,
+		applicable:     applicable,
+	})
+
+	// EffectiveGrade is the same scoring with waived findings set aside. It is what a CI
+	// threshold compares against, and it is deliberately NOT what AIGateStatus follows.
+	effective := grade
+	if len(decision.Waived) > 0 {
+		effective, _ = score(scoreInput{
+			findings:       decision.Findings,
+			downMigrations: downMigrations,
+			analyzerErrors: analyzerErrors,
+			applicable:     applicable,
+		})
+	}
 
 	cert = domain.ReversibilityCertificate{
 		SchemaVersion:  domain.SchemaVersion,
 		Grade:          grade,
+		EffectiveGrade: effective,
 		AIGateStatus:   grade.Gate(),
-		Applicable:     in.applicable,
+		Applicable:     applicable,
 		InputDigest:    digest,
-		Findings:       nonNilFindings(findings),
-		UndoPlan:       nonNilPlan(buildUndoPlan(findings)),
+		PolicyDigest:   e.policyDigest(),
+		Findings:       nonNilFindings(decision.Findings),
+		Waived:         nonNilWaived(decision.Waived),
+		UndoPlan:       nonNilPlan(buildUndoPlan(decision.All)),
 		Blockers:       nonNilStrings(blockers),
 		DownMigrations: nonNilStatuses(downMigrations),
 	}
@@ -192,9 +245,10 @@ func panicCertificate(digest string, r any) domain.ReversibilityCertificate {
 	}
 
 	return domain.ReversibilityCertificate{
-		SchemaVersion: domain.SchemaVersion,
-		Grade:         domain.GradeF,
-		AIGateStatus:  domain.GradeF.Gate(),
+		SchemaVersion:  domain.SchemaVersion,
+		Grade:          domain.GradeF,
+		EffectiveGrade: domain.GradeF,
+		AIGateStatus:   domain.GradeF.Gate(),
 
 		// Applicable stays true: the engine was asked for an opinion and failed to produce one,
 		// which is not the same as having nothing to say.
@@ -212,6 +266,7 @@ func failedCertificate(digest string, err error) domain.ReversibilityCertificate
 	return domain.ReversibilityCertificate{
 		SchemaVersion:  domain.SchemaVersion,
 		Grade:          domain.GradeF,
+		EffectiveGrade: domain.GradeF,
 		AIGateStatus:   domain.GradeF.Gate(),
 		Applicable:     true,
 		InputDigest:    digest,
@@ -236,9 +291,10 @@ func UnavailableCertificate(ruleID string, cause error) domain.ReversibilityCert
 		"The changeset could not be retrieved, so nothing about it could be analyzed: %v.", cause)
 
 	return domain.ReversibilityCertificate{
-		SchemaVersion: domain.SchemaVersion,
-		Grade:         domain.GradeF,
-		AIGateStatus:  domain.GradeF.Gate(),
+		SchemaVersion:  domain.SchemaVersion,
+		Grade:          domain.GradeF,
+		EffectiveGrade: domain.GradeF,
+		AIGateStatus:   domain.GradeF.Gate(),
 
 		// Applicable stays true: the engine was asked for an opinion and could not form one,
 		// which is not the same as having nothing to say.
@@ -299,3 +355,18 @@ func nonNilStatuses(in []domain.DownMigrationStatus) []domain.DownMigrationStatu
 type discard struct{}
 
 func (discard) Write(p []byte) (int, error) { return len(p), nil }
+
+func nonNilWaived(in []domain.WaivedFinding) []domain.WaivedFinding {
+	if in == nil {
+		return []domain.WaivedFinding{}
+	}
+	return in
+}
+
+// policyDigest returns the digest of the policy in force, or "" when there is none.
+func (e *Engine) policyDigest() string {
+	if e.policy == nil {
+		return ""
+	}
+	return e.policy.Digest
+}

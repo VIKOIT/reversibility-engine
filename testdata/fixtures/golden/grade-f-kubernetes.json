@@ -1,6 +1,7 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "grade": "F",
+  "effectiveGrade": "F",
   "aiGateStatus": "FAIL",
   "applicable": true,
   "inputDigest": "e83a6aad8b31bb8fb4ce922e1dddcccb1097283ce17935bf07dc58d96c807c17",
@@ -24,6 +25,7 @@
       "rationale": "Deleting Namespace legacy cascades to every object inside it, which is among the largest blast radii in Kubernetes and is not undone by re-applying the manifest."
     }
   ],
+  "waived": [],
   "undoPlan": [
     "-- NO COMPLETE UNDO EXISTS. This changeset cannot be fully reversed.",
     "-- The following changes have no reverse:",

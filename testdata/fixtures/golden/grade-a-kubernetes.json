@@ -1,6 +1,7 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "grade": "A",
+  "effectiveGrade": "A",
   "aiGateStatus": "PASS",
   "applicable": true,
   "inputDigest": "b10cfa10960f1f66198e1ea86f4a7555ae112d13269f365cbf63ca311e4eeb96",
@@ -16,6 +17,7 @@
       "undoStep": "kubectl set image Deployment/api api=ghcr.io/acme/api@sha256:3f79bb7b435b05321651daefd374cdc681dc06faa65e374e38337b88ca046dea"
     }
   ],
+  "waived": [],
   "undoPlan": [
     "kubectl set image Deployment/api api=ghcr.io/acme/api@sha256:3f79bb7b435b05321651daefd374cdc681dc06faa65e374e38337b88ca046dea"
   ],

@@ -51,3 +51,18 @@ func writeField(h interface{ Write([]byte) (int, error) }, b []byte) {
 	_, _ = h.Write(length[:])
 	_, _ = h.Write(b)
 }
+
+// combineDigests folds a second digest into the input digest.
+//
+// The two are length-prefixed and rehashed rather than concatenated, for the same reason every
+// field inside InputDigest is: a digest that can collide is not evidence of anything.
+//
+// It is applied only when a policy exists, so every digest ever produced without one is
+// unchanged — which is what lets a stored certificate from before policies existed still be
+// compared against a rerun.
+func combineDigests(input, policy string) string {
+	h := sha256.New()
+	writeField(h, []byte(input))
+	writeField(h, []byte(policy))
+	return hex.EncodeToString(h.Sum(nil))
+}

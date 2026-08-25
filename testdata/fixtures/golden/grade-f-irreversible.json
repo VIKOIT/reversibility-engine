@@ -1,6 +1,7 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "grade": "F",
+  "effectiveGrade": "F",
   "aiGateStatus": "FAIL",
   "applicable": true,
   "inputDigest": "7404433e87050328312a537aed5f48e2f8e5f8fef4d3c185ed21f03904be2169",
@@ -15,6 +16,7 @@
       "rationale": "Dropping table legacy_orders destroys every row it holds; recreating the table restores the shape but not the data."
     }
   ],
+  "waived": [],
   "undoPlan": [
     "-- NO COMPLETE UNDO EXISTS. This changeset cannot be fully reversed.",
     "-- The following changes have no reverse:",

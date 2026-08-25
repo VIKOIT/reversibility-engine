@@ -234,7 +234,28 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 
 	// Downstream merge gates parse this. Changing it is a deliberate, breaking act — if this
 	// test fails, the version was bumped, and that must be intentional.
-	if domain.SchemaVersion != "1.0.0" {
-		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.0.0")
+	//
+	// 1.1.0 added EffectiveGrade, Waived, and PolicyDigest for the policy file. It is a minor
+	// bump because nothing was removed or given a new meaning: a consumer reading 1.0.0 fields
+	// out of a 1.1.0 certificate still gets exactly what it did before.
+	if domain.SchemaVersion != "1.1.0" {
+		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.1.0")
+	}
+}
+
+// EffectiveGrade must never be the field an agent gates on. Grade is the measurement; a policy
+// may move EffectiveGrade and may not move Grade, and the two must not be confused.
+func TestGateFollowsGradeNotEffectiveGrade(t *testing.T) {
+	t.Parallel()
+
+	cert := domain.ReversibilityCertificate{
+		Grade:          domain.GradeF,
+		EffectiveGrade: domain.GradeA,
+		AIGateStatus:   domain.GradeF.Gate(),
+	}
+
+	if cert.AIGateStatus != domain.GateFail {
+		t.Errorf("AIGateStatus = %q for a grade F change with everything waived, want FAIL; "+
+			"a waiver must never authorise an agent to merge", cert.AIGateStatus)
 	}
 }

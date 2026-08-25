@@ -44,6 +44,7 @@ func (Markdown) Render(w io.Writer, cert domain.ReversibilityCertificate) error 
 	writeHeader(&b, cert)
 	writeBlockers(&b, cert)
 	writeFindings(&b, cert)
+	writeWaived(&b, cert)
 	writeUndoPlan(&b, cert)
 	writeDownMigrations(&b, cert)
 	writeFooter(&b, cert)
@@ -75,8 +76,55 @@ func writeHeader(b *strings.Builder, cert domain.ReversibilityCertificate) {
 
 	fmt.Fprintf(b, "| | |\n| --- | --- |\n")
 	fmt.Fprintf(b, "| **Grade** | %s |\n", cert.Grade)
+
+	// The two grades are shown together only when they differ. Printing an identical pair on
+	// every certificate would train readers to skip the row, which is the row that matters on
+	// the one change where a waiver applied.
+	if cert.EffectiveGrade != "" && cert.EffectiveGrade != cert.Grade {
+		fmt.Fprintf(b, "| **Grade after waivers** | %s |\n", cert.EffectiveGrade)
+	}
+
 	fmt.Fprintf(b, "| **AI merge gate** | %s |\n", gate)
 	fmt.Fprintf(b, "| **Findings** | %d |\n", len(cert.Findings))
+
+	if len(cert.Waived) > 0 {
+		fmt.Fprintf(b, "| **Waived** | %d |\n", len(cert.Waived))
+	}
+
+	b.WriteString("\n")
+}
+
+// writeWaived reports the findings a policy accepted.
+//
+// They are printed, never omitted. A waiver is a decision to accept a specific risk, and the
+// only way a reviewer can judge whether that decision still holds is to see what was accepted,
+// who accepted it, and when it lapses.
+func writeWaived(b *strings.Builder, cert domain.ReversibilityCertificate) {
+	if len(cert.Waived) == 0 {
+		return
+	}
+
+	b.WriteString("### Waived\n\n")
+	b.WriteString("A policy waiver accepted each of these. They still count toward the grade above — " +
+		"a waiver accepts a risk, it does not remove one — and they no longer block the pipeline.\n\n")
+	b.WriteString("| Rule | Location | Reversibility | Reason | Expires | Approved by |\n")
+	b.WriteString("| --- | --- | --- | --- | --- | --- |\n")
+
+	for _, w := range cert.Waived {
+		approver := w.ApprovedBy
+		if approver == "" {
+			approver = "—"
+		}
+
+		fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s | %s |\n",
+			mdCode(w.Finding.RuleID),
+			mdEscape(findingLocation(w.Finding)),
+			mdEscape(string(w.Finding.Reversibility)),
+			mdEscape(w.Reason),
+			mdEscape(w.Expires),
+			mdEscape(approver))
+	}
+
 	b.WriteString("\n")
 }
 

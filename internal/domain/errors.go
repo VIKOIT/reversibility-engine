@@ -34,4 +34,9 @@ var (
 
 	// ErrAnalyzerPanic means an analyzer panicked and the engine's recover boundary caught it.
 	ErrAnalyzerPanic = errors.New("domain: analyzer panicked")
+
+	// ErrInvalidPolicy means a policy file is malformed, or asks for something a policy is not
+	// permitted to ask for. It is never survivable: a run that could not resolve its own
+	// configuration does not know what it was supposed to enforce.
+	ErrInvalidPolicy = errors.New("domain: invalid policy")
 )

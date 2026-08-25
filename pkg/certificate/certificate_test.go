@@ -18,11 +18,12 @@ func TestFromDomainCarriesEveryField(t *testing.T) {
 	t.Parallel()
 
 	in := domain.ReversibilityCertificate{
-		SchemaVersion: domain.SchemaVersion,
-		Grade:         domain.GradeC,
-		AIGateStatus:  domain.GateFail,
-		Applicable:    true,
-		InputDigest:   "deadbeef",
+		SchemaVersion:  domain.SchemaVersion,
+		Grade:          domain.GradeC,
+		EffectiveGrade: domain.GradeC,
+		AIGateStatus:   domain.GateFail,
+		Applicable:     true,
+		InputDigest:    "deadbeef",
 		Findings: []domain.Finding{{
 			RuleID:        "PG012",
 			File:          "migrations/0001.up.sql",
@@ -49,11 +50,12 @@ func TestFromDomainCarriesEveryField(t *testing.T) {
 	got := certificate.FromDomain(in)
 
 	want := certificate.Certificate{
-		SchemaVersion: domain.SchemaVersion,
-		Grade:         certificate.GradeC,
-		AIGateStatus:  certificate.GateFail,
-		Applicable:    true,
-		InputDigest:   "deadbeef",
+		SchemaVersion:  domain.SchemaVersion,
+		Grade:          certificate.GradeC,
+		AIGateStatus:   certificate.GateFail,
+		Applicable:     true,
+		EffectiveGrade: certificate.GradeC,
+		InputDigest:    "deadbeef",
 		Findings: []certificate.Finding{{
 			RuleID:        "PG012",
 			File:          "migrations/0001.up.sql",
@@ -64,6 +66,7 @@ func TestFromDomainCarriesEveryField(t *testing.T) {
 			Rationale:     "a rename breaks the previous application version",
 			UndoStep:      "ALTER TABLE purchase_orders RENAME TO orders;",
 		}},
+		Waived:   []certificate.WaivedFinding{},
 		UndoPlan: []string{"ALTER TABLE purchase_orders RENAME TO orders;"},
 		Blockers: []string{"a blocker"},
 		DownMigrations: []certificate.DownMigrationStatus{{
@@ -203,7 +206,10 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 	t.Parallel()
 
 	// Downstream merge gates pin this. A change here is a deliberate, breaking act.
-	if certificate.SchemaVersion != "1.0.0" {
-		t.Errorf("SchemaVersion = %q, want 1.0.0", certificate.SchemaVersion)
+	//
+	// 1.1.0 added EffectiveGrade, Waived, and PolicyDigest. Nothing was removed or redefined,
+	// so a consumer written against 1.0.0 still reads exactly what it read before.
+	if certificate.SchemaVersion != "1.1.0" {
+		t.Errorf("SchemaVersion = %q, want 1.1.0", certificate.SchemaVersion)
 	}
 }

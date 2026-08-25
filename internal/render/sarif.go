@@ -93,6 +93,19 @@ type sarifResult struct {
 	Level     string          `json:"level"`
 	Message   sarifText       `json:"message"`
 	Locations []sarifLocation `json:"locations"`
+
+	// Suppressions marks a finding a policy waiver accepted. SARIF calls this out separately
+	// rather than by lowering the level, which is exactly the distinction a waiver draws: the
+	// finding is as severe as it ever was, and somebody has accepted it. Code scanning shows
+	// suppressed results as closed rather than hiding them.
+	Suppressions []sarifSuppression `json:"suppressions,omitempty"`
+}
+
+type sarifSuppression struct {
+	// Kind is always "external": the decision lives in .reversibility.yml, not in the code and
+	// not in this tool.
+	Kind          string `json:"kind"`
+	Justification string `json:"justification"`
 }
 
 type sarifLocation struct {
@@ -121,11 +134,13 @@ type sarifInvocation struct {
 }
 
 type sarifRunProps struct {
-	Grade         string `json:"grade"`
-	AIGateStatus  string `json:"aiGateStatus"`
-	Applicable    bool   `json:"applicable"`
-	InputDigest   string `json:"inputDigest"`
-	SchemaVersion string `json:"certificateSchemaVersion"`
+	Grade          string `json:"grade"`
+	EffectiveGrade string `json:"effectiveGrade"`
+	AIGateStatus   string `json:"aiGateStatus"`
+	Applicable     bool   `json:"applicable"`
+	InputDigest    string `json:"inputDigest"`
+	PolicyDigest   string `json:"policyDigest,omitempty"`
+	SchemaVersion  string `json:"certificateSchemaVersion"`
 }
 
 // Render implements Renderer.
@@ -138,9 +153,9 @@ func (SARIF) Render(w io.Writer, cert domain.ReversibilityCertificate) error {
 				Name:           toolName,
 				Version:        toolVersion,
 				InformationURI: toolURI,
-				Rules:          sarifRules(cert.Findings),
+				Rules:          sarifRules(allFindings(cert)),
 			}},
-			Results: sarifResults(cert.Findings),
+			Results: append(sarifResults(cert.Findings), sarifWaivedResults(cert.Waived)...),
 			Invocations: []sarifInvocation{{
 				// A failing grade is a successful execution: the engine did its job. Reporting
 				// otherwise would make code scanning treat a correctly-detected destructive
@@ -148,11 +163,13 @@ func (SARIF) Render(w io.Writer, cert domain.ReversibilityCertificate) error {
 				ExecutionSuccessful: true,
 				ExitCodeDescription: fmt.Sprintf("grade %s, AI merge gate %s", cert.Grade, cert.AIGateStatus),
 				Properties: sarifRunProps{
-					Grade:         string(cert.Grade),
-					AIGateStatus:  string(cert.AIGateStatus),
-					Applicable:    cert.Applicable,
-					InputDigest:   cert.InputDigest,
-					SchemaVersion: cert.SchemaVersion,
+					Grade:          string(cert.Grade),
+					EffectiveGrade: string(cert.EffectiveGrade),
+					AIGateStatus:   string(cert.AIGateStatus),
+					Applicable:     cert.Applicable,
+					InputDigest:    cert.InputDigest,
+					PolicyDigest:   cert.PolicyDigest,
+					SchemaVersion:  cert.SchemaVersion,
 				},
 			}},
 		}},
@@ -258,4 +275,39 @@ func sarifMessage(f domain.Finding) string {
 
 func shortDescription(f domain.Finding) string {
 	return fmt.Sprintf("%s change with %s lock hazard", f.Reversibility, f.LockHazard)
+}
+
+// allFindings returns every finding the certificate carries, waived ones included.
+//
+// The rule declarations have to cover both: SARIF requires each result to reference a declared
+// rule, and a waived result that named an undeclared rule would be an invalid log.
+func allFindings(cert domain.ReversibilityCertificate) []domain.Finding {
+	out := make([]domain.Finding, 0, len(cert.Findings)+len(cert.Waived))
+	out = append(out, cert.Findings...)
+	for _, w := range cert.Waived {
+		out = append(out, w.Finding)
+	}
+	return out
+}
+
+// sarifWaivedResults renders waived findings as suppressed results.
+//
+// The level is unchanged. A waiver does not make a finding less severe — it records that
+// somebody accepted it — and lowering the level instead would hide the severity from every
+// consumer that reads the log without looking at suppressions.
+func sarifWaivedResults(waived []domain.WaivedFinding) []sarifResult {
+	findings := make([]domain.Finding, 0, len(waived))
+	for _, w := range waived {
+		findings = append(findings, w.Finding)
+	}
+
+	results := sarifResults(findings)
+	for i, w := range waived {
+		results[i].Suppressions = []sarifSuppression{{
+			Kind:          "external",
+			Justification: fmt.Sprintf("%s (waiver expires %s)", w.Reason, w.Expires),
+		}}
+	}
+
+	return results
 }

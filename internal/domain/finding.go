@@ -74,3 +74,23 @@ func SortFindings(findings []Finding) {
 		return a.RuleID < b.RuleID
 	})
 }
+
+// WaivedFinding is a finding a policy downgraded to advisory.
+//
+// The finding is carried whole rather than summarised. A waiver is a decision to accept a
+// specific risk, and a reader can only judge whether that decision still holds if the thing
+// being accepted is still in front of them — which is also why a waived finding is reported at
+// all rather than filtered out.
+type WaivedFinding struct {
+	Finding Finding `json:"finding"`
+
+	// Reason is why the risk was accepted. A waiver cannot exist without one.
+	Reason string `json:"reason"`
+
+	// Expires is the last day the waiver applies, as YYYY-MM-DD. After it, the finding
+	// returns on its own.
+	Expires string `json:"expires"`
+
+	// ApprovedBy is who accepted the risk, if the policy said.
+	ApprovedBy string `json:"approvedBy,omitempty"`
+}

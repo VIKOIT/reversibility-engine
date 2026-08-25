@@ -1,6 +1,7 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "grade": "F",
+  "effectiveGrade": "F",
   "aiGateStatus": "FAIL",
   "applicable": true,
   "inputDigest": "8f1b5f8e1fe0efd8c4ec1c3c3fba4e1fcd79b552facd55c88a93ff02b4b90ea6",
@@ -24,6 +25,7 @@
       "rationale": "this statement matches no rule in the PostgreSQL classification table, and an unclassified change is treated as unsafe"
     }
   ],
+  "waived": [],
   "undoPlan": [
     "-- NO COMPLETE UNDO EXISTS. This changeset cannot be fully reversed.",
     "-- The following changes have no reverse:",
