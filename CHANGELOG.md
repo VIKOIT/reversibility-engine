@@ -18,6 +18,44 @@ move:
 
 ### Added
 
+**Policy file — `.reversibility.yml`.** Discovered by walking up from the analysis
+path, or named with `--config`, or ignored with `--no-config`. It carries a gate
+threshold, `ignore` globs, expiring waivers, and tighten-only overrides.
+
+A waiver requires a `reason` and an `expires` date; missing either is a
+configuration error that exits 2, not a warning. `expires` is a calendar day, at
+most 180 days out, and an expired waiver is inert — the finding returns with no
+edit to the file. A waiver may not cover an `UNKNOWN` finding, and waived findings
+are reported under a new `Waived` section rather than suppressed.
+
+**A waiver never improves the measurement.** `grade` is what the evidence says and
+no policy setting moves it; the new `effectiveGrade` is `grade` with waived
+findings set aside and is what a CI threshold compares. `aiGateStatus` follows
+`grade`, so a waiver can unblock a human's pipeline and can never authorise an
+autonomous agent to merge. Without a policy, `effectiveGrade` equals `grade`.
+
+The resolved policy is hashed into `inputDigest` and reported as `policyDigest`.
+The hash covers the resolved configuration rather than the file's bytes, so
+reformatting or editing a comment does not change a certificate.
+
+**The certificate schema is now `1.1.0`** — `effectiveGrade`, `waived`, and
+`policyDigest` were added. Nothing was removed or given a new meaning, so a
+consumer written against `1.0.0` reads exactly what it read before.
+
+### Fixed
+
+- **The `fs` provider tested its include predicate against the absolute path on
+  disk**, so a policy `ignore` of `legacy/**` matched nothing and the files it
+  named were analyzed anyway. Extension checks never noticed, because they only
+  look at a suffix. The predicate now sees the path as it appears in the
+  changeset, which is what the git and GitHub providers already did.
+- **The engine analyzed its own configuration.** `.reversibility.yml` is YAML, so
+  the Kubernetes analyzer claimed it and correctly reported `K8S014`/UNKNOWN for a
+  document with no kind — meaning adopting a policy graded your repository F
+  because of the file you adopted it with.
+
+### Added — earlier in this release
+
 **Git ref resolution.** `revctl check --base <ref>` resolves a changeset from two
 git refs instead of two directories, with `--head` defaulting to `HEAD` and path
 arguments acting as pathspecs that scope the comparison to a subtree. The

@@ -160,6 +160,72 @@ grade A is the only verdict that permits an agent to merge.
 
 ---
 
+## Policy — `.reversibility.yml`
+
+A gate with no legitimate escape hatch gets switched off entirely the first time
+it is wrong, and a gate that is switched off protects nothing. The escape hatch is
+a file, discovered by walking up from the analysis path:
+
+```yaml
+version: 1
+gate: A                    # minimum passing grade
+
+ignore:
+  - "legacy/**"
+  - "**/*.generated.sql"
+
+waivers:
+  - rule: PG012
+    path: "migrations/0031_*.sql"
+    reason: "expand-contract; old code removed in #482"
+    expires: 2026-10-01
+    approved_by: "vikoit"
+
+overrides:                 # tighten only — never loosen
+  - rule: K8S008
+    severity: IRREVERSIBLE
+```
+
+**A waiver never improves the measurement.** The certificate keeps two numbers:
+
+| Field | Meaning |
+| --- | --- |
+| `grade` | What the evidence says. A `DROP TABLE` is irreversible whoever signed off on it, so no policy setting moves this. |
+| `effectiveGrade` | `grade` with waived findings set aside. This is what a CI threshold compares — and it equals `grade` whenever no policy applied, so it is always the right field to gate on. |
+| `aiGateStatus` | PASS only when `grade` is A. It follows the measurement, so **a waiver can unblock your pipeline and can never let an autonomous agent merge.** |
+
+The rules, all enforced:
+
+- `reason` and `expires` are **required**. Missing either is a configuration
+  error and exits 2 — not a warning, because a warning in a CI log is not read
+  and the waiver would apply anyway.
+- `expires` is a date, never a duration, and at most 180 days out. A duration is
+  relative to a moment nobody records, so it renews on every run and never
+  expires. An expired waiver is inert and the finding returns on its own.
+- A waived finding is **reported, never deleted** — it appears under `Waived`
+  with its reason and expiry, and as a SARIF `suppression` at its original
+  severity. Silent suppression is how a safety tool stops being one.
+- A waiver **cannot cover an `UNKNOWN` finding or an analyzer error.** Accepting a
+  risk nobody has characterised is not a decision anyone is in a position to make.
+- `overrides` may only make a rule stricter. One that weakens a finding is a
+  configuration error.
+- The resolved policy is hashed into `inputDigest` and reported as
+  `policyDigest`, so a verdict is attributable to its configuration. Reformatting
+  the file or editing a comment does not change either.
+
+> **A waiver's `path` matches the finding's `file` exactly as the certificate
+> prints it.** Under the action and `--base` that is repository-relative
+> (`migrations/0031_backfill.sql`), which is what the example above assumes.
+> Running `revctl check ./migrations` by hand reports paths relative to the
+> directory you named, so the same waiver would need `path: "0031_*.sql"`. A
+> pattern that matches nothing is silently inert rather than approximately
+> applied — over-matching a waiver is the one direction this must not fail in.
+
+`--config` names a policy explicitly; `--no-config` ignores one entirely, which is
+how you see what the gate says without it.
+
+---
+
 ## What it checks
 
 | Domain | Coverage |

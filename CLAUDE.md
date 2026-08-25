@@ -62,7 +62,7 @@ The v0.2 plan continues the same way. Each session is written up in full in
 | --- | --- | --- |
 | S8 | Git ref resolution: a `gitProvider` behind `--base` / `--head`. | **BUILT — awaiting approval** |
 | S9 | GitHub Action (`action.yml`) + release workflow. | **BUILT — awaiting approval** |
-| S10 | Policy file `.reversibility.yml` with expiring waivers. | |
+| S10 | Policy file `.reversibility.yml` with expiring waivers. | **BUILT — awaiting approval** |
 | S11 | Production context snapshots (`revctl snapshot`, `--context`). | |
 | S12 | Terraform plan analyzer. | |
 
@@ -81,6 +81,7 @@ internal/analyzer/postgres/parser/   SQLParser interface, isolates cgo pg_query_
 internal/analyzer/kubernetes/
 internal/engine/                     Registry, orchestrator, scorer
 internal/provider/                   FileProvider interface: fs, git, github, fake
+internal/policy/                     .reversibility.yml: parse, validate, apply
 internal/render/                     json, markdown, sarif
 internal/delivery/cli/
 internal/delivery/github/
@@ -108,7 +109,7 @@ testdata/fixtures/
 | `github.com/spf13/cobra` | `internal/delivery/cli` | S5 (in go.mod) |
 | `github.com/pganalyze/pg_query_go/v5` | `internal/analyzer/postgres/parser` | S2, **cgo** (in go.mod) |
 | `github.com/google/go-github/v66` | `internal/delivery/github`, `internal/provider` | S6 (in go.mod) |
-| `sigs.k8s.io/yaml` (JSON-typed decode) + `gopkg.in/yaml.v3` (stream decoder) | `internal/analyzer/kubernetes` | S3 |
+| `sigs.k8s.io/yaml` (JSON-typed decode) + `gopkg.in/yaml.v3` (stream decoder) | `internal/analyzer/kubernetes`; `sigs.k8s.io/yaml` alone in `internal/policy` | S3, S10 |
 | `github.com/google/go-cmp` | tests only | S1 |
 
 Adding anything else requires the owner's approval. `go.mod` is intentionally dependency-free
@@ -151,14 +152,17 @@ type Finding struct {
 }
 
 type ReversibilityCertificate struct {
-    SchemaVersion string    // "1.0.0" — bump on any breaking field change
-    Grade         Grade
-    AIGateStatus  string    // PASS | FAIL
-    Applicable    bool
-    InputDigest   string    // SHA256 over sorted (path, content)
-    Findings      []Finding // sorted by File, then Line, then RuleID
-    UndoPlan      []UndoStep
-    Blockers      []string  // human-readable reasons for F
+    SchemaVersion  string    // "1.1.0" — bump on any breaking field change
+    Grade          Grade     // the measurement; no policy may move it
+    EffectiveGrade Grade     // Grade minus waived findings; what CI compares (S10)
+    AIGateStatus   string    // PASS | FAIL — follows Grade, never EffectiveGrade
+    Applicable     bool
+    InputDigest    string    // SHA256 over sorted (path, content), plus the policy if any
+    PolicyDigest   string    // SHA256 over the resolved policy, "" if none (S10)
+    Findings       []Finding // sorted by File, then Line, then RuleID
+    Waived         []WaivedFinding // findings a live waiver accepted (S10)
+    UndoPlan       []UndoStep
+    Blockers       []string  // human-readable reasons for F
 }
 ```
 
@@ -385,6 +389,74 @@ Prereleases are excluded: `v2.1.0-rc.1` must never become what `@v2` means.
 `.github/workflows/action-selftest.yml` runs the action against this repository's own fixtures
 and asserts the grade, the gate status, the finding count, **and that a grade F actually fails
 the job**. An action that reports F and exits zero is not a gate.
+
+## 11f. Policy file — as built in S10
+
+`.reversibility.yml`, discovered by walking up from the analysis path and stopping at the
+directory holding `.git`. `--config` names one explicitly; `--no-config` discards one.
+
+**The one thing a policy may never do is improve the measurement.** §14 says configuration must
+not improve a grade, and S10 says a waiver downgrades a finding to advisory. Both are honoured by
+splitting the number in two, which is the owner's ruling:
+
+| Field | Means | Moved by a policy? |
+| --- | --- | --- |
+| `Grade` | what the evidence says about the change | **never** |
+| `EffectiveGrade` | `Grade` with waived findings set aside | yes — this is what CI compares |
+| `AIGateStatus` | PASS iff `Grade` is A | **never** |
+
+So a waiver unblocks a human's pipeline and **can never authorise an autonomous agent to merge**.
+`EffectiveGrade` equals `Grade` whenever no policy applied, so a consumer always has exactly one
+field to gate on and never has to know whether a policy existed.
+
+- **A waiver requires `reason` and `expires`, and both are errors rather than warnings.** A
+  warning in a CI log is not read, and the waiver would take effect anyway — which is the
+  unexplained suppression this design exists to prevent. Exit code 2: a run that could not
+  resolve its own configuration does not know what it was meant to enforce.
+- **`expires` is a date, never a duration, capped at 180 days from the parse date.** "90d" is
+  relative to a moment nobody records, so it renews on every read and never expires at all.
+- **An expired waiver is inert.** The finding returns with no edit and no announcement.
+- **A waiver is reported, never deleted.** Waived findings appear in the certificate's `Waived`
+  section with their reason and expiry, in Markdown, JSON, and as SARIF `suppressions` — SARIF
+  keeps the original level, because a waiver records acceptance, it does not reduce severity.
+- **A waiver may not cover UNKNOWN, an unreadable verdict, or an analyzer error.** Accepting a
+  risk nobody has characterised is not a decision anyone is in a position to make.
+- **The undo plan still covers waived findings.** A waiver accepts a risk; it does not invent an
+  undo. A plan that omitted the waived half would claim a completeness it does not have.
+- **Overrides tighten only,** and they move `Grade` as well — tightening is the one direction
+  configuration is allowed to push the measurement. An override to REVERSIBLE is refused at parse
+  time; one that would weaken an actual finding is refused when applied.
+- **Order is fixed: overrides tighten, then waivers match the result.** Waiving first would let a
+  waiver written for a mild classification swallow a finding somebody separately marked severe.
+- **`today` is injected** (`engine.WithToday`), defaulting to the system date. It is the only
+  value in the engine not derived from the input, so it is injected rather than read where it
+  would be untestable.
+- **The policy is hashed into `InputDigest`, and exposed as `PolicyDigest`.** The digest covers
+  the *resolved* policy, not the file's bytes, so reformatting or editing a comment does not
+  change a certificate — and deliberately not which waivers are currently live, since a digest
+  that changed overnight on its own would stop being evidence. It is mixed in **only when a
+  policy exists**, so every digest ever produced without one is unchanged.
+- **The engine does not analyze its own configuration.** `.reversibility.yml` is YAML, so the
+  Kubernetes analyzer claimed it and reported K8S014/UNKNOWN — adopting a policy graded your
+  repository F because of the file you adopted it with. `policy.IsPolicyFile` excludes it.
+
+**Two bugs S10's tests found in earlier sessions' code**, both fixed here:
+
+- The `fs` provider tested its `Include` predicate against the **absolute** path on disk, so
+  `ignore: ["legacy/**"]` matched nothing. Extension checks never noticed because they only look
+  at the suffix. The predicate now sees the path as it will appear in the changeset, which is
+  what the git and GitHub providers already did.
+- `.reversibility.yml` grading itself, above.
+
+**A waiver's `path` matches `Finding.File` exactly as rendered**, which is repository-relative
+under `--base` and the action, and relative to the named directory under `revctl check ./dir`. A
+pattern matching nothing is inert rather than approximately applied: over-matching a waiver is
+the one direction this must never fail in. Pinned by `TestWaiverPathMatchesTheFindingAsReported`.
+
+Glob syntax in `ignore` and `waivers[].path` is `**` for whole segments, `*`/`?`/`[...]` within
+one, delegating to `path.Match` per segment. **This is deliberately not git pathspec syntax** —
+pathspecs are what the git provider hands to git, these are what the policy matches, and two
+syntaxes under one name would be worse than two names.
 
 ## 12. Engineering standards
 
