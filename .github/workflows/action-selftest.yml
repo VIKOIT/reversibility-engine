@@ -1,0 +1,177 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
+name: Action
+
+# Exercises the composite action itself against this repository's own fixtures.
+#
+# The engine's unit tests prove the analyzers are right. They say nothing about whether the
+# packaging around them works: the ref detection, the pathspec plumbing, the JSON the outputs
+# are read from, the exit code the job is graded on. That path is what a consumer actually
+# runs, and until this workflow existed it was only ever exercised by consumers.
+#
+# The binary comes from a local build rather than a release download, because the point is to
+# test the action against the code in the pull request. The download and checksum path is
+# exercised by the release workflow and by every real consumer.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: action-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixtures:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The gold-standard reversible migration: this is the fixture that proves an A is
+          # reachable at all, so if it stops being one the gate has become unusable.
+          - name: 'a reversible migration grades A'
+            fixture: testdata/fixtures/postgres/PG024_create_index_concurrently/migrations
+            grade: 'A'
+            gate-status: 'PASS'
+            findings: '1'
+          - name: 'a dropped table grades F'
+            fixture: testdata/fixtures/postgres/PG001_drop_table/migrations
+            grade: 'F'
+            gate-status: 'FAIL'
+            findings: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The action compares against a base commit, which a shallow clone does not contain.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build revctl
+        env:
+          CGO_ENABLED: '1'
+        run: go build -o "$RUNNER_TEMP/revctl" ./cmd/revctl
+
+      # The action analyzes a range of commits, so the fixture has to arrive as one. Committing
+      # it locally and never pushing gives the action exactly the shape of input it sees in a
+      # real pull request.
+      - name: Stage the fixture as a commit
+        run: |
+          set -euo pipefail
+          git config user.name 'Action Self Test'
+          git config user.email 'selftest@example.invalid'
+          mkdir -p .selftest
+          cp "${{ matrix.fixture }}"/*.sql .selftest/
+          git add .selftest
+          git commit --quiet --message 'test: stage a fixture for the action self test'
+          git --no-pager show --stat --oneline HEAD
+
+      - id: certify
+        uses: ./
+        with:
+          binary: ${{ runner.temp }}/revctl
+          base: HEAD~1
+          path: .selftest
+          gate: A
+          # The destructive case is expected to grade F, and a self test that failed its own
+          # job could not then assert anything about the outputs.
+          fail-on-gate: false
+          comment: false
+
+      - name: Assert the certificate
+        env:
+          GOT_GRADE: ${{ steps.certify.outputs.grade }}
+          GOT_GATE: ${{ steps.certify.outputs.gate-status }}
+          GOT_FINDINGS: ${{ steps.certify.outputs.findings-count }}
+          GOT_PATH: ${{ steps.certify.outputs.certificate-path }}
+          WANT_GRADE: ${{ matrix.grade }}
+          WANT_GATE: ${{ matrix.gate-status }}
+          WANT_FINDINGS: ${{ matrix.findings }}
+        run: |
+          set -euo pipefail
+          failed=0
+          check() {
+            if [ "$2" != "$3" ]; then
+              echo "::error::$1 = '$2', want '$3'"
+              failed=1
+            else
+              echo "$1 = $2"
+            fi
+          }
+
+          check 'grade'          "$GOT_GRADE"    "$WANT_GRADE"
+          check 'gate-status'    "$GOT_GATE"     "$WANT_GATE"
+          check 'findings-count' "$GOT_FINDINGS" "$WANT_FINDINGS"
+
+          if [ ! -s "$GOT_PATH" ]; then
+            echo "::error::certificate-path '$GOT_PATH' is missing or empty"
+            failed=1
+          fi
+
+          exit "$failed"
+
+  gate-fails-the-job:
+    name: the gate fails the job it is meant to block
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build revctl
+        env:
+          CGO_ENABLED: '1'
+        run: go build -o "$RUNNER_TEMP/revctl" ./cmd/revctl
+
+      - name: Stage a destructive migration as a commit
+        run: |
+          set -euo pipefail
+          git config user.name 'Action Self Test'
+          git config user.email 'selftest@example.invalid'
+          mkdir -p .selftest
+          cp testdata/fixtures/postgres/PG001_drop_table/migrations/*.sql .selftest/
+          git add .selftest
+          git commit --quiet --message 'test: stage a destructive fixture'
+
+      # An action that reports F and exits zero is not a gate. This is the assertion that the
+      # exit code, not just the output, does its job.
+      - id: certify
+        continue-on-error: true
+        uses: ./
+        with:
+          binary: ${{ runner.temp }}/revctl
+          base: HEAD~1
+          path: .selftest
+          gate: A
+          comment: false
+
+      - name: Assert the step failed
+        run: |
+          set -euo pipefail
+          if [ '${{ steps.certify.outcome }}' != 'failure' ]; then
+            echo '::error::A grade F change did not fail the job. The gate does not gate.'
+            exit 1
+          fi
+          echo 'Grade F failed the job, as it must.'
