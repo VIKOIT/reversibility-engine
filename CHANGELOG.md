@@ -44,6 +44,10 @@ put on a Linux runner. Every build verifies that it still classifies a
 `DROP TABLE` before it is packaged — a binary that quietly lost the parser would
 grade every migration A for lack of findings.
 
+**Automatic major tag.** Publishing `v2.1.0` repoints `v2` at it, so `@v2` means
+the newest v2.x without a manual step after every release. Prereleases are
+excluded — `v2.1.0-rc.1` never becomes what `@v2` resolves to.
+
 ### Changed
 
 **The GitHub Action is now a composite action, published as `@v2`.** `@v1`

@@ -376,6 +376,12 @@ that silently lost the parser would grade every migration A for lack of findings
 No `-ldflags` version stamping anywhere. A build stamp reaching rendered output would break the
 byte-identical guarantee (§11b).
 
+**The major tag moves itself.** Consumers write `@v2` and expect the newest v2.x; nothing in git
+moves that tag, and forgetting to do it by hand fails silently — everyone stays on the previous
+release and the fix they were told to upgrade for never arrives. A final job repoints it through
+the API and then reads it back, because a tag that quietly did not move is the same failure.
+Prereleases are excluded: `v2.1.0-rc.1` must never become what `@v2` means.
+
 `.github/workflows/action-selftest.yml` runs the action against this repository's own fixtures
 and asserts the grade, the gate status, the finding count, **and that a grade F actually fails
 the job**. An action that reports F and exits zero is not a gate.

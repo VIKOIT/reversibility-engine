@@ -217,3 +217,60 @@ jobs:
             ls -1 out
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  major-tag:
+    name: Move the major tag
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: write
+
+    # Consumers write `uses: VIKOIT/reversibility-engine@v2` and expect it to mean the newest
+    # v2.x. Nothing moves that tag on its own, so until this existed it was a manual step
+    # after every release — and the failure mode of forgetting is silent: everyone stays on
+    # the previous release and the fix they were told to upgrade for never reaches them.
+    #
+    # Prereleases are excluded by the `-` check: v2.1.0-rc.1 must not become what @v2 means.
+    steps:
+      - name: Point the major tag at this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          major="${TAG%%.*}"
+          if [ "$major" = "$TAG" ]; then
+            echo "::error::Tag '$TAG' is not in vMAJOR.MINOR.PATCH form; refusing to guess a major tag."
+            exit 1
+          fi
+
+          echo "Moving $major to $SHA (released as $TAG)"
+
+          # An existing tag is force-updated, a new one is created. Doing it through the API
+          # rather than a push keeps this job free of a checkout, and a token-pushed tag does
+          # not trigger workflows — which is what we want, since re-running the release for a
+          # tag move would republish assets that already exist.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$major" > /dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$major" \
+              --field sha="$SHA" --field force=true > /dev/null
+            echo "Updated $major."
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              --field ref="refs/tags/$major" --field sha="$SHA" > /dev/null
+            echo "Created $major."
+          fi
+
+          # Read it back. A tag that silently did not move is the same failure this job exists
+          # to prevent, so it is confirmed rather than assumed.
+          actual="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$major" --jq '.object.sha')"
+          if [ "$actual" != "$SHA" ]; then
+            echo "::error::$major points at $actual, expected $SHA."
+            exit 1
+          fi
+
+          echo "### \`$major\` now points at \`$TAG\`" >> "$GITHUB_STEP_SUMMARY"
