@@ -12,41 +12,35 @@ branding:
   color: 'purple'
 
 inputs:
-  github-token:
+  path:
     description: >-
-      Token used to read the pull request and post the certificate comment. The default
-      GITHUB_TOKEN is enough, but the job must grant `pull-requests: write`, and a pull
-      request from a fork receives a read-only token that cannot comment.
+      Git pathspec selecting what to analyze, relative to the repository root. The default is
+      the whole tree; narrowing it to the directories that actually hold migrations and
+      manifests is the cheapest way to cut noise. Space-separated for several.
     required: false
-    default: ${{ github.token }}
+    default: '.'
 
-  min-grade:
+  base:
     description: >-
-      The worst grade that still passes: A, B, C, or F. The job fails if the certificate
-      grades below it. Autonomous agents must use A, which is what `revctl --gate` means.
-      F accepts everything and turns this action into a reporter rather than a gate.
+      The git ref to compare against. Left empty it is detected from the event: a pull request
+      uses its base commit, a push uses the commit it moved from. On any other event it must be
+      given, because there is nothing to infer a comparison from and guessing one would certify
+      a range nobody asked about.
     required: false
-    default: 'B'
+    default: ''
 
-  include:
+  gate:
     description: >-
-      Space-separated git pathspecs selecting the changed files to analyze. The defaults
-      are every extension the engine's analyzers claim. Narrowing this to the directories
-      that actually hold migrations and manifests is the cheapest way to cut noise.
+      The worst grade that still passes: A, B, C, or F. The job fails if the certificate grades
+      below it. Autonomous agents must use A. F accepts everything and turns this action into a
+      reporter rather than a gate.
     required: false
-    default: '*.sql *.yaml *.yml'
+    default: 'A'
 
-  exclude:
-    description: >-
-      Space-separated git pathspecs to skip, applied on top of `include`. The defaults are
-      YAML that is configuration for tooling rather than a Kubernetes manifest. The analyzer
-      cannot tell "not a manifest" from "a manifest I could not read", and reports
-      K8S014/UNKNOWN for both — which is the correct fail-closed answer and the reason to
-      scope what it is shown. No default can cover every such file, so a repository whose
-      manifests live in known directories is better served by narrowing `include` than by
-      extending this.
+  format:
+    description: 'Certificate format written to disk: markdown, json, or sarif.'
     required: false
-    default: '.github/** action.yml'
+    default: 'markdown'
 
   comment:
     description: >-
@@ -55,39 +49,174 @@ inputs:
     required: false
     default: 'true'
 
+  sarif-upload:
+    description: >-
+      Upload the findings to GitHub code scanning, so they appear on the Security tab and
+      inline on the diff. Requires `security-events: write` on the job.
+    required: false
+    default: 'false'
+
+  config:
+    description: >-
+      Path to a .reversibility.yml policy file. NOT YET IMPLEMENTED — it arrives in a later
+      release, and setting it now is an error rather than a no-op. A policy file that was
+      silently ignored would leave a user believing their waivers applied when nothing had
+      read them, which is the one direction a safety tool must never fail in.
+    required: false
+    default: ''
+
+  version:
+    description: >-
+      Release of revctl to run. Empty means the version of this action that the workflow
+      referenced, falling back to the latest release when the action is referenced by branch
+      or SHA. Pin it for a build that must be reproducible.
+    required: false
+    default: ''
+
+  binary:
+    description: >-
+      Path to an existing revctl binary, skipping the download entirely. It exists so this
+      repository can test the action against an unreleased build; consumers have no reason
+      to set it.
+    required: false
+    default: ''
+
+  github-token:
+    description: >-
+      Token used to read the pull request and post the certificate comment. The default
+      GITHUB_TOKEN is enough, but the job must grant `pull-requests: write`, and a pull
+      request from a fork receives a read-only token that cannot comment.
+    required: false
+    default: ${{ github.token }}
+
+  # ----------------------------------------------------------------------------------------
+  # Deprecated aliases, kept because v1 published them and a gate that breaks on upgrade gets
+  # deleted rather than fixed. Each one is read only when its replacement is at its default,
+  # so a workflow setting both gets the new name's value rather than a silent merge.
+  # ----------------------------------------------------------------------------------------
+
+  min-grade:
+    description: 'DEPRECATED — use `gate`.'
+    required: false
+    default: ''
+
+  include:
+    description: 'DEPRECATED — use `path`.'
+    required: false
+    default: ''
+
+  exclude:
+    description: >-
+      Space-separated pathspecs to skip, applied on top of `path`. Still supported and not
+      deprecated: `path` says where to look and this says what to ignore inside it. The
+      defaults are YAML that is configuration for tooling rather than a Kubernetes manifest.
+      The analyzer cannot tell "not a manifest" from "a manifest I could not read", and reports
+      K8S014/UNKNOWN for both — which is the correct fail-closed answer and the reason to scope
+      what it is shown.
+    required: false
+    default: '.github/** action.yml'
+
   fail-on-gate:
     description: >-
-      Fail the job when the grade is below `min-grade`. Set to false to report without
-      blocking. A run that could not complete fails the job either way — a broken analysis
-      is never a pass.
+      Fail the job when the grade is below `gate`. Set to false to report without blocking.
+      A run that could not complete fails the job either way — a broken analysis is never a
+      pass.
     required: false
     default: 'true'
 
 outputs:
   grade:
     description: 'The certificate grade: A, B, C, or F.'
+    value: ${{ steps.certify.outputs.grade }}
+  gate-status:
+    description: 'PASS or FAIL — whether an autonomous agent may merge. Independent of `gate`.'
+    value: ${{ steps.certify.outputs.gate-status }}
+  findings-count:
+    description: 'How many findings the certificate carries.'
+    value: ${{ steps.certify.outputs.findings-count }}
+  certificate-path:
+    description: 'Path to the rendered certificate inside the workspace.'
+    value: ${{ steps.certify.outputs.certificate-path }}
+
+  # Deprecated aliases, kept for v1 consumers.
   gate:
-    description: 'PASS or FAIL — whether an autonomous agent may merge. Independent of min-grade.'
+    description: 'DEPRECATED — use `gate-status`.'
+    value: ${{ steps.certify.outputs.gate-status }}
   applicable:
-    description: 'true when the pull request changed at least one file an analyzer claims.'
+    description: 'true when the change touched at least one file an analyzer claims.'
+    value: ${{ steps.certify.outputs.applicable }}
   certificate:
-    description: 'Path to the rendered Markdown certificate inside the workspace.'
+    description: 'DEPRECATED — use `certificate-path`.'
+    value: ${{ steps.certify.outputs.certificate-path }}
 
 runs:
-  # Docker rather than a composite action: the Postgres analyzer links the real PostgreSQL
-  # parser through cgo, so a consumer would otherwise need a Go toolchain and a C compiler
-  # on their runner. The image carries both outcomes of that build and the consumer carries
-  # neither. The cost is that this action runs only on Linux runners.
-  using: 'docker'
+  # Composite rather than Docker. The v1 action pulled a container, which pinned it to Linux
+  # runners and paid an image pull on every run. A released binary runs anywhere and needs
+  # neither a Go toolchain nor a C compiler on the runner — which matters here, because the
+  # Postgres analyzer links the real PostgreSQL parser through cgo and building it on demand
+  # would cost minutes of every pull request.
+  using: 'composite'
 
-  # The published image, not a local build. `image: Dockerfile` makes every consumer compile
-  # pg_query's C sources on every run; this pulls a layer instead.
-  #
-  # The tag tracks the major version so it keeps pace with the git tag consumers write after
-  # the @. That does mean the reference is mutable: a later v1.x image becomes what this pulls.
-  # It is the usual trade for a marketplace action — pin by digest instead if a build has to be
-  # reproducible years from now.
-  #
-  # Published by .github/workflows/publish-image.yml. The GHCR package must stay public, or
-  # consumers get a pull failure rather than a gate.
-  image: 'docker://ghcr.io/vikoit/reversibility-engine:v1'
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_BINARY: ${{ inputs.binary }}
+        ACTION_REF: ${{ github.action_ref }}
+        ACTION_REPOSITORY: ${{ github.action_repository }}
+        FALLBACK_REPOSITORY: ${{ github.repository }}
+        RUNNER_OS_NAME: ${{ runner.os }}
+        RUNNER_ARCH_NAME: ${{ runner.arch }}
+      run: bash "$GITHUB_ACTION_PATH/action/resolve.sh"
+
+    # Keyed on the exact version and asset, so a cache entry can never serve a different
+    # release or platform than the one that was asked for. An unpinned run emits no key and
+    # skips the cache entirely, because a key naming "latest" would freeze the first binary it
+    # ever cached.
+    - if: steps.resolve.outputs.cache-key != ''
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.resolve.outputs.install-dir }}
+        key: ${{ steps.resolve.outputs.cache-key }}
+
+    - if: steps.resolve.outputs.needs-download == 'true'
+      shell: bash
+      env:
+        ASSET: ${{ steps.resolve.outputs.asset }}
+        CHECKSUMS_URL: ${{ steps.resolve.outputs.checksums-url }}
+        DOWNLOAD_URL: ${{ steps.resolve.outputs.download-url }}
+        INSTALL_DIR: ${{ steps.resolve.outputs.install-dir }}
+        REVCTL: ${{ steps.resolve.outputs.revctl }}
+      run: bash "$GITHUB_ACTION_PATH/action/install.sh"
+
+    - id: certify
+      shell: bash
+      env:
+        REVCTL: ${{ steps.resolve.outputs.revctl }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_GATE: ${{ inputs.gate }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_SARIF_UPLOAD: ${{ inputs.sarif-upload }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_MIN_GRADE: ${{ inputs.min-grade }}
+        INPUT_INCLUDE: ${{ inputs.include }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
+        INPUT_FAIL_ON_GATE: ${{ inputs.fail-on-gate }}
+      run: bash "$GITHUB_ACTION_PATH/action/certify.sh"
+
+    # always(): a failed gate must still post its explanation. A pull request with no
+    # certificate looks identical to one that was never analyzed.
+    - if: always() && inputs.comment == 'true' && steps.certify.outputs.markdown-path != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        MARKDOWN_PATH: ${{ steps.certify.outputs.markdown-path }}
+      run: bash "$GITHUB_ACTION_PATH/action/comment.sh"
+
+    - if: always() && inputs.sarif-upload == 'true' && steps.certify.outputs.sarif-path != ''
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.certify.outputs.sarif-path }}
+        category: reversibility-engine
