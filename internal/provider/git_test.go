@@ -274,6 +274,27 @@ func TestGitResolvesAChangeset(t *testing.T) {
 			},
 		},
 		{
+			// An excluded path must not return as a sibling of a changed one. The action's
+			// `exclude` input relies on this: YAML that was never a manifest grades
+			// K8S014/UNKNOWN, and a changed file in the same directory would otherwise drag it
+			// back in through the context door.
+			name:  "an excluded path does not return as context",
+			paths: []string{".", ":!k8s/not-a-manifest.yaml"},
+			setup: func(r *repo) {
+				r.write("k8s/not-a-manifest.yaml", "lint:\n  enabled: true\n")
+				r.write("k8s/deployment.yaml", "kind: Deployment\n")
+				r.commit("base")
+				r.write("k8s/deployment.yaml", "kind: Deployment\nreplicas: 2\n")
+				r.commit("scale up")
+			},
+			want: []domain.ChangedFile{{
+				Path:     "k8s/deployment.yaml",
+				Status:   domain.StatusModified,
+				Previous: []byte("kind: Deployment\n"),
+				Current:  []byte("kind: Deployment\nreplicas: 2\n"),
+			}},
+		},
+		{
 			name: "the include predicate keeps unsupported files out",
 			setup: func(r *repo) {
 				r.write("notes.txt", "before\n")

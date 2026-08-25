@@ -412,76 +412,78 @@ func (g *Git) readContext(ctx context.Context, changed []domain.ChangedFile, rev
 		dirs[path.Dir(f.Path)] = true
 	}
 
+	if len(dirs) == 0 {
+		return nil, nil
+	}
+
+	candidates, err := g.treePaths(ctx, rev)
+	if err != nil {
+		return nil, err
+	}
+
 	var out []domain.ChangedFile
 
-	for _, dir := range sortedStrings(dirs) {
-		siblings, err := g.listDirectory(ctx, rev, dir)
+	for _, candidate := range candidates {
+		if known[candidate] || !dirs[path.Dir(candidate)] || !g.included(candidate) {
+			continue
+		}
+		known[candidate] = true
+
+		content, err := g.readBlob(ctx, rev, candidate)
 		if err != nil {
 			return nil, err
 		}
 
-		for _, sibling := range siblings {
-			if known[sibling] || !g.included(sibling) {
-				continue
-			}
-			known[sibling] = true
+		// Reported as MODIFIED with identical sides, matching the fake, filesystem, and
+		// GitHub providers. The analyzers treat a file whose content did not change as
+		// context and generate no findings for it.
+		out = append(out, domain.ChangedFile{
+			Path:     candidate,
+			Status:   domain.StatusModified,
+			Previous: content,
+			Current:  content,
+		})
 
-			content, err := g.readBlob(ctx, rev, sibling)
-			if err != nil {
-				return nil, err
-			}
-
-			// Reported as MODIFIED with identical sides, matching the fake, filesystem, and
-			// GitHub providers. The analyzers treat a file whose content did not change as
-			// context and generate no findings for it.
-			out = append(out, domain.ChangedFile{
-				Path:     sibling,
-				Status:   domain.StatusModified,
-				Previous: content,
-				Current:  content,
-			})
-
-			if len(out) > maxContextFiles {
-				return nil, fmt.Errorf("%w: more than %d context files", ErrChangesetTooLarge, maxContextFiles)
-			}
+		if len(out) > maxContextFiles {
+			return nil, fmt.Errorf("%w: more than %d context files", ErrChangesetTooLarge, maxContextFiles)
 		}
 	}
 
 	return out, nil
 }
 
-// listDirectory returns the blob paths directly inside a directory at a revision.
-func (g *Git) listDirectory(ctx context.Context, rev, dir string) ([]string, error) {
-	args := []string{"ls-tree", "-z", "--full-tree", rev}
-	if dir != "." && dir != "" {
-		args = append(args, "--", dir+"/")
+// emptyTree is git's constant hash of the empty tree object.
+//
+// Diffing it against a revision lists every file at that revision. It is a documented constant
+// of the SHA-1 object format rather than a value this package invented.
+const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// treePaths lists every file at a revision that the caller's pathspecs select.
+//
+// It is a diff against the empty tree rather than an ls-tree walk because ls-tree does not
+// support exclude pathspecs (`:!vendor/**`), and `git diff` does. Context files have to obey the
+// same scoping as the changeset: a path the user excluded must not come back through the side
+// door, which is precisely what happens when an excluded manifest shares a directory with a
+// changed one. Using the same command for both means one definition of what a pathspec selects,
+// and it is git's.
+func (g *Git) treePaths(ctx context.Context, rev string) ([]string, error) {
+	args := []string{"diff", "--name-only", "-z", "--no-color", "--no-renames", "--diff-filter=A", emptyTree, rev}
+	if len(g.paths) > 0 {
+		args = append(args, "--")
+		args = append(args, g.paths...)
 	}
 
 	out, stderr, err := g.run(ctx, args...)
 	if err != nil {
-		return nil, fmt.Errorf("git provider: listing %q at %s: %s: %w",
-			dir, short(rev), stderr, domain.ErrProviderFailed)
+		return nil, fmt.Errorf("git provider: listing the tree at %s: %s: %w",
+			short(rev), stderr, domain.ErrProviderFailed)
 	}
 
 	var paths []string
-	for _, entry := range strings.Split(string(out), "\x00") {
-		if entry == "" {
-			continue
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			paths = append(paths, p)
 		}
-
-		// "<mode> SP <type> SP <object> TAB <path>"
-		meta, p, found := strings.Cut(entry, "\t")
-		if !found {
-			return nil, fmt.Errorf("git provider: unparseable ls-tree entry %q: %w", entry, domain.ErrProviderFailed)
-		}
-
-		// Only blobs. A subdirectory or a submodule is not something an analyzer can read, and
-		// recursing would turn a bounded lookup into a walk of the repository.
-		if fields := strings.Fields(meta); len(fields) < 2 || fields[1] != "blob" {
-			continue
-		}
-
-		paths = append(paths, p)
 	}
 
 	sort.Strings(paths)
