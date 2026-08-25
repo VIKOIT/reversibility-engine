@@ -45,7 +45,12 @@ jobs:
           # .github and action.yml are YAML that was never a Kubernetes manifest. The analyzer
           # cannot tell that from a manifest it failed to read and reports K8S014/UNKNOWN for
           # both, which is the correct fail-closed answer and the reason to scope what it sees.
-          exclude: 'testdata/** .github/** action.yml'
+          # catalog/ is the Terraform resource-type catalog. It is YAML that was never a
+          # Kubernetes manifest, and the analyzer cannot tell that from a manifest it failed to
+          # read — it reports K8S014/UNKNOWN for both, which is the correct fail-closed answer
+          # and the reason to scope what it sees. Without this, every pull request that adds a
+          # resource type would fail this repository's own gate.
+          exclude: 'testdata/** .github/** action.yml catalog/**'
 
       # The certificate is kept even when the gate fails: it is the artifact that explains why.
       - if: always() && steps.certify.outputs.certificate != ''
