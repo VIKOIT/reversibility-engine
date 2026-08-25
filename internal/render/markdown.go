@@ -47,6 +47,7 @@ func (Markdown) Render(w io.Writer, cert domain.ReversibilityCertificate) error 
 	writeWaived(&b, cert)
 	writeUndoPlan(&b, cert)
 	writeDownMigrations(&b, cert)
+	writeContextWarnings(&b, cert)
 	writeFooter(&b, cert)
 
 	if _, err := io.WriteString(w, b.String()); err != nil {
@@ -167,8 +168,45 @@ func writeFindings(b *strings.Builder, cert domain.ReversibilityCertificate) {
 	b.WriteString("<details>\n<summary>Why each finding was classified this way</summary>\n\n")
 	for _, f := range cert.Findings {
 		fmt.Fprintf(b, "- **%s** at %s — %s\n", f.RuleID, mdEscape(findingLocation(f)), mdEscape(f.Rationale))
+		writeFindingContext(b, f)
 	}
 	b.WriteString("\n</details>\n\n")
+}
+
+// writeFindingContext prints what a production snapshot added to one finding.
+//
+// It is nested under the rationale rather than given a column, because it is a sentence about
+// this specific database and not a property of the rule. The estimate is labelled every time it
+// appears: a number the reader learns to distrust is worse than no number.
+func writeFindingContext(b *strings.Builder, f domain.Finding) {
+	if f.Context == nil {
+		return
+	}
+
+	if f.Context.ContextNote != "" {
+		fmt.Fprintf(b, "  - _In production:_ %s\n", mdEscape(f.Context.ContextNote))
+	}
+
+	if f.Context.EstimatedLockDuration != "" {
+		fmt.Fprintf(b, "  - _Estimated %s lock: %s — an approximation from table size, not a measurement._\n",
+			f.LockHazard, mdEscape(f.Context.EstimatedLockDuration))
+	}
+}
+
+// writeContextWarnings reports what was wrong with the snapshots supplied.
+//
+// Stale context is used and flagged rather than discarded: falling back to none would make the
+// certificate quietly less informative at exactly the moment somebody stopped refreshing it.
+func writeContextWarnings(b *strings.Builder, cert domain.ReversibilityCertificate) {
+	if len(cert.ContextWarnings) == 0 {
+		return
+	}
+
+	b.WriteString("### Production context\n\n")
+	for _, w := range cert.ContextWarnings {
+		fmt.Fprintf(b, "- ⚠️ %s\n", mdEscape(w))
+	}
+	b.WriteString("\n")
 }
 
 func writeUndoPlan(b *strings.Builder, cert domain.ReversibilityCertificate) {

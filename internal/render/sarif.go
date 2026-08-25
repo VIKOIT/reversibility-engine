@@ -267,6 +267,16 @@ func sarifLevel(r domain.Reversibility) string {
 }
 
 func sarifMessage(f domain.Finding) string {
+	// Production context is appended to the message rather than given a property, because code
+	// scanning shows the message and hides properties, and "212M rows" is the half of this a
+	// reviewer needs at the moment they see the alert.
+	if f.Context != nil && f.Context.ContextNote != "" {
+		return baseSarifMessage(f) + " In production: " + f.Context.ContextNote
+	}
+	return baseSarifMessage(f)
+}
+
+func baseSarifMessage(f domain.Finding) string {
 	if f.UndoStep == "" {
 		return fmt.Sprintf("%s: %s No undo step exists for this change.", f.Reversibility, f.Rationale)
 	}

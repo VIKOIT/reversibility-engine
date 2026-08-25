@@ -13,6 +13,7 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/analyzer"
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
 	"github.com/VIKOIT/reversibility-engine/internal/policy"
+	"github.com/VIKOIT/reversibility-engine/internal/snapshot"
 )
 
 // Engine orchestrates analyzers and turns their findings into a certificate.
@@ -24,6 +25,7 @@ type Engine struct {
 	log       *slog.Logger
 	policy    *policy.Policy
 	today     time.Time
+	context   *snapshot.Set
 }
 
 // Option configures an Engine.
@@ -43,6 +45,18 @@ func WithPolicy(p *policy.Policy) Option {
 // invisible.
 func WithToday(t time.Time) Option {
 	return func(e *Engine) { e.today = t }
+}
+
+// WithContext supplies production metadata collected by `revctl snapshot`.
+//
+// It is a value that has already been read from a file, never a connection. The engine does not
+// talk to a database or a cluster during analysis, and this option is the shape of that
+// promise: there is nothing here to connect with.
+//
+// A nil set means no context, which is the default and must behave exactly as it did before
+// snapshots existed.
+func WithContext(set *snapshot.Set) Option {
+	return func(e *Engine) { e.context = set }
 }
 
 // WithLogger sets the logger. Logging is diagnostic only: nothing the engine logs affects a
@@ -95,6 +109,9 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 	if e.policy != nil {
 		digest = combineDigests(digest, e.policy.Digest)
 	}
+	if e.context != nil {
+		digest = combineDigests(digest, e.context.Digest)
+	}
 
 	defer func() {
 		r := recover()
@@ -118,6 +135,14 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 	findings, downMigrations, analyzerErrors := e.run(ctx, files)
 
 	domain.SortFindings(findings)
+
+	// Enrichment runs before the policy so that a waived finding carries its production detail
+	// too: a reader judging whether an accepted risk still holds needs the size of the table as
+	// much as anyone else does.
+	//
+	// It cannot change a classification — see snapshot.Enrich — so it cannot change what the
+	// policy then matches, and it cannot change a grade.
+	findings = e.context.Enrich(findings)
 
 	// A policy that cannot be resolved is a broken run, not a run without a policy. Continuing
 	// would enforce something nobody configured.
@@ -152,18 +177,19 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 	}
 
 	cert = domain.ReversibilityCertificate{
-		SchemaVersion:  domain.SchemaVersion,
-		Grade:          grade,
-		EffectiveGrade: effective,
-		AIGateStatus:   grade.Gate(),
-		Applicable:     applicable,
-		InputDigest:    digest,
-		PolicyDigest:   e.policyDigest(),
-		Findings:       nonNilFindings(decision.Findings),
-		Waived:         nonNilWaived(decision.Waived),
-		UndoPlan:       nonNilPlan(buildUndoPlan(decision.All)),
-		Blockers:       nonNilStrings(blockers),
-		DownMigrations: nonNilStatuses(downMigrations),
+		SchemaVersion:   domain.SchemaVersion,
+		Grade:           grade,
+		EffectiveGrade:  effective,
+		AIGateStatus:    grade.Gate(),
+		Applicable:      applicable,
+		InputDigest:     digest,
+		PolicyDigest:    e.policyDigest(),
+		Findings:        nonNilFindings(decision.Findings),
+		Waived:          nonNilWaived(decision.Waived),
+		UndoPlan:        nonNilPlan(buildUndoPlan(decision.All)),
+		Blockers:        nonNilStrings(blockers),
+		ContextWarnings: e.contextWarnings(),
+		DownMigrations:  nonNilStatuses(downMigrations),
 	}
 
 	if len(analyzerErrors) > 0 {
@@ -369,4 +395,12 @@ func (e *Engine) policyDigest() string {
 		return ""
 	}
 	return e.policy.Digest
+}
+
+// contextWarnings reports what was wrong with the production snapshots supplied, if any.
+func (e *Engine) contextWarnings() []string {
+	if e.context == nil || len(e.context.Warnings) == 0 {
+		return nil
+	}
+	return append([]string(nil), e.context.Warnings...)
 }

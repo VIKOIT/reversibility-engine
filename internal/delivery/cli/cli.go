@@ -91,6 +91,7 @@ func newRootCommand(opts Options) *cobra.Command {
 	}
 
 	root.AddCommand(newCheckCommand(opts))
+	root.AddCommand(newSnapshotCommand(opts))
 	root.AddCommand(newVersionCommand())
 
 	return root

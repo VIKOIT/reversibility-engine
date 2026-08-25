@@ -5,7 +5,7 @@ package domain
 
 // SchemaVersion is the version of the certificate wire format. It follows semantic versioning
 // and is bumped on any breaking field change, because downstream merge gates parse this.
-const SchemaVersion = "1.1.0"
+const SchemaVersion = "1.2.0"
 
 // DownMigrationStatus records the outcome of down-migration validation for one migration pair,
 // at the three levels defined in docs/RULES.md §1.
@@ -87,6 +87,16 @@ type ReversibilityCertificate struct {
 	// PolicyDigest is the SHA-256 over the resolved policy, or "" when no policy applied. It
 	// makes a verdict attributable to the configuration that produced it, not just the input.
 	PolicyDigest string `json:"policyDigest,omitempty"`
+
+	// ContextWarnings records what was wrong with the production snapshots that were supplied:
+	// a stale one, most often. They are warnings rather than findings because they are about
+	// the evidence rather than about the change.
+	//
+	// A warning never improves anything. Stale context is used and flagged rather than
+	// discarded, because the alternative — silently falling back to no context — would make a
+	// certificate quietly less informative at exactly the moment somebody stopped refreshing
+	// the snapshot.
+	ContextWarnings []string `json:"contextWarnings,omitempty"`
 
 	// UndoPlan is built from the UndoStep fields of Findings and of Waived alike, in reverse
 	// order of application. It is empty when any of them is IRREVERSIBLE — see Blockers.

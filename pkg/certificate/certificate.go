@@ -84,6 +84,31 @@ type Finding struct {
 
 	// UndoStep is the exact command that reverses this change, or empty when none exists.
 	UndoStep string `json:"undoStep,omitempty"`
+
+	// Context is what a production snapshot added, if one was supplied. Absent by default: the
+	// engine works exactly as it did before snapshots existed, and every number in here is an
+	// estimate rather than a measurement. See docs/ESTIMATES.md.
+	Context *FindingContext `json:"context,omitempty"`
+}
+
+// FindingContext is what a production snapshot told the engine about a finding's subject.
+//
+// EVERY NUMBER HERE IS AN ESTIMATE, derived from planner statistics that the database itself
+// keeps approximately. They exist to turn "this rewrites the table" into "this rewrites a table
+// of roughly this size" — never to promise how long anything will take.
+type FindingContext struct {
+	// RowEstimate is the planner's row count for the subject relation.
+	RowEstimate int64 `json:"rowEstimate,omitempty"`
+
+	// SizeBytes is the on-disk size of the subject, table or index.
+	SizeBytes int64 `json:"sizeBytes,omitempty"`
+
+	// EstimatedLockDuration is an approximation such as "~14m", always carrying a leading tilde
+	// so it cannot be read as a measurement.
+	EstimatedLockDuration string `json:"estimatedLockDuration,omitempty"`
+
+	// ContextNote states, in one sentence, a fact the snapshot established.
+	ContextNote string `json:"contextNote,omitempty"`
 }
 
 // WaivedFinding is a finding a policy waiver downgraded to advisory.
@@ -159,6 +184,12 @@ type Certificate struct {
 	// PolicyDigest is the SHA-256 over the resolved policy, or "" when none applied.
 	PolicyDigest string `json:"policyDigest,omitempty"`
 
+	// ContextWarnings records what was wrong with the production snapshots supplied — a stale
+	// one, most often. Stale context is used and flagged rather than discarded, because silently
+	// falling back to none would make a certificate quietly less informative at exactly the
+	// moment somebody stopped refreshing the snapshot.
+	ContextWarnings []string `json:"contextWarnings,omitempty"`
+
 	// UndoPlan is the rollback script, in reverse order of application. When any finding is
 	// irreversible or unknown it is replaced by a statement that no complete undo exists.
 	UndoPlan []string `json:"undoPlan"`
@@ -181,18 +212,19 @@ func (c Certificate) Passed() bool { return c.AIGateStatus == GatePass }
 // renders a nil slice as null and an empty one as [], and determinism has to survive that.
 func FromDomain(in domain.ReversibilityCertificate) Certificate {
 	out := Certificate{
-		SchemaVersion:  in.SchemaVersion,
-		Grade:          Grade(in.Grade),
-		EffectiveGrade: Grade(in.EffectiveGrade),
-		AIGateStatus:   GateStatus(in.AIGateStatus),
-		Applicable:     in.Applicable,
-		InputDigest:    in.InputDigest,
-		PolicyDigest:   in.PolicyDigest,
-		Findings:       make([]Finding, 0, len(in.Findings)),
-		Waived:         make([]WaivedFinding, 0, len(in.Waived)),
-		UndoPlan:       make([]string, 0, len(in.UndoPlan)),
-		Blockers:       make([]string, 0, len(in.Blockers)),
-		DownMigrations: make([]DownMigrationStatus, 0, len(in.DownMigrations)),
+		SchemaVersion:   in.SchemaVersion,
+		Grade:           Grade(in.Grade),
+		EffectiveGrade:  Grade(in.EffectiveGrade),
+		AIGateStatus:    GateStatus(in.AIGateStatus),
+		Applicable:      in.Applicable,
+		InputDigest:     in.InputDigest,
+		PolicyDigest:    in.PolicyDigest,
+		ContextWarnings: in.ContextWarnings,
+		Findings:        make([]Finding, 0, len(in.Findings)),
+		Waived:          make([]WaivedFinding, 0, len(in.Waived)),
+		UndoPlan:        make([]string, 0, len(in.UndoPlan)),
+		Blockers:        make([]string, 0, len(in.Blockers)),
+		DownMigrations:  make([]DownMigrationStatus, 0, len(in.DownMigrations)),
 	}
 
 	for _, f := range in.Findings {
@@ -230,7 +262,7 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 }
 
 func fromDomainFinding(f domain.Finding) Finding {
-	return Finding{
+	out := Finding{
 		RuleID:        f.RuleID,
 		File:          f.File,
 		Line:          f.Line,
@@ -240,4 +272,15 @@ func fromDomainFinding(f domain.Finding) Finding {
 		Rationale:     f.Rationale,
 		UndoStep:      string(f.UndoStep),
 	}
+
+	if f.Context != nil {
+		out.Context = &FindingContext{
+			RowEstimate:           f.Context.RowEstimate,
+			SizeBytes:             f.Context.SizeBytes,
+			EstimatedLockDuration: f.Context.EstimatedLockDuration,
+			ContextNote:           f.Context.ContextNote,
+		}
+	}
+
+	return out
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/policy"
 	"github.com/VIKOIT/reversibility-engine/internal/provider"
 	"github.com/VIKOIT/reversibility-engine/internal/render"
+	"github.com/VIKOIT/reversibility-engine/internal/snapshot"
 )
 
 // checkFlags holds the parsed command line for one invocation. Keeping it a value rather than
@@ -35,6 +36,7 @@ type checkFlags struct {
 	minGrade string
 	config   string
 	noConfig bool
+	context  []string
 }
 
 func newCheckCommand(opts Options) *cobra.Command {
@@ -80,6 +82,8 @@ func newCheckCommand(opts Options) *cobra.Command {
 		"path to a .reversibility.yml policy file, instead of discovering one")
 	cmd.Flags().BoolVar(&flags.noConfig, "no-config", false,
 		"ignore any .reversibility.yml, including one that would be discovered")
+	cmd.Flags().StringArrayVar(&flags.context, "context", nil,
+		"production snapshot from `revctl snapshot`, repeatable; a path that does not exist is skipped, because context is an enhancement rather than a requirement")
 
 	return cmd
 }
@@ -102,11 +106,25 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 		return err
 	}
 
+	// Read here, in the transport layer, and handed to the engine as a value. The engine never
+	// opens a connection — that is the whole design constraint of production context, and it is
+	// enforced by an architecture test rather than by convention.
+	production, err := snapshot.Load(flags.context, snapshot.Options{Now: time.Now()})
+	if err != nil {
+		return fmt.Errorf("reading the production context: %w", err)
+	}
+	if production != nil {
+		for _, warning := range production.Warnings {
+			_, _ = fmt.Fprintf(opts.Stderr, "revctl: %s\n", warning)
+		}
+	}
+
 	// The engine is built first because the provider asks it which files are worth reading.
 	// That keeps the list of interesting extensions in one place.
 	eng := engine.New(
 		[]analyzer.Analyzer{postgres.New(), kubernetes.New()},
 		engine.WithPolicy(pol),
+		engine.WithContext(production),
 	)
 
 	// An ignored path is never read, so it is never classified and never returned as context

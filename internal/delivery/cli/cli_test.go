@@ -849,3 +849,225 @@ waivers:
 		})
 	}
 }
+
+// writeSnapshotFile writes a production snapshot and returns its path.
+func writeSnapshotFile(t *testing.T, body string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "pg.json")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the snapshot: %v", err)
+	}
+	return path
+}
+
+func freshSnapshot(t *testing.T) string {
+	t.Helper()
+
+	return writeSnapshotFile(t, fmt.Sprintf(`{
+  "schemaVersion": "1.0.0",
+  "kind": "postgres",
+  "collectedAt": %q,
+  "sourceFingerprint": "clitestclitestclitestclitestclitestclitestclitestclitestclites0",
+  "postgres": {
+    "tables": [
+      {"schema":"public","name":"legacy_orders","rowEstimate":212000000,"sizeBytes":34359738368,"totalSizeBytes":51539607552}
+    ],
+    "indexes": [],
+    "columns": []
+  }
+}`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)))
+}
+
+// Production context is an enhancement, not a requirement. A workflow that passes --context
+// unconditionally must keep working before the first snapshot is ever collected.
+func TestMissingContextFileIsNotAnError(t *testing.T) {
+	t.Parallel()
+
+	root := safeMigrations(t)
+	absent := filepath.Join(t.TempDir(), "never-collected.json")
+
+	stdout, stderr, code := run("check", "--context", absent, "--gate", "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitOK, stderr)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if cert.Grade != certificate.GradeA {
+		t.Errorf("Grade = %q, want A; a missing snapshot must change nothing", cert.Grade)
+	}
+	if len(cert.ContextWarnings) != 0 {
+		t.Errorf("a missing snapshot produced warnings: %v", cert.ContextWarnings)
+	}
+}
+
+// The headline of the session: a category becomes a quantity.
+func TestContextMakesTheCertificateConcrete(t *testing.T) {
+	t.Parallel()
+
+	root := destructiveMigrations(t)
+	snap := freshSnapshot(t)
+
+	stdout, stderr, code := run("check", "--context", snap, "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d\n%s", code, stderr)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+
+	// PG001 is not a rule that gains context, so this asserts the shape rather than the number:
+	// the run completed, the snapshot was accepted, and nothing was warned about.
+	if cert.Grade != certificate.GradeF {
+		t.Errorf("Grade = %q, want F", cert.Grade)
+	}
+	if len(cert.ContextWarnings) != 0 {
+		t.Errorf("a fresh snapshot warned: %v", cert.ContextWarnings)
+	}
+
+	// The same run without context must produce the same verdict and a different digest.
+	plain, _, _ := run("check", "--format", "json", root)
+	var without certificate.Certificate
+	if err := json.Unmarshal([]byte(plain), &without); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if without.Grade != cert.Grade {
+		t.Errorf("context changed the grade: %q without, %q with", without.Grade, cert.Grade)
+	}
+	if without.InputDigest == cert.InputDigest {
+		t.Error("supplying a snapshot did not change the input digest")
+	}
+}
+
+// A stale snapshot is used and flagged. Silently falling back to none would make the certificate
+// quietly less informative at exactly the moment somebody stopped refreshing it.
+func TestStaleContextIsReportedAndStillUsed(t *testing.T) {
+	t.Parallel()
+
+	root := safeMigrations(t)
+	stale := writeSnapshotFile(t, `{
+  "schemaVersion": "1.0.0",
+  "kind": "postgres",
+  "collectedAt": "2020-01-01T00:00:00Z",
+  "sourceFingerprint": "staleeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "postgres": {"tables": [], "indexes": [], "columns": []}
+}`)
+
+	stdout, stderr, code := run("check", "--context", stale, "--gate", "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d; a stale snapshot must not fail the run\n%s", code, cli.ExitOK, stderr)
+	}
+	if !strings.Contains(stderr, "days old") {
+		t.Errorf("stderr does not report the stale snapshot:\n%s", stderr)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if len(cert.ContextWarnings) != 1 {
+		t.Errorf("ContextWarnings = %v, want one", cert.ContextWarnings)
+	}
+	if cert.Grade != certificate.GradeA {
+		t.Errorf("Grade = %q, want A; a stale snapshot must not change a verdict", cert.Grade)
+	}
+}
+
+// Context that is wrong is worse than context that is absent, because context is believed.
+func TestUnreadableContextIsABrokenRun(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		body    string
+		mustSay string
+	}{
+		{
+			name:    "a version this build cannot read",
+			body:    `{"schemaVersion":"9.9.9","kind":"postgres","collectedAt":"2026-08-24T00:00:00Z","sourceFingerprint":"a","postgres":{"tables":[],"indexes":[],"columns":[]}}`,
+			mustSay: "not supported",
+		},
+		{
+			name:    "a field this build does not know",
+			body:    `{"schemaVersion":"1.0.0","kind":"postgres","collectedAt":"2026-08-24T00:00:00Z","sourceFingerprint":"a","postgres":{"tables":[],"indexes":[],"columns":[]},"newThing":1}`,
+			mustSay: "unknown field",
+		},
+		{
+			name:    "not json at all",
+			body:    `this is not a snapshot`,
+			mustSay: "decoding",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, stderr, code := run("check", "--context", writeSnapshotFile(t, tc.body), safeMigrations(t))
+			if code != cli.ExitError {
+				t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitError, stderr)
+			}
+			if !strings.Contains(stderr, tc.mustSay) {
+				t.Errorf("stderr does not explain the problem (%q):\n%s", tc.mustSay, stderr)
+			}
+		})
+	}
+}
+
+// The snapshot command is a separate command for a reason: analysis never connects to anything.
+func TestSnapshotCommandRefusesAnAmbiguousRequest(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		args    []string
+		mustSay string
+	}{
+		{"no output", []string{"snapshot", "--dsn", "postgres://x/y"}, "--out is required"},
+		{"nothing to collect", []string{"snapshot", "--out", "x.json"}, "nothing to collect"},
+		{
+			"both sources at once",
+			[]string{"snapshot", "--out", "x.json", "--dsn", "postgres://x/y", "--kube-context", "prod"},
+			"run the command twice",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, stderr, code := run(tc.args...)
+			if code != cli.ExitError {
+				t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitError, stderr)
+			}
+			if !strings.Contains(stderr, tc.mustSay) {
+				t.Errorf("stderr does not explain the problem (%q):\n%s", tc.mustSay, stderr)
+			}
+		})
+	}
+}
+
+// "Metadata only" has to be verifiable, and the first place anybody looks is --help.
+func TestSnapshotHelpListsWhatIsCollected(t *testing.T) {
+	t.Parallel()
+
+	stdout, _, code := run("snapshot", "--help")
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d", code)
+	}
+
+	for _, want := range []string{
+		"WHAT IS COLLECTED", "WHAT IS NEVER COLLECTED",
+		"reltuples", "null_frac", "reclaimPolicy",
+		"No row of user data", "default_transaction_read_only", "pg_monitor",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("the help text does not mention %q", want)
+		}
+	}
+}

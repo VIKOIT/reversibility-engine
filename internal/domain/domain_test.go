@@ -235,11 +235,11 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 	// Downstream merge gates parse this. Changing it is a deliberate, breaking act — if this
 	// test fails, the version was bumped, and that must be intentional.
 	//
-	// 1.1.0 added EffectiveGrade, Waived, and PolicyDigest for the policy file. It is a minor
-	// bump because nothing was removed or given a new meaning: a consumer reading 1.0.0 fields
-	// out of a 1.1.0 certificate still gets exactly what it did before.
-	if domain.SchemaVersion != "1.1.0" {
-		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.1.0")
+	// 1.2.0 added optional per-finding production context and ContextWarnings, on top of 1.1.0's
+	// EffectiveGrade, Waived, and PolicyDigest. Both are minor bumps: nothing was removed or
+	// given a new meaning, so a consumer reading 1.0.0 fields still gets exactly what it did.
+	if domain.SchemaVersion != "1.2.0" {
+		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.2.0")
 	}
 }
 

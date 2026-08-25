@@ -43,4 +43,4 @@ Steps are in the order they must be run, unwinding the change from the last step
 
 ---
 
-<sub>Reversibility Engine · schema 1.1.0 · input digest `e83a6aad8b31bb8fb4ce922e1dddcccb1097283ce17935bf07dc58d96c807c17`</sub>
+<sub>Reversibility Engine · schema 1.2.0 · input digest `e83a6aad8b31bb8fb4ce922e1dddcccb1097283ce17935bf07dc58d96c807c17`</sub>
