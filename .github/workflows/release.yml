@@ -37,7 +37,11 @@ jobs:
     timeout-minutes: 30
 
     strategy:
-      fail-fast: true
+      # Every target runs even when one fails. A release matrix runs rarely, and the first time
+      # it ran, one Windows failure cancelled darwin before it had built anything — so a single
+      # portability bug cost a whole cycle and still left two platforms unproven. Runner minutes
+      # are cheaper than round trips.
+      fail-fast: false
       matrix:
         include:
           - { runner: ubuntu-latest,    goos: linux,   goarch: amd64, archive: tar.gz }
@@ -92,7 +96,21 @@ jobs:
           ext=''
           if [ "${{ matrix.goos }}" = 'windows' ]; then ext='.exe'; fi
           printf 'DROP TABLE t;\n' > probe.sql
-          "./dist/revctl${ext}" check probe.sql --format json | tee /dev/stderr | grep -q '"PG001"'
+
+          # The output goes to a file rather than through `tee /dev/stderr`. MSYS on the Windows
+          # runner cannot open /dev/stderr when the runner has replaced stderr with a pipe, and
+          # this step failed there having built a perfectly good binary — a portability bug in
+          # the check, reported as a broken release.
+          #
+          # Printing only on failure is also the better shape: the happy path stays quiet and a
+          # failure shows the whole certificate rather than a grep exit code.
+          "./dist/revctl${ext}" check probe.sql --format json > probe.json
+
+          if ! grep -q '"PG001"' probe.json; then
+            echo "::error::the built binary did not classify DROP TABLE as PG001 — it has lost its cgo parser"
+            cat probe.json
+            exit 1
+          fi
           echo 'Parser present.'
 
       - name: Package

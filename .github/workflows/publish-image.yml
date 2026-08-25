@@ -49,10 +49,21 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          # NO MOVING MAJOR TAG. `:v1` is not a convenience alias here — it is wired into the
+          # frozen v1 Docker action, whose action.yml at the v1 git tag pulls
+          # `docker://ghcr.io/vikoit/reversibility-engine:v1` and runs the image's ENTRYPOINT.
+          #
+          # That entrypoint used to be entrypoint.sh, which did the analysis. It is now revctl
+          # itself, and revctl invoked with no arguments prints help and exits 0 — so publishing
+          # a v1.1.0 image as `:v1` silently turned every `@v1` consumer's gate into a green
+          # check over no analysis at all. Exactly the fail-open this product exists to prevent,
+          # introduced by a tag pattern rather than by any rule.
+          #
+          # Immutable version tags only. A moving alias for the image may come back when nothing
+          # consumes it as an action entrypoint, and not before.
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
 
       - name: Build and push
         id: build
