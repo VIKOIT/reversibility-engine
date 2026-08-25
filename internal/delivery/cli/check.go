@@ -16,6 +16,7 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/analyzer"
 	"github.com/VIKOIT/reversibility-engine/internal/analyzer/kubernetes"
 	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres"
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/terraform"
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
 	"github.com/VIKOIT/reversibility-engine/internal/engine"
 	"github.com/VIKOIT/reversibility-engine/internal/policy"
@@ -37,6 +38,7 @@ type checkFlags struct {
 	config   string
 	noConfig bool
 	context  []string
+	plans    []string
 }
 
 func newCheckCommand(opts Options) *cobra.Command {
@@ -84,6 +86,8 @@ func newCheckCommand(opts Options) *cobra.Command {
 		"ignore any .reversibility.yml, including one that would be discovered")
 	cmd.Flags().StringArrayVar(&flags.context, "context", nil,
 		"production snapshot from `revctl snapshot`, repeatable; a path that does not exist is skipped, because context is an enhancement rather than a requirement")
+	cmd.Flags().StringArrayVar(&flags.plans, "terraform-plan", nil,
+		"analyze this file as a Terraform plan whatever it is called; repeatable. The default convention is *.tfplan.json, and this is the escape hatch for a plan named otherwise")
 
 	return cmd
 }
@@ -121,8 +125,13 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 
 	// The engine is built first because the provider asks it which files are worth reading.
 	// That keeps the list of interesting extensions in one place.
+	analyzers, err := buildAnalyzers(flags, pol)
+	if err != nil {
+		return err
+	}
+
 	eng := engine.New(
-		[]analyzer.Analyzer{postgres.New(), kubernetes.New()},
+		analyzers,
 		engine.WithPolicy(pol),
 		engine.WithContext(production),
 	)
@@ -322,4 +331,29 @@ func openOutput(stdout io.Writer, path string) (io.Writer, func(), error) {
 	}
 
 	return f, func() { _ = f.Close() }, nil
+}
+
+// buildAnalyzers assembles the registry for one run.
+//
+// The Terraform analyzer is the only one that can fail to construct: its Layer 3 overrides are a
+// configuration rule, and a user who tried to weaken a classification must be told so rather
+// than quietly obeyed. That is a configuration error, so it exits 2 — the run never happened,
+// as distinct from a change that failed the gate.
+func buildAnalyzers(flags *checkFlags, pol *policy.Policy) ([]analyzer.Analyzer, error) {
+	var overrides []terraform.Override
+	if pol != nil {
+		for _, tt := range pol.TerraformTypes {
+			overrides = append(overrides, terraform.Override{Type: tt.Type, Class: terraform.Class(tt.Class)})
+		}
+	}
+
+	tf, err := terraform.New(terraform.Options{
+		Overrides:      overrides,
+		ExtraPlanPaths: flags.plans,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("configuring the Terraform analyzer: %w", err)
+	}
+
+	return []analyzer.Analyzer{postgres.New(), kubernetes.New(), tf}, nil
 }

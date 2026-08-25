@@ -1071,3 +1071,203 @@ func TestSnapshotHelpListsWhatIsCollected(t *testing.T) {
 		}
 	}
 }
+
+// writePlan writes a Terraform plan document and returns the directory holding it.
+func writePlan(t *testing.T, name, body string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the plan: %v", err)
+	}
+	return root
+}
+
+const destroyPlanJSON = `{"format_version":"1.1","terraform_version":"1.9.5","resource_changes":[
+  {"address":"aws_db_instance.orders","mode":"managed","type":"aws_db_instance",
+   "change":{"actions":["delete"],"before":{"id":"orders-prod","allocated_storage":500},"after":null}}]}`
+
+const unknownTypePlanJSON = `{"format_version":"1.1","terraform_version":"1.9.5","resource_changes":[
+  {"address":"aws_zeta_thing.a","mode":"managed","type":"aws_zeta_thing",
+   "change":{"actions":["delete"],"before":{"id":"a"},"after":null}},
+  {"address":"aws_alpha_thing.b","mode":"managed","type":"aws_alpha_thing",
+   "change":{"actions":["delete"],"before":{"id":"b"},"after":null}}]}`
+
+// A destroyed database in a plan grades F, and the catalog that said so is on the certificate.
+func TestTerraformPlanIsAnalyzed(t *testing.T) {
+	t.Parallel()
+
+	root := writePlan(t, "main.tfplan.json", destroyPlanJSON)
+
+	stdout, stderr, code := run("check", "--no-config", "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d\n%s", code, stderr)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+
+	if cert.Grade != certificate.GradeF {
+		t.Errorf("Grade = %q, want F. Findings: %+v", cert.Grade, cert.Findings)
+	}
+	if cert.CatalogVersion == "" {
+		t.Error("CatalogVersion is empty despite a plan being classified")
+	}
+	if len(cert.Findings) != 1 || cert.Findings[0].RuleID != "TF001" {
+		t.Errorf("findings = %+v, want one TF001", cert.Findings)
+	}
+}
+
+// The extension convention is the default; the flag is the escape hatch for a plan named
+// otherwise, so nobody has to rename a file to be analyzed.
+func TestTerraformPlanFlagClaimsADifferentlyNamedFile(t *testing.T) {
+	t.Parallel()
+
+	root := writePlan(t, "tfplan-output.json", destroyPlanJSON)
+	target := filepath.Join(root, "tfplan-output.json")
+
+	// Without the flag the file is not claimed at all, so the changeset is not applicable.
+	stdout, _, code := run("check", "--no-config", "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d", code)
+	}
+	var ignored certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &ignored); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if ignored.Applicable {
+		t.Errorf("a file named tfplan-output.json was claimed without the flag; the convention is *.tfplan.json")
+	}
+
+	// With it, the same file is analyzed.
+	stdout, stderr, code := run("check", "--no-config", "--terraform-plan", target, "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d\n%s", code, stderr)
+	}
+	var claimed certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &claimed); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if claimed.Grade != certificate.GradeF {
+		t.Errorf("Grade = %q, want F once the plan was claimed", claimed.Grade)
+	}
+}
+
+// THE GROWTH LOOP. Unknown types produce ONE snippet and ONE issue link covering all of them.
+// Six unknown types meaning six paste operations is where somebody disables the gate instead.
+func TestUnclassifiedTypesProduceOneAggregatedSuggestion(t *testing.T) {
+	t.Parallel()
+
+	root := writePlan(t, "main.tfplan.json", unknownTypePlanJSON)
+
+	stdout, _, code := run("check", "--no-config", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d", code)
+	}
+
+	if n := strings.Count(stdout, "terraform_types:"); n != 1 {
+		t.Errorf("the certificate contains %d policy snippets, want exactly 1", n)
+	}
+	if n := strings.Count(stdout, "issues/new?"); n != 1 {
+		t.Errorf("the certificate contains %d issue links, want exactly 1", n)
+	}
+
+	for _, want := range []string{"aws_alpha_thing", "aws_zeta_thing"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("the suggestion does not cover %s", want)
+		}
+	}
+
+	// Sorted, so the snippet is stable between runs.
+	alpha := strings.Index(stdout, "type: aws_alpha_thing")
+	zeta := strings.Index(stdout, "type: aws_zeta_thing")
+	if alpha < 0 || zeta < 0 || alpha > zeta {
+		t.Errorf("the snippet is not in sorted order (alpha at %d, zeta at %d)", alpha, zeta)
+	}
+}
+
+// A user may classify a type the catalog does not know. Weakening one it does is a configuration
+// error, and a configuration error is a broken run: exit 2, not exit 1.
+func TestTerraformTypeOverrides(t *testing.T) {
+	t.Parallel()
+
+	t.Run("classifying an unknown type is permitted", func(t *testing.T) {
+		t.Parallel()
+
+		root := writePlan(t, "main.tfplan.json", unknownTypePlanJSON)
+		policyPath := writePolicy(t, root, "version: 1\nterraform_types:\n  - type: aws_zeta_thing\n    class: STATEFUL\n  - type: aws_alpha_thing\n    class: STATELESS\n")
+		_ = policyPath
+
+		stdout, _, code := run("check", "--format", "json", root)
+		if code != cli.ExitOK {
+			t.Fatalf("exit code = %d", code)
+		}
+
+		var cert certificate.Certificate
+		if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+			t.Fatalf("decoding: %v", err)
+		}
+
+		rules := map[string]string{}
+		for _, f := range cert.Findings {
+			rules[f.RuleID] = f.Statement
+		}
+		if _, ok := rules["TF010"]; ok {
+			t.Errorf("a type the user classified is still unknown: %+v", cert.Findings)
+		}
+		if _, ok := rules["TF001"]; !ok {
+			t.Errorf("the STATEFUL classification did not take effect: %+v", cert.Findings)
+		}
+	})
+
+	t.Run("weakening a catalogued type is a broken run", func(t *testing.T) {
+		t.Parallel()
+
+		root := writePlan(t, "main.tfplan.json", destroyPlanJSON)
+		writePolicy(t, root, "version: 1\nterraform_types:\n  - type: aws_db_instance\n    class: STATELESS\n")
+
+		_, stderr, code := run("check", root)
+		if code != cli.ExitError {
+			t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitError, stderr)
+		}
+		if !strings.Contains(stderr, "waiver") {
+			t.Errorf("stderr does not point at the waiver path:\n%s", stderr)
+		}
+	})
+}
+
+// The catalog is compiled in and its identity is printable without a network.
+func TestCatalogShow(t *testing.T) {
+	t.Parallel()
+
+	stdout, _, code := run("catalog", "show")
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d", code)
+	}
+
+	for _, want := range []string{"catalog version", "digest", "classified", "stateful", "stateless"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("catalog show does not report %q:\n%s", want, stdout)
+		}
+	}
+}
+
+// catalog scan is a maintainer tool. It must fail with a message that says what to install
+// rather than an exec error, and nothing in the check path may depend on it.
+func TestCatalogScanFailsClearlyWithoutTerraform(t *testing.T) {
+	t.Parallel()
+
+	if _, err := exec.LookPath("terraform"); err == nil {
+		t.Skip("terraform is installed; this test covers the machine where it is not")
+	}
+
+	_, stderr, code := run("catalog", "scan", "--provider", "aws")
+	if code != cli.ExitError {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitError)
+	}
+	if !strings.Contains(stderr, "terraform is not on PATH") {
+		t.Errorf("stderr does not say what is missing:\n%s", stderr)
+	}
+}
