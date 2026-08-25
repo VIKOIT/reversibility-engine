@@ -46,4 +46,4 @@ _Symmetry is a heuristic and is advisory only; it never affects the grade on its
 
 ---
 
-<sub>Reversibility Engine · schema 1.2.0 · input digest `900c272e7e264d22031f0b8b00deb44425ebe2f9290670f11c9067a69677ba12`</sub>
+<sub>Reversibility Engine · schema 1.3.0 · input digest `900c272e7e264d22031f0b8b00deb44425ebe2f9290670f11c9067a69677ba12`</sub>

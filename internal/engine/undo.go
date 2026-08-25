@@ -57,6 +57,12 @@ func unreversibleFindings(findings []domain.Finding) []domain.UndoStep {
 			why = "cannot be undone"
 		case domain.ReversibilityUnknown:
 			why = "was not understood, so no undo can be written for it"
+		case domain.ReversibilityWillFail:
+			// A statement that aborts rolls its transaction back, so nothing it did survives to
+			// be undone — and neither does anything else in the same migration. Printing a
+			// confident rollback script beside a migration that will not apply would describe a
+			// state the database is never going to be in.
+			why = "will not apply, so there is nothing to undo; fix the migration instead"
 		default:
 			continue
 		}

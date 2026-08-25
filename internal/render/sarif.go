@@ -257,7 +257,7 @@ func sarifResults(findings []domain.Finding) []sarifResult {
 // nobody understood pass a scanning gate, which is the fail-open this product exists to prevent.
 func sarifLevel(r domain.Reversibility) string {
 	switch r {
-	case domain.ReversibilityIrreversible, domain.ReversibilityUnknown:
+	case domain.ReversibilityIrreversible, domain.ReversibilityUnknown, domain.ReversibilityWillFail:
 		return levelError
 	case domain.ReversibilityCostly:
 		return levelWarning

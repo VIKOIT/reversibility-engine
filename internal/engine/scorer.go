@@ -97,6 +97,19 @@ func score(in scoreInput) (domain.Grade, []string) {
 		grade = grade.Cap(domain.GradeB)
 	}
 
+	// Production context, when there is any. A lock duration band lowers the ceiling and never
+	// lifts it: a NEGLIGIBLE band caps nothing, so a small table cannot turn a C into a B. The
+	// band is only ever set from a snapshot that established a size, so its absence — no
+	// snapshot, a stale one, an unresolvable table — imposes nothing and changes nothing.
+	for _, f := range in.findings {
+		if f.Context == nil {
+			continue
+		}
+		if cap := f.Context.LockDurationBand.Cap(); cap != "" {
+			grade = grade.Cap(cap)
+		}
+	}
+
 	// The A row states the conditions for A, so failing any of them means the grade is not A.
 	// B is the highest grade below A, which makes this the least punitive reading consistent
 	// with the table. It matters for FULL_SCAN, which fails the "lock <= SHORT" condition but
@@ -132,6 +145,11 @@ func blockingFindings(findings []domain.Finding) []string {
 			blockers = append(blockers, fmt.Sprintf("%s at %s: irreversible — %s", f.RuleID, location(f), f.Rationale))
 		case domain.ReversibilityUnknown:
 			blockers = append(blockers, fmt.Sprintf("%s at %s: unknown — %s", f.RuleID, location(f), f.Rationale))
+		case domain.ReversibilityWillFail:
+			// Deliberately worded apart from irreversible. That one says the change cannot be
+			// undone; this one says it will not apply at all, so the fix is to the migration
+			// rather than to the rollback plan, and a reader must not confuse the two.
+			blockers = append(blockers, fmt.Sprintf("%s at %s: will not apply — %s", f.RuleID, location(f), f.Rationale))
 		}
 	}
 

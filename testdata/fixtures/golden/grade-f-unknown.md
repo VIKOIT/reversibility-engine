@@ -1,6 +1,6 @@
 ## Reversibility Certificate — Grade F
 
-**Not reversible.** Rolling this back would lose data, or the engine could not determine what it does.
+**Not reversible.** Rolling this back would lose data, the engine could not determine what the change does, or the change will not apply at all.
 
 | | |
 | --- | --- |
@@ -59,4 +59,4 @@ _Symmetry is a heuristic and is advisory only; it never affects the grade on its
 
 ---
 
-<sub>Reversibility Engine · schema 1.2.0 · input digest `8f1b5f8e1fe0efd8c4ec1c3c3fba4e1fcd79b552facd55c88a93ff02b4b90ea6`</sub>
+<sub>Reversibility Engine · schema 1.3.0 · input digest `8f1b5f8e1fe0efd8c4ec1c3c3fba4e1fcd79b552facd55c88a93ff02b4b90ea6`</sub>

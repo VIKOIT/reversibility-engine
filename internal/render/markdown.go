@@ -27,7 +27,9 @@ var gradeSummary = map[domain.Grade]string{
 	domain.GradeA: "Fully reversible. This change can be rolled back with no data loss.",
 	domain.GradeB: "Reversible at a cost. Rolling back is possible but slow, disruptive, or only safe within a window.",
 	domain.GradeC: "Reversible with significant caveats. Review the findings before merging.",
-	domain.GradeF: "**Not reversible.** Rolling this back would lose data, or the engine could not determine what it does.",
+	// F now covers three different failures, and the summary names all three: a reader whose
+	// migration will not even apply should not be told it would lose data on rollback.
+	domain.GradeF: "**Not reversible.** Rolling this back would lose data, the engine could not determine what the change does, or the change will not apply at all.",
 }
 
 var reversibilityIcon = map[domain.Reversibility]string{
@@ -35,6 +37,7 @@ var reversibilityIcon = map[domain.Reversibility]string{
 	domain.ReversibilityCostly:       "🟡",
 	domain.ReversibilityIrreversible: "🔴",
 	domain.ReversibilityUnknown:      "⚫",
+	domain.ReversibilityWillFail:     "🛑",
 }
 
 // Render implements Renderer.
@@ -188,8 +191,14 @@ func writeFindingContext(b *strings.Builder, f domain.Finding) {
 	}
 
 	if f.Context.EstimatedLockDuration != "" {
-		fmt.Fprintf(b, "  - _Estimated %s lock: %s — an approximation from table size, not a measurement._\n",
-			f.LockHazard, mdEscape(f.Context.EstimatedLockDuration))
+		band := ""
+		if f.Context.LockDurationBand != "" {
+			// The band is what scoring uses, so it is shown beside the number it came from
+			// rather than left for a reader to infer from a duration and a table of thresholds.
+			band = fmt.Sprintf(" — %s", f.Context.LockDurationBand)
+		}
+		fmt.Fprintf(b, "  - _Estimated %s lock: %s%s. An approximation from table size, not a measurement._\n",
+			f.LockHazard, mdEscape(f.Context.EstimatedLockDuration), band)
 	}
 }
 

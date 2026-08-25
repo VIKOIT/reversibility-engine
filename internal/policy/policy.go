@@ -185,7 +185,15 @@ func (p *Policy) waiverFor(f domain.Finding, today time.Time) (Waiver, bool) {
 	// understood the change, and accepting a risk nobody has characterised is not a decision
 	// anyone is in a position to make. The same goes for a verdict the domain cannot even
 	// read, which is a broken analyzer rather than a classified change.
-	if f.Reversibility == domain.ReversibilityUnknown || !f.Reversibility.Valid() {
+	//
+	// WILL_FAIL is excluded for a different reason: it is not a risk at all. A waiver accepts a
+	// trade-off, and there is no trade-off in a statement that production state proves cannot
+	// apply — waiving it would document a bug rather than accept one, and the pipeline it
+	// unblocked would fail at deploy instead of at review.
+	switch {
+	case f.Reversibility == domain.ReversibilityUnknown,
+		f.Reversibility == domain.ReversibilityWillFail,
+		!f.Reversibility.Valid():
 		return Waiver{}, false
 	}
 

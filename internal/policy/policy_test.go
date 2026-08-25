@@ -91,6 +91,15 @@ func TestApplyWaivers(t *testing.T) {
 			wantScored: []string{"PG027"},
 		},
 		{
+			// Not a risk to accept but a certainty of failure. A waiver documents a trade-off,
+			// and there is none in a statement that cannot apply.
+			name:       "a waiver cannot cover WILL_FAIL",
+			waivers:    []policy.Waiver{waiver("PG017", "", "2026-10-01")},
+			findings:   []domain.Finding{finding("PG017", "a.sql", domain.ReversibilityWillFail)},
+			today:      today,
+			wantScored: []string{"PG017"},
+		},
+		{
 			// A verdict the domain cannot read is a broken analyzer, not a classified change.
 			name:       "a waiver cannot cover an unrecognised verdict",
 			waivers:    []policy.Waiver{waiver("PG012", "", "2026-10-01")},

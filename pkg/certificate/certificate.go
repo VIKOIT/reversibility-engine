@@ -51,6 +51,10 @@ const (
 	Costly       Reversibility = "COSTLY"
 	Irreversible Reversibility = "IRREVERSIBLE"
 	Unknown      Reversibility = "UNKNOWN"
+
+	// WillFail means production state was checked and the change is certain to abort. It is a
+	// different failure from Irreversible: that one cannot be undone, this one will not run.
+	WillFail Reversibility = "WILL_FAIL"
 )
 
 // LockHazard describes the locking cost of applying a change to a live database.
@@ -106,6 +110,11 @@ type FindingContext struct {
 	// EstimatedLockDuration is an approximation such as "~14m", always carrying a leading tilde
 	// so it cannot be read as a measurement.
 	EstimatedLockDuration string `json:"estimatedLockDuration,omitempty"`
+
+	// LockDurationBand buckets that duration: NEGLIGIBLE, NOTICEABLE, DISRUPTIVE, or OUTAGE.
+	// Empty when no band was computed. DISRUPTIVE and OUTAGE lower the grade; the milder two
+	// and an absent band change nothing, because a small table is not evidence of safety.
+	LockDurationBand string `json:"lockDurationBand,omitempty"`
 
 	// ContextNote states, in one sentence, a fact the snapshot established.
 	ContextNote string `json:"contextNote,omitempty"`
@@ -278,6 +287,7 @@ func fromDomainFinding(f domain.Finding) Finding {
 			RowEstimate:           f.Context.RowEstimate,
 			SizeBytes:             f.Context.SizeBytes,
 			EstimatedLockDuration: f.Context.EstimatedLockDuration,
+			LockDurationBand:      string(f.Context.LockDurationBand),
 			ContextNote:           f.Context.ContextNote,
 		}
 	}

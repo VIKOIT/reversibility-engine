@@ -207,10 +207,10 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 
 	// Downstream merge gates pin this. A change here is a deliberate, breaking act.
 	//
-	// 1.2.0 added optional per-finding production context and ContextWarnings. As with 1.1.0,
-	// nothing was removed or redefined, so a consumer written against 1.0.0 still reads exactly
-	// what it read before.
-	if certificate.SchemaVersion != "1.2.0" {
-		t.Errorf("SchemaVersion = %q, want 1.2.0", certificate.SchemaVersion)
+	// 1.3.0 added the WILL_FAIL reversibility value and the lock duration band. WILL_FAIL is a
+	// new value in an existing enum: a consumer switching exhaustively on reversibility now has
+	// an unhandled case, which is the one change here worth a release note.
+	if certificate.SchemaVersion != "1.3.0" {
+		t.Errorf("SchemaVersion = %q, want 1.3.0", certificate.SchemaVersion)
 	}
 }
