@@ -19,3 +19,6 @@ Thumbs.db
 
 # Local scratch space for trying the CLI by hand
 test_bad_code/
+
+# Local Claude Code state — session-specific permissions, not project configuration
+.claude/settings.local.json
