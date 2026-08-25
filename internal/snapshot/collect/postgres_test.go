@@ -24,9 +24,15 @@ import (
 // container. .github/workflows/ci.yml sets this.
 const dsnEnv = "REVCTL_TEST_POSTGRES_DSN"
 
-// The values seeded into the throwaway database. Every one of them is the kind of thing that
+// The values seeded into the throwaway database. Every one of them stands for something that
 // must never reach a snapshot file, and each is distinctive enough that a substring search for
 // it cannot match by accident.
+//
+// DELIBERATELY NOT SHAPED LIKE REAL CREDENTIALS. An earlier version used a realistic Stripe key,
+// which GitHub push protection correctly refused to accept — and the remedy on offer was to
+// allowlist a credential-shaped string into the history permanently. Realism buys this test
+// nothing: it only has to prove the collector does not copy a value it was shown. A repository
+// that teaches its own scanners to be ignored is worse off than one with an unglamorous fixture.
 var sensitiveValues = []string{
 	"canary-value-password-must-not-appear",
 	"canary-value-api-token-must-not-appear",
