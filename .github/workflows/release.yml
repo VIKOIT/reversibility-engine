@@ -1,0 +1,219 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Abdul Ghani (VIKOIT)
+
+name: Release
+
+# Builds the binaries the composite action downloads, and publishes them with the checksums
+# that action verifies before it will run one.
+#
+# Every target is compiled on a runner of its own architecture and operating system. That is
+# not a preference: CGO_ENABLED=1 is mandatory here, because the Postgres analyzer links the
+# real PostgreSQL parser through pganalyze/pg_query_go, and a CGO_ENABLED=0 build would drop
+# the parser and grade every migration as unanalyzed. Cross-compiling cgo needs a toolchain
+# per target, and the two darwin targets need the macOS SDK, which cannot be redistributed
+# onto a Linux runner. goreleaser's OSS edition cannot split a build across runners — that is
+# a Pro feature — so the matrix does the job directly and a final step assembles one
+# checksums.txt from the parts.
+#
+# The container image is published separately by publish-image.yml on the same tag. Two
+# workflows pushing the same image tags would race, so this one does not touch the registry.
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: ubuntu-latest,    goos: linux,   goarch: amd64, archive: tar.gz }
+          # Public repositories get the hosted arm64 Linux runner at no cost. A private fork
+          # would need a paid plan or a self-hosted runner for this one entry.
+          - { runner: ubuntu-24.04-arm, goos: linux,   goarch: arm64, archive: tar.gz }
+          - { runner: macos-13,         goos: darwin,  goarch: amd64, archive: tar.gz }
+          - { runner: macos-14,         goos: darwin,  goarch: arm64, archive: tar.gz }
+          - { runner: windows-latest,   goos: windows, goarch: amd64, archive: zip }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # A missing C compiler must fail here, loudly, rather than later as a binary that built
+      # fine and cannot parse SQL.
+      - name: Show the C toolchain
+        shell: bash
+        run: cc --version || gcc --version
+
+      - name: Build
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ext=''
+          if [ "$GOOS" = 'windows' ]; then ext='.exe'; fi
+
+          # No -ldflags version stamping. The certificate must be byte-identical for identical
+          # input, and a build stamp reaching any rendered output would break that.
+          for cmd in revctl revsrv; do
+            go build -trimpath -o "dist/${cmd}${ext}" "./cmd/${cmd}"
+          done
+
+          ls -l dist
+
+      # The build is worthless if it lost the parser, and a binary that quietly stopped
+      # classifying SQL would grade every migration A for lack of findings. Native runners can
+      # execute what they just built, so they check it.
+      - name: Verify the binary still classifies SQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          ext=''
+          if [ "${{ matrix.goos }}" = 'windows' ]; then ext='.exe'; fi
+          printf 'DROP TABLE t;\n' > probe.sql
+          "./dist/revctl${ext}" check probe.sql --format json | tee /dev/stderr | grep -q '"PG001"'
+          echo 'Parser present.'
+
+      - name: Package
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          ext=''
+          if [ "$GOOS" = 'windows' ]; then ext='.exe'; fi
+
+          # One archive per binary, named exactly as the action asks for it. Documents ride
+          # along because a downloaded tarball is where somebody looks for the licence.
+          for cmd in revctl revsrv; do
+            stage="stage/${cmd}"
+            rm -rf "$stage" && mkdir -p "$stage"
+            cp "dist/${cmd}${ext}" "$stage/"
+            cp LICENSE NOTICE README.md "$stage/"
+
+            asset="${cmd}_${GOOS}_${GOARCH}.${ARCHIVE}"
+            if [ "$ARCHIVE" = 'zip' ]; then
+              ( cd "$stage" && 7z a -tzip -bso0 "../../out/${asset}" . )
+            else
+              tar -czf "out/${asset}" -C "$stage" .
+            fi
+
+            # The sha is computed here, on the machine that produced the file, and merged
+            # later. Recomputing centrally would only prove the artifact upload was faithful.
+            if command -v sha256sum > /dev/null 2>&1; then
+              ( cd out && sha256sum "$asset" > "${asset}.sha256" )
+            else
+              ( cd out && shasum -a 256 "$asset" > "${asset}.sha256" )
+            fi
+          done
+
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: out
+
+      - name: Assemble checksums.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd out
+          # Sorted so the file is stable between runs and diffable between releases.
+          cat ./*.sha256 | LC_ALL=C sort -k2 > checksums.txt
+          rm -f ./*.sha256
+          echo '### checksums.txt'
+          cat checksums.txt
+
+      # Every archive must have a checksum line, or the action would refuse to install one of
+      # them and the release would be half broken in a way nobody notices until a consumer
+      # upgrades on the platform that was missed.
+      - name: Verify every asset is checksummed
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd out
+          missing=0
+          for f in revctl_* revsrv_*; do
+            case "$f" in checksums.txt) continue ;; esac
+            # sha256sum marks binary-mode entries with a leading asterisk, which the Windows
+            # runner's git-bash does and Linux does not. Both spellings are valid and both
+            # must count as present.
+            if ! grep -qE "[ *]${f}\$" checksums.txt; then
+              echo "::error::$f has no line in checksums.txt"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Verify the checksums match the files
+        shell: bash
+        run: cd out && sha256sum --check checksums.txt
+
+      - name: Create the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --generate-notes \
+            out/*
+
+      - name: Summarise a dry run
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        shell: bash
+        run: |
+          {
+            echo '### Dry run — no tag, so no release was created'
+            echo
+            echo 'Assets that would have been published:'
+            echo '```'
+            ls -1 out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
