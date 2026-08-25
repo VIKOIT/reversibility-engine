@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "kubernetes",
+  "environment": "prod",
+  "collectedAt": "2026-08-24T09:00:00Z",
+  "sourceFingerprint": "1111aaaa2222bbbb3333cccc4444dddd5555eeee6666ffff7777aaaa8888bbbb",
+  "kubernetes": {
+    "storageClasses": [
+      {"name":"fast-ssd","reclaimPolicy":"Delete"},
+      {"name":"archival","reclaimPolicy":"Retain"}
+    ],
+    "claims": [
+      {"namespace":"shop","name":"orders-data","phase":"Bound","storageClass":"fast-ssd","capacity":"100Gi"},
+      {"namespace":"shop","name":"archive-data","phase":"Bound","storageClass":"archival","capacity":"2Ti"},
+      {"namespace":"other","name":"orders-data","phase":"Bound","storageClass":"fast-ssd","capacity":"1Gi"}
+    ],
+    "workloads": [
+      {"namespace":"shop","kind":"StatefulSet","name":"orders","replicas":3}
+    ]
+  }
+}

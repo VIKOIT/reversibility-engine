@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "postgres",
+  "environment": "prod",
+  "collectedAt": "2026-08-24T09:00:00Z",
+  "sourceFingerprint": "aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+  "postgres": {
+    "tables": [
+      {"schema":"public","name":"orders","rowEstimate":212000000,"sizeBytes":34359738368,"totalSizeBytes":51539607552},
+      {"schema":"public","name":"tiny","rowEstimate":12,"sizeBytes":8192,"totalSizeBytes":16384},
+      {"schema":"public","name":"ambiguous","rowEstimate":5,"sizeBytes":100,"totalSizeBytes":200},
+      {"schema":"archive","name":"ambiguous","rowEstimate":7,"sizeBytes":300,"totalSizeBytes":400}
+    ],
+    "indexes": [
+      {"schema":"public","table":"orders","name":"idx_orders_status","sizeBytes":2147483648,"scans":0,"statsResetAt":"2026-02-01T00:00:00Z"},
+      {"schema":"public","table":"orders","name":"idx_orders_hot","sizeBytes":1073741824,"scans":98211}
+    ],
+    "columns": [
+      {"schema":"public","table":"orders","name":"shipped_at","nullFraction":0.31,"averageWidth":8},
+      {"schema":"public","table":"orders","name":"id","nullFraction":0,"averageWidth":8},
+      {"schema":"public","table":"orders","name":"rare_null","nullFraction":0.00000005,"averageWidth":4}
+    ]
+  }
+}

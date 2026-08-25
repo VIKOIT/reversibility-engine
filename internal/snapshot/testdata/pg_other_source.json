@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "postgres",
+  "environment": "staging",
+  "collectedAt": "2026-08-24T09:00:00Z",
+  "sourceFingerprint": "9999999999999999999999999999999999999999999999999999999999999999",
+  "postgres": {"tables": [], "indexes": [], "columns": []}
+}
