@@ -68,8 +68,10 @@ inputs:
   version:
     description: >-
       Release of revctl to run. Empty means the version of this action that the workflow
-      referenced, falling back to the latest release when the action is referenced by branch
-      or SHA. Pin it for a build that must be reproducible.
+      referenced, falling back to the latest release when the action is referenced by a
+      branch, a SHA, or a moving major tag — `@v1` has no release of its own, only the
+      full versions it points at. Pin a full version here for a build that must be
+      reproducible.
     required: false
     default: ''
 

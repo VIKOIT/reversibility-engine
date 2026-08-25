@@ -79,6 +79,22 @@ if [ -z "$version" ]; then
     esac
 fi
 
+# A moving major tag has no release of its own.
+#
+# `uses: ...@v1` is the documented way to consume this action, and it resolves ACTION_REF to
+# "v1" — but releases are cut as v1.1.0 and the v1 tag is only repointed at them afterwards.
+# Downloading from releases/download/v1/ therefore 404s on the tag everybody actually uses,
+# while a full pin like @v1.2.0 works. Major-only refs resolve to the newest release instead.
+#
+# The caveat, stated rather than hidden: while two major lines are maintained at once, @v1
+# would resolve to a v2 release. Only one line is maintained today; a build that must be
+# reproducible across that change should pin a full version, which is what `version` is for.
+case "$version" in
+    v[0-9]) version='latest' ;;
+    v[0-9][0-9]) version='latest' ;;
+    v[0-9][0-9][0-9]) version='latest' ;;
+esac
+
 case "$version" in
     latest)  ;;
     v[0-9]*) ;;

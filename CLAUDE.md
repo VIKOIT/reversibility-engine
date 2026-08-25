@@ -385,6 +385,12 @@ Docker container action; that tag still is one, and is frozen.
 - **`latest` is deliberately not cached.** An `actions/cache` key is immutable once written, so
   a key containing "latest" would pin the first binary it ever saw and keep serving it. Pinning
   a version is what earns the cache.
+- **A moving major tag resolves to the latest release, not to itself.** `@v1` is the documented
+  way to consume the action, and it has no release of its own — releases are cut as `v1.2.0` and
+  the `v1` tag is repointed at them afterwards, so a download from `releases/download/v1/` 404s
+  on precisely the tag everybody uses. Major-only refs therefore resolve to `latest`. The
+  caveat, stated rather than hidden: while two major lines are maintained at once, `@v1` would
+  fetch a v2 release. Pin a full version to be immune to that.
 - **The action analyzes a git range (`--base`), not a staged pair of trees.** v1 reconstructed
   two directories by copying changed files, which passed `--diff-filter=d` and therefore **never
   showed the analyzer a deleted file** — K8S003, K8S006, and every other removal rule could not
