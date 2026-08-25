@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,6 +25,8 @@ import (
 // package state is what lets the command be run repeatedly in tests.
 type checkFlags struct {
 	before   []string
+	base     string
+	head     string
 	format   string
 	output   string
 	gate     bool
@@ -40,11 +43,15 @@ func newCheckCommand(opts Options) *cobra.Command {
 			"reversibility certificate.\n\n" +
 			"With only paths given, every file is treated as newly added — the shape of a migration\n" +
 			"pull request. Pass --before to compare two trees, which is what the Kubernetes rules\n" +
-			"need in order to see what a change replaced.\n\n" +
+			"need in order to see what a change replaced. Pass --base to compare two git refs\n" +
+			"instead — the same comparison a pull request shows. Content is read from the refs, so\n" +
+			"a dirty working tree cannot change the certificate.\n\n" +
 			"Exit codes: 0 success, 1 the gate was not met, 2 the run did not complete.",
-		Args: cobra.MinimumNArgs(1),
+		Args: cobra.ArbitraryArgs,
 		Example: "  revctl check ./migrations\n" +
 			"  revctl check --before ./k8s/base --format markdown ./k8s/head\n" +
+			"  revctl check --base origin/main\n" +
+			"  revctl check --base v1.2.0 --head HEAD ./migrations\n" +
 			"  revctl check ./migrations --format json --gate",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCheck(cmd, opts, flags, args)
@@ -53,6 +60,10 @@ func newCheckCommand(opts Options) *cobra.Command {
 
 	cmd.Flags().StringSliceVar(&flags.before, "before", nil,
 		"path(s) holding the previous state, to compare against")
+	cmd.Flags().StringVar(&flags.base, "base", "",
+		"git ref to compare against, e.g. origin/main; the comparison uses the merge base, matching pull-request semantics")
+	cmd.Flags().StringVar(&flags.head, "head", "",
+		"git ref holding the change; defaults to HEAD, and is only meaningful with --base")
 	cmd.Flags().StringVarP(&flags.format, "format", "f", render.FormatMarkdown,
 		fmt.Sprintf("output format: %s", strings.Join(render.Formats(), ", ")))
 	cmd.Flags().StringVarP(&flags.output, "output", "o", "",
@@ -80,8 +91,12 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	// That keeps the list of interesting extensions in one place.
 	eng := engine.New([]analyzer.Analyzer{postgres.New(), kubernetes.New()})
 
-	files, err := provider.NewFS(flags.before, paths, eng.Supports).
-		ChangedFiles(cmd.Context(), "")
+	source, err := resolveProvider(flags, paths, eng.Supports)
+	if err != nil {
+		return err
+	}
+
+	files, err := source.ChangedFiles(cmd.Context(), "")
 	if err != nil {
 		return fmt.Errorf("reading the changeset: %w", err)
 	}
@@ -107,6 +122,39 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	}
 
 	return applyGate(opts.Stderr, cert, minGrade)
+}
+
+// resolveProvider picks the source of the changeset from the flags.
+//
+// The modes are mutually exclusive by construction rather than by precedence. Silently
+// preferring one over another would let a user believe they had certified a comparison that
+// never ran, and the comparison they think they ran is the one they would have gated on.
+func resolveProvider(flags *checkFlags, paths []string, include provider.Include) (provider.FileProvider, error) {
+	switch {
+	case flags.base != "" && len(flags.before) > 0:
+		return nil, errors.New("--base and --before are different comparisons: --base names git refs, --before names directories; pass one, not both")
+
+	case flags.base != "":
+		// Path arguments become git pathspecs, scoping the comparison to a subtree.
+		source, err := provider.NewGit(provider.GitOptions{
+			Base:  flags.base,
+			Head:  flags.head,
+			Paths: paths,
+		}, include)
+		if err != nil {
+			return nil, fmt.Errorf("resolving the git refs: %w", err)
+		}
+		return source, nil
+
+	case flags.head != "":
+		return nil, errors.New("--head names the ref holding the change and only means something alongside --base")
+
+	case len(paths) == 0:
+		return nil, errors.New("no paths given: pass a directory to analyze, or --base to compare two git refs")
+
+	default:
+		return provider.NewFS(flags.before, paths, include), nil
+	}
 }
 
 // resolveMinGrade turns the two gating flags into one threshold.

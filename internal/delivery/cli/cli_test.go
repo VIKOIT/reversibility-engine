@@ -6,7 +6,9 @@ package cli_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -351,5 +353,200 @@ func TestUnknownCommand(t *testing.T) {
 
 	if _, _, code := run("frobnicate"); code != cli.ExitError {
 		t.Errorf("exit code = %d, want %d", code, cli.ExitError)
+	}
+}
+
+// gitRepo builds a throwaway repository and returns its path, or skips when git is absent.
+//
+// The CLI resolves refs in the process working directory, because the user's shell already
+// selected the repository. That is what makes this test the only one here that cannot run in
+// parallel.
+func gitRepo(t *testing.T, commits []map[string]string) string {
+	t.Helper()
+
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not on PATH")
+	}
+
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+
+	git("init", "--quiet", ".")
+	git("symbolic-ref", "HEAD", "refs/heads/main")
+	git("config", "user.name", "Reversibility Test")
+	git("config", "user.email", "test@example.invalid")
+	git("config", "commit.gpgsign", "false")
+
+	for i, files := range commits {
+		for name, content := range files {
+			path := filepath.Join(dir, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("creating %s: %v", filepath.Dir(path), err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("writing %s: %v", name, err)
+			}
+		}
+		git("add", "--all")
+		git("commit", "--quiet", "--message", fmt.Sprintf("commit %d", i))
+	}
+
+	return dir
+}
+
+// chdir moves into dir for the duration of the test.
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("reading the working directory: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("entering %s: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previous); err != nil {
+			t.Fatalf("returning to %s: %v", previous, err)
+		}
+	})
+}
+
+func TestCheckResolvesAGitRange(t *testing.T) {
+	repo := gitRepo(t, []map[string]string{
+		{"migrations/0001_init.up.sql": "CREATE TABLE orders (id bigint);\n"},
+		{
+			"migrations/0002_drop.up.sql":   "DROP TABLE orders;\n",
+			"migrations/0002_drop.down.sql": "CREATE TABLE orders (id bigint);\n",
+		},
+	})
+	chdir(t, repo)
+
+	// The working tree is left dirty. The certificate must describe the committed refs.
+	if err := os.WriteFile(filepath.Join(repo, "migrations", "0002_drop.up.sql"),
+		[]byte("SELECT 1;\n"), 0o644); err != nil {
+		t.Fatalf("dirtying the working tree: %v", err)
+	}
+
+	stdout, _, code := run("check", "--base", "HEAD~1", "--format", "json")
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitOK, stdout)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+
+	if cert.Grade != certificate.GradeF {
+		t.Errorf("Grade = %q, want F for a committed DROP TABLE. Findings: %+v", cert.Grade, cert.Findings)
+	}
+
+	var sawDrop bool
+	for _, f := range cert.Findings {
+		if f.RuleID == "PG001" {
+			sawDrop = true
+		}
+		if f.File != filepath.ToSlash(f.File) {
+			t.Errorf("finding file %q is not repository-relative with forward slashes", f.File)
+		}
+	}
+	if !sawDrop {
+		t.Errorf("the committed DROP TABLE was not detected; the working tree may have been read instead: %+v", cert.Findings)
+	}
+}
+
+// A pathspec argument scopes the comparison, and the ref still decides what is compared.
+func TestCheckScopesAGitRangeToASubtree(t *testing.T) {
+	repo := gitRepo(t, []map[string]string{
+		{"migrations/0001_init.up.sql": "CREATE TABLE orders (id bigint);\n"},
+		{
+			"migrations/0002_drop.up.sql": "DROP TABLE orders;\n",
+			"other/0003_safe.up.sql":      "CREATE INDEX CONCURRENTLY i ON orders (id);\n",
+		},
+	})
+	chdir(t, repo)
+
+	stdout, _, code := run("check", "--base", "HEAD~1", "--format", "json", "other")
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitOK, stdout)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+
+	for _, f := range cert.Findings {
+		if strings.HasPrefix(f.File, "migrations/") {
+			t.Errorf("finding outside the requested subtree: %+v", f)
+		}
+	}
+}
+
+// The changeset sources are alternatives, not a precedence order. A user who believes they
+// gated on one comparison must not have been given another.
+func TestCheckRejectsAnAmbiguousChangesetSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		args    []string
+		mustSay string
+	}{
+		{
+			name:    "both git refs and directories",
+			args:    []string{"check", "--base", "origin/main", "--before", "./old", "./new"},
+			mustSay: "--base and --before",
+		},
+		{
+			name:    "head without base",
+			args:    []string{"check", "--head", "HEAD", "./migrations"},
+			mustSay: "--head",
+		},
+		{
+			name:    "nothing at all",
+			args:    []string{"check"},
+			mustSay: "no paths given",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, code := run(tc.args...)
+			if code != cli.ExitError {
+				t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitError, stdout)
+			}
+			if !strings.Contains(stderr, tc.mustSay) {
+				t.Errorf("stderr does not explain the conflict (%q):\n%s", tc.mustSay, stderr)
+			}
+		})
+	}
+}
+
+// An unresolvable ref is a broken run, not an unsafe change: exit 2, not exit 1. Conflating the
+// two is how a broken tool ends up ignored in a pipeline.
+func TestCheckReportsAnUnknownRefAsABrokenRun(t *testing.T) {
+	repo := gitRepo(t, []map[string]string{
+		{"migrations/0001_init.up.sql": "CREATE TABLE orders (id bigint);\n"},
+	})
+	chdir(t, repo)
+
+	_, stderr, code := run("check", "--base", "origin/does-not-exist", "--gate")
+	if code != cli.ExitError {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitError)
+	}
+	if !strings.Contains(stderr, "does-not-exist") {
+		t.Errorf("stderr does not name the ref:\n%s", stderr)
 	}
 }
