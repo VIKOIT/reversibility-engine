@@ -1,0 +1,452 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Abdul Ghani (VIKOIT)
+#
+# Resource-type catalog for the AWS Terraform provider.
+#
+# THE DISCRIMINATOR. A resource is STATEFUL when destroying it destroys data, destroys an
+# identity that re-applying the same configuration cannot recreate, or destroys a recovery
+# capability a future rollback would depend on. Everything else is STATELESS.
+#
+# The third clause is why snapshots are here: deleting one destroys no running system, it
+# destroys the undo. It is the same family as turning off deletion protection.
+#
+# STATELESS entries are not filler. An unclassified deleted type grades F, so the network, IAM,
+# load-balancing and compute groups below are what stand between a new user and an immediate
+# failing gate on an ordinary plan.
+#
+# Every entry MUST carry class and evidence. A missing evidence link fails the build — see
+# TestEveryEntryCarriesClassAndEvidence. Evidence is the provider documentation for the type,
+# which is where a reviewer checks the claim.
+#
+# Adding a type: open a pull request. `revctl catalog scan` generates candidates from a provider
+# schema, but nothing is ever merged automatically and nothing is ever fetched during analysis.
+
+catalog_version: "2026.08.1"
+provider: registry.terraform.io/hashicorp/aws
+
+entries:
+  # ----------------------------------------------------------------------------------------
+  # STATEFUL — relational and NoSQL engines. Destroying these destroys the rows.
+  # ----------------------------------------------------------------------------------------
+  - type: aws_db_instance
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_instance"
+    added_in: "2026.08.1"
+  - type: aws_rds_cluster
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster"
+    added_in: "2026.08.1"
+  - type: aws_rds_cluster_instance
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster_instance"
+    added_in: "2026.08.1"
+  - type: aws_rds_global_cluster
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_global_cluster"
+    added_in: "2026.08.1"
+  - type: aws_docdb_cluster
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/docdb_cluster"
+    added_in: "2026.08.1"
+  - type: aws_docdb_cluster_instance
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/docdb_cluster_instance"
+    added_in: "2026.08.1"
+  - type: aws_neptune_cluster
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/neptune_cluster"
+    added_in: "2026.08.1"
+  - type: aws_neptune_cluster_instance
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/neptune_cluster_instance"
+    added_in: "2026.08.1"
+  - type: aws_dynamodb_table
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dynamodb_table"
+    added_in: "2026.08.1"
+  - type: aws_elasticache_cluster
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticache_cluster"
+    added_in: "2026.08.1"
+  - type: aws_elasticache_replication_group
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticache_replication_group"
+    added_in: "2026.08.1"
+  - type: aws_elasticache_serverless_cache
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticache_serverless_cache"
+    added_in: "2026.08.1"
+  - type: aws_memorydb_cluster
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/memorydb_cluster"
+    added_in: "2026.08.1"
+  - type: aws_redshift_cluster
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/redshift_cluster"
+    added_in: "2026.08.1"
+  - type: aws_redshiftserverless_namespace
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/redshiftserverless_namespace"
+    added_in: "2026.08.1"
+  - type: aws_timestreamwrite_database
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/timestreamwrite_database"
+    added_in: "2026.08.1"
+  - type: aws_timestreamwrite_table
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/timestreamwrite_table"
+    added_in: "2026.08.1"
+  - type: aws_keyspaces_table
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/keyspaces_table"
+    added_in: "2026.08.1"
+
+  # ----------------------------------------------------------------------------------------
+  # STATEFUL — object, block and file storage.
+  # ----------------------------------------------------------------------------------------
+  - type: aws_s3_bucket
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket"
+    added_in: "2026.08.1"
+  # Deleting an object deletes data — the plainest case in this table. A repository that manages
+  # config artifacts in bulk should use the policy ignore list rather than a weakened default.
+  - type: aws_s3_object
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_object"
+    added_in: "2026.08.1"
+  - type: aws_ebs_volume
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ebs_volume"
+    added_in: "2026.08.1"
+  - type: aws_efs_file_system
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/efs_file_system"
+    added_in: "2026.08.1"
+  - type: aws_fsx_lustre_file_system
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/fsx_lustre_file_system"
+    added_in: "2026.08.1"
+  - type: aws_fsx_windows_file_system
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/fsx_windows_file_system"
+    added_in: "2026.08.1"
+  - type: aws_fsx_ontap_file_system
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/fsx_ontap_file_system"
+    added_in: "2026.08.1"
+  - type: aws_fsx_openzfs_file_system
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/fsx_openzfs_file_system"
+    added_in: "2026.08.1"
+  - type: aws_glacier_vault
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/glacier_vault"
+    added_in: "2026.08.1"
+  - type: aws_qldb_ledger
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/qldb_ledger"
+    added_in: "2026.08.1"
+  - type: aws_opensearch_domain
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/opensearch_domain"
+    added_in: "2026.08.1"
+  - type: aws_elasticsearch_domain
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticsearch_domain"
+    added_in: "2026.08.1"
+
+  # ----------------------------------------------------------------------------------------
+  # STATEFUL — snapshots, backups and vaults.
+  #
+  # The third clause of the discriminator. Destroying one of these destroys no running system;
+  # it destroys the thing a rollback would have used.
+  # ----------------------------------------------------------------------------------------
+  - type: aws_db_snapshot
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_snapshot"
+    added_in: "2026.08.1"
+  - type: aws_db_cluster_snapshot
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_cluster_snapshot"
+    added_in: "2026.08.1"
+  - type: aws_ebs_snapshot
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ebs_snapshot"
+    added_in: "2026.08.1"
+  - type: aws_rds_cluster_snapshot
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster_snapshot"
+    added_in: "2026.08.1"
+  - type: aws_backup_vault
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/backup_vault"
+    added_in: "2026.08.1"
+
+  # ----------------------------------------------------------------------------------------
+  # STATEFUL — secrets and keys. Destroying these destroys the ability to read what they
+  # protected, which no amount of re-applying brings back.
+  # ----------------------------------------------------------------------------------------
+  - type: aws_kms_key
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key"
+    added_in: "2026.08.1"
+  - type: aws_kms_replica_key
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_replica_key"
+    added_in: "2026.08.1"
+  - type: aws_secretsmanager_secret
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret"
+    added_in: "2026.08.1"
+  - type: aws_ssm_parameter
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter"
+    added_in: "2026.08.1"
+  - type: aws_cloudhsm_v2_cluster
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudhsm_v2_cluster"
+    added_in: "2026.08.1"
+  - type: aws_cloudhsm_v2_hsm
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudhsm_v2_hsm"
+    added_in: "2026.08.1"
+
+  # ----------------------------------------------------------------------------------------
+  # STATEFUL — retained messages, streams and logs.
+  # ----------------------------------------------------------------------------------------
+  - type: aws_kinesis_stream
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kinesis_stream"
+    added_in: "2026.08.1"
+  - type: aws_kinesis_firehose_delivery_stream
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kinesis_firehose_delivery_stream"
+    added_in: "2026.08.1"
+  # In-flight messages are data. The empty-queue case is real but invisible to a plan, and AWS
+  # blocks name reuse for sixty seconds after deletion, so even that case is not clean.
+  - type: aws_sqs_queue
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sqs_queue"
+    added_in: "2026.08.1"
+  - type: aws_msk_cluster
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/msk_cluster"
+    added_in: "2026.08.1"
+  - type: aws_mq_broker
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/mq_broker"
+    added_in: "2026.08.1"
+  - type: aws_cloudwatch_log_group
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group"
+    added_in: "2026.08.1"
+
+  # ----------------------------------------------------------------------------------------
+  # STATEFUL — unrecoverable identity. The second clause of the discriminator.
+  # ----------------------------------------------------------------------------------------
+  # You cannot get that address back. A third party's allow-list is not something re-applying
+  # the configuration recreates, and releases are rare enough that the noise cost is near zero.
+  - type: aws_eip
+    class: STATEFUL
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip"
+    added_in: "2026.08.1"
+
+  # ----------------------------------------------------------------------------------------
+  # STATELESS — network fabric. Disruptive to destroy, fully recreatable by re-applying.
+  # ----------------------------------------------------------------------------------------
+  - type: aws_vpc
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc"
+    added_in: "2026.08.1"
+  - type: aws_subnet
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/subnet"
+    added_in: "2026.08.1"
+  - type: aws_security_group
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group"
+    added_in: "2026.08.1"
+  - type: aws_security_group_rule
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule"
+    added_in: "2026.08.1"
+  - type: aws_vpc_security_group_ingress_rule
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_ingress_rule"
+    added_in: "2026.08.1"
+  - type: aws_vpc_security_group_egress_rule
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_security_group_egress_rule"
+    added_in: "2026.08.1"
+  - type: aws_route_table
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table"
+    added_in: "2026.08.1"
+  - type: aws_route
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route"
+    added_in: "2026.08.1"
+  - type: aws_route_table_association
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route_table_association"
+    added_in: "2026.08.1"
+  - type: aws_internet_gateway
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/internet_gateway"
+    added_in: "2026.08.1"
+  - type: aws_nat_gateway
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/nat_gateway"
+    added_in: "2026.08.1"
+  - type: aws_vpc_endpoint
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint"
+    added_in: "2026.08.1"
+  - type: aws_network_acl
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/network_acl"
+    added_in: "2026.08.1"
+  - type: aws_vpc_peering_connection
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_peering_connection"
+    added_in: "2026.08.1"
+  # The trap. It contains "db" and holds nothing at all — which is why classification is a
+  # lookup and never a match on the type name.
+  - type: aws_db_subnet_group
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_subnet_group"
+    added_in: "2026.08.1"
+  - type: aws_elasticache_subnet_group
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/elasticache_subnet_group"
+    added_in: "2026.08.1"
+  - type: aws_redshift_subnet_group
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/redshift_subnet_group"
+    added_in: "2026.08.1"
+
+  # ----------------------------------------------------------------------------------------
+  # STATELESS — identity and access.
+  # ----------------------------------------------------------------------------------------
+  - type: aws_iam_role
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role"
+    added_in: "2026.08.1"
+  - type: aws_iam_policy
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy"
+    added_in: "2026.08.1"
+  - type: aws_iam_role_policy
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy"
+    added_in: "2026.08.1"
+  - type: aws_iam_role_policy_attachment
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment"
+    added_in: "2026.08.1"
+  - type: aws_iam_user
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user"
+    added_in: "2026.08.1"
+  - type: aws_iam_group
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_group"
+    added_in: "2026.08.1"
+  - type: aws_iam_instance_profile
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_instance_profile"
+    added_in: "2026.08.1"
+  - type: aws_iam_openid_connect_provider
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_openid_connect_provider"
+    added_in: "2026.08.1"
+
+  # ----------------------------------------------------------------------------------------
+  # STATELESS — load balancing and DNS.
+  # ----------------------------------------------------------------------------------------
+  - type: aws_lb
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb"
+    added_in: "2026.08.1"
+  - type: aws_lb_target_group
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_target_group"
+    added_in: "2026.08.1"
+  - type: aws_lb_listener
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_listener"
+    added_in: "2026.08.1"
+  - type: aws_lb_listener_rule
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_listener_rule"
+    added_in: "2026.08.1"
+  - type: aws_route53_record
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record"
+    added_in: "2026.08.1"
+  - type: aws_route53_zone
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_zone"
+    added_in: "2026.08.1"
+  # DNS-validated certificates are re-issuable. An IMPORTED certificate carries a top-level
+  # private_key, which is a Layer 1 evidence key, so those raise themselves to STATEFUL.
+  - type: aws_acm_certificate
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/acm_certificate"
+    added_in: "2026.08.1"
+
+  # ----------------------------------------------------------------------------------------
+  # STATELESS — compute and orchestration.
+  # ----------------------------------------------------------------------------------------
+  # Cattle. The root volume is destroyed on termination, but a rule that fires on most ordinary
+  # plans gets the whole tool switched off, which costs more safety than it buys. An instance
+  # that actually holds instance-store data carries a non-empty ephemeral_block_device, which is
+  # a Layer 1 evidence key, and raises itself.
+  - type: aws_instance
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/instance"
+    added_in: "2026.08.1"
+  - type: aws_ecs_cluster
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecs_cluster"
+    added_in: "2026.08.1"
+  - type: aws_ecs_service
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecs_service"
+    added_in: "2026.08.1"
+  - type: aws_ecs_task_definition
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecs_task_definition"
+    added_in: "2026.08.1"
+  - type: aws_eks_cluster
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_cluster"
+    added_in: "2026.08.1"
+  - type: aws_eks_node_group
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eks_node_group"
+    added_in: "2026.08.1"
+  - type: aws_lambda_function
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function"
+    added_in: "2026.08.1"
+  - type: aws_autoscaling_group
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/autoscaling_group"
+    added_in: "2026.08.1"
+  - type: aws_launch_template
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/launch_template"
+    added_in: "2026.08.1"
+  - type: aws_cloudwatch_event_rule
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_rule"
+    added_in: "2026.08.1"
+  - type: aws_sns_topic
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic"
+    added_in: "2026.08.1"
+  - type: aws_cloudtrail
+    class: STATELESS
+    evidence: "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudtrail"
+    added_in: "2026.08.1"
