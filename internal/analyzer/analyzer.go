@@ -82,3 +82,21 @@ func NormalizeStatement(s string) string {
 	const marker = "..."
 	return string(runes[:domain.MaxStatementLength-len(marker)]) + marker
 }
+
+// CatalogVersioner is an optional capability an Analyzer may implement when its verdicts depend
+// on a data table shipped with the build.
+//
+// The Terraform analyzer classifies against an embedded catalog, so the same plan can grade
+// differently under two builds. Without recording which catalog produced a verdict there would
+// be no way to tell why — so the engine mixes the digest into the certificate's input digest and
+// puts the version on the certificate.
+//
+// It is an optional interface for the same reason DownMigrationValidator is: an analyzer with no
+// data table should not have to answer a question that does not apply to it.
+type CatalogVersioner interface {
+	// CatalogVersion is the human-readable version, such as "2026.08.1".
+	CatalogVersion() string
+
+	// CatalogDigest is the SHA-256 over the catalog's classifications.
+	CatalogDigest() string
+}
