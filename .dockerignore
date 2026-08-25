@@ -1,10 +1,10 @@
-# The build context is the whole repository, and a Docker action rebuilds this image on
-# every run unless a prebuilt one is published. Everything not needed to compile revctl or
-# run the entrypoint is kept out, because it is copied over the daemon socket each time.
+# The build context is the whole repository. Everything not needed to compile revctl is kept
+# out, because it is copied over the daemon socket each time.
 
 .git
 .github
 .golangci.yml
+action
 
 # Fixtures are loaded by tests, never by the binary. They are the largest thing here.
 testdata

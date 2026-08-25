@@ -85,7 +85,7 @@ jobs:
           image="$(printf '%s' '${{ steps.meta.outputs.tags }}' | head -n 1)"
           echo "Verifying $image"
           printf 'DROP TABLE t;\n' > probe.sql
-          docker run --rm --entrypoint revctl \
+          docker run --rm \
             --volume "$PWD:/probe" --workdir /probe \
             "$image" check probe.sql --format json | tee /dev/stderr | grep -q '"PG001"'
           echo "Image classifies SQL correctly."

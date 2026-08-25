@@ -41,22 +41,23 @@ RUN printf 'DROP TABLE t;\n' > /tmp/probe.sql \
 # ---------------------------------------------------------------------------------------
 FROM debian:bookworm-slim
 
-# git      reconstructs the base tree; curl and jq talk to the REST API.
-# The GitHub CLI is deliberately absent: it is not present in an action container by default,
-# and installing it means trusting an apt repository or an unpinned release tarball to do what
-# twenty lines of curl and jq already do.
+# git is what revctl shells out to in order to resolve --base into a changeset. ca-certificates
+# is needed by nothing here today and is kept because a TLS-less base image fails obscurely the
+# first time anything reaches the network.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
-        curl \
         git \
-        jq \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /out/revctl /usr/local/bin/revctl
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# No USER directive. GitHub mounts the workspace into the container as root, and dropping
-# privileges here would leave the certificate unwritable.
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# No USER directive. A mounted workspace is owned by the invoking user, and dropping privileges
+# here would leave the certificate unwritable.
+#
+# The entrypoint is the CLI itself. Until v2 this image was also the GitHub Action, and its
+# entrypoint was a script that reconstructed the changeset and posted the comment; the action
+# is now a composite that downloads a released binary, so that script has no caller and is
+# gone. What remains is the way to run revctl without installing Go — which is what the README
+# documents this image for.
+ENTRYPOINT ["/usr/local/bin/revctl"]
