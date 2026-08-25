@@ -55,6 +55,17 @@ N+1 until the owner approves.
 | S6 | GitHub App webhook server. | **DONE** |
 | S7 | Hardening: fuzz tests, panic-recovery boundary tests, golden-file determinism. | **DONE** |
 
+The v0.2 plan continues the same way. Each session is written up in full in
+`.claude/commands/s8.md` … `s12.md`, one file per session.
+
+| Session | Deliverable | Status |
+| --- | --- | --- |
+| S8 | Git ref resolution: a `gitProvider` behind `--base` / `--head`. | **BUILT — awaiting approval** |
+| S9 | GitHub Action (`action.yml`) + goreleaser release workflow. | |
+| S10 | Policy file `.reversibility.yml` with expiring waivers. | |
+| S11 | Production context snapshots (`revctl snapshot`, `--context`). | |
+| S12 | Terraform plan analyzer. | |
+
 Update the Status column when a session is approved as complete.
 
 ## 5. Layout
@@ -69,7 +80,7 @@ internal/analyzer/postgres/
 internal/analyzer/postgres/parser/   SQLParser interface, isolates cgo pg_query_go
 internal/analyzer/kubernetes/
 internal/engine/                     Registry, orchestrator, scorer
-internal/provider/                   FileProvider interface: fs, github, fake
+internal/provider/                   FileProvider interface: fs, git, github, fake
 internal/render/                     json, markdown, sarif
 internal/delivery/cli/
 internal/delivery/github/
@@ -117,9 +128,9 @@ type FileProvider interface {
 }
 ```
 
-`FileProvider` is implemented **three** times: `fsProvider` (local dir/diff), `githubProvider`,
-`fakeProvider` (reads `testdata/`). Never write "simulated" or placeholder fetch code — use
-`fakeProvider`.
+`FileProvider` is implemented **four** times: `fsProvider` (local dir/diff), `gitProvider`
+(two refs, S8), `githubProvider`, `fakeProvider` (reads `testdata/`). Never write "simulated" or
+placeholder fetch code — use `fakeProvider`.
 
 ## 8. Domain types
 
@@ -230,8 +241,8 @@ existing reference to them means.
 - **Two-tree comparison (`--before`) returns unchanged files as MODIFIED with identical sides**,
   matching `fakeProvider`, because K8S003 and K8S009 need context the change did not touch
   (§16.4).
-- **Resolving a changeset from a git ref is not implemented.** The fs provider compares paths,
-  not revisions. The README says so plainly rather than advertising a flag that does not exist.
+- ~~**Resolving a changeset from a git ref is not implemented.**~~ **RESOLVED in S8** — see §11d.
+  The fs provider still compares paths, not revisions; `--base` selects the git provider instead.
 
 ## 11c. GitHub App — as built in S6
 
@@ -287,6 +298,40 @@ context lies outside that still sees nothing and must return UNKNOWN.
 - `GITHUB_WEBHOOK_SECRET` **and** credentials are both required to start. A server that
   authenticates correctly and then cannot post is worse than no gate — the pull request looks
   reviewed.
+
+## 11d. Git ref resolution — as built in S8
+
+`--base <ref>` (with `--head`, defaulting to `HEAD`) resolves the changeset from git rather than
+from two directories. Path arguments become git pathspecs, scoping the comparison to a subtree.
+
+- **git is shelled out to; no git library is linked.** git's own answer to what a ref, a merge
+  base, and a rename are is the definition of those words here. A second implementation would be
+  a second thing that can disagree with the pull request the developer is looking at.
+- **Blobs are read from the object database (`git show <sha>:<path>`), never from the working
+  tree.** A dirty checkout is invisible: the certificate describes the refs it names, which is
+  what lets someone else reproduce it. `TestCheckResolvesAGitRange` leaves uncommitted edits in
+  place and asserts they do not appear.
+- **The comparison is three-dot (`base...head`), and the previous side is read at the merge
+  base.** Reading old content at the base ref instead would pair each old file with a newer
+  sibling and describe a transition nobody proposed.
+- **Refs are resolved to SHAs once, up front.** A branch that moves mid-run cannot then produce a
+  changeset assembled from two different commits.
+- **An ambiguous ref is an error, not a preference.** git resolves a branch and a tag of the same
+  name by precedence and warns on stderr; accepting that would certify a comparison the user did
+  not ask for.
+- **A rename is reported as a REMOVED plus an ADDED, never as `StatusRenamed`.** The Kubernetes
+  rules compare whole objects, and K8S003/K8S009 need to see the removal to ask what still
+  depends on it. A copy (`C`) yields only the new path, since the source is untouched.
+- **An unrecognised diff status is an error.** `U` (unmerged) and `X` (a bug in git, by git's own
+  documentation) cannot be classified, and guessing a side would hand an analyzer a
+  half-populated file.
+- **Unchanged siblings in touched directories are returned as MODIFIED with identical sides**,
+  matching the fake, fs, and GitHub providers (§16.4). Without this the same pull request would
+  grade differently from the CLI than from the app, and the more permissive answer is the one a
+  developer would see first.
+- **Failures name the fix.** Not a repository, unknown ref, ambiguous ref, and — the common CI
+  case — a shallow clone missing the base commit, which says `fetch-depth: 0` in the message.
+  All of them reach the caller as a failure to fetch the changeset, which is grade F and exit 2.
 
 ## 12. Engineering standards
 

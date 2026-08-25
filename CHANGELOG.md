@@ -16,7 +16,25 @@ move:
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+**Git ref resolution.** `revctl check --base <ref>` resolves a changeset from two
+git refs instead of two directories, with `--head` defaulting to `HEAD` and path
+arguments acting as pathspecs that scope the comparison to a subtree. The
+comparison is three-dot (`base...head`), so it runs against the merge base — the
+same range a pull request shows.
+
+Content is read out of the object database, never out of the working tree: a
+dirty checkout cannot change the certificate. Unchanged siblings in touched
+directories come back as context, matching what the GitHub App already supplies,
+so the CLI and the app grade the same pull request the same way.
+
+Failures name their fix rather than repeating git's wording — not a repository,
+unknown ref, ambiguous ref, and the common CI case of a shallow clone missing the
+base commit, which says `fetch-depth: 0`. All of them are exit 2, a run that did
+not complete, never a passing grade.
+
+The certificate schema is unchanged.
 
 ## [0.1.0] - 2026-08-20 — Initial Release
 

@@ -265,6 +265,15 @@ revctl check ./migrations
 # what a change replaced.
 revctl check --before ./k8s/base ./k8s/head
 
+# Compare two git refs instead of two directories. The comparison runs against
+# the merge base — the same range a pull request shows — and content is read
+# from the refs, so uncommitted edits cannot change the certificate.
+revctl check --base origin/main
+
+# Any ref works, --head defaults to HEAD, and a path argument scopes the
+# comparison to a subtree.
+revctl check --base v1.2.0 --head HEAD ./migrations
+
 # Machine-readable output for a pipeline gate.
 revctl check ./migrations --format json --gate
 
@@ -329,9 +338,10 @@ none.
 - **Static analysis only.** The engine reads files; it never connects to a
   database or a cluster. It cannot see table sizes, actual row counts, or whether
   a column is truly unused.
-- **No git ref resolution yet.** `--base origin/main` is not implemented. The
-  filesystem provider compares paths, not revisions; git resolution ships with
-  the GitHub App path.
+- **Git resolution needs the base commit present.** `--base origin/main` compares
+  two refs through the merge base, the same comparison a pull request shows — but
+  a shallow CI checkout does not contain the base commit. Set `fetch-depth: 0` on
+  `actions/checkout`; the error says so when it happens.
 - **Rendered manifests only.** Helm charts and Kustomize overlays must be
   rendered before analysis (`helm template`, `kustomize build`).
 - **PostgreSQL only.** MySQL, SQL Server, and MongoDB are not supported.
