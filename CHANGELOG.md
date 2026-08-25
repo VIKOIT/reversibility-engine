@@ -18,6 +18,51 @@ move:
 
 ### Added
 
+**Production context — `revctl snapshot` and `revctl check --context`.** The
+engine can now say that a rewrite covers 212M rows and roughly 48 GiB, that
+dropping an index nothing has read is genuinely cheap, and — most usefully — that
+a `SET NOT NULL` **will fail** because the column already contains nulls, before
+it runs rather than after.
+
+**The engine still never connects to anything during analysis.** A separate
+command collects metadata into a file and the analysis reads the file. CI
+therefore never needs a production credential, certificates stay byte-identical
+between runs, and the analyzers stay pure functions over a changeset. An
+architecture test fails the build if `pgx` or `client-go` can be reached from
+`internal/domain`, `internal/analyzer`, `internal/engine`, or `internal/snapshot`
+through any number of hops — and separately asserts the collector still reaches
+them, so the guard cannot go vacuous.
+
+**Metadata only, and tested rather than asserted.** Table sizes, row estimates,
+index sizes and scan counts, column null fractions; storage classes with their
+reclaim policies, claim capacities, workload replica counts. No row of user data,
+no column values, no Secrets, no connection string. CI seeds a throwaway database
+with passwords, API keys, and private-key material, runs the collector, and fails
+if any of them reaches the output. The PostgreSQL connection is opened with
+`default_transaction_read_only=on`; Kubernetes access is `List` only.
+
+**Context never changes a grade.** Enrichment writes one optional field on a
+finding and touches nothing else. A property test runs every fixture in the
+repository twice — with and without a snapshot deliberately sized to trip any
+size-sensitive rule — and asserts the grade, effective grade, gate status, and
+every individual classification are identical. A stale snapshot (older than seven
+days) is used and flagged rather than discarded; a **missing** snapshot is not an
+error at all.
+
+New dependencies, quarantined to `internal/snapshot/collect`:
+`github.com/jackc/pgx/v5` and `k8s.io/client-go`, both pinned to the newest
+versions that still declare `go 1.22`.
+
+**The certificate schema is now `1.2.0`** — findings gained an optional `context`
+object, and the certificate gained `contextWarnings`. Nothing was removed or
+redefined.
+
+Documentation: [`docs/PRODUCTION-CONTEXT.md`](docs/PRODUCTION-CONTEXT.md) for what
+is collected and the grants it needs, [`docs/ESTIMATES.md`](docs/ESTIMATES.md) for
+every formula and where it will be wrong.
+
+### Added — the policy file
+
 **Policy file — `.reversibility.yml`.** Discovered by walking up from the analysis
 path, or named with `--config`, or ignored with `--no-config`. It carries a gate
 threshold, `ignore` globs, expiring waivers, and tighten-only overrides.

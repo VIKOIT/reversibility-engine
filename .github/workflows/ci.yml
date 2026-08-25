@@ -63,6 +63,28 @@ jobs:
   test:
     name: Test (race)
     runs-on: ubuntu-latest
+
+    # A throwaway PostgreSQL instance, so the snapshot collector is tested against a real
+    # database rather than a mock. The test that matters here asserts that a database seeded
+    # with obviously-sensitive values produces a snapshot containing none of them — "metadata
+    # only" is the whole basis on which anybody points this at production, and reviewing the
+    # queries by eye is not enough to keep it true.
+    #
+    # These tests skip when the variable is unset, which is what makes a local `go test ./...`
+    # work without Docker.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: throwaway-not-a-real-secret
+          POSTGRES_DB: revctl_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -70,6 +92,18 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
       - run: go test -race -count=1 ./...
+        env:
+          REVCTL_TEST_POSTGRES_DSN: postgres://postgres:throwaway-not-a-real-secret@localhost:5432/revctl_test?sslmode=disable
+
+      # A skipped test passes, so the one test this service exists for is confirmed to have
+      # actually run rather than quietly skipped past a broken service container.
+      - name: The redaction test must have run, not skipped
+        env:
+          REVCTL_TEST_POSTGRES_DSN: postgres://postgres:throwaway-not-a-real-secret@localhost:5432/revctl_test?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -run TestSnapshotContainsNoUserData -v ./internal/snapshot/collect/ | tee out.txt
+          grep -q -- '--- PASS: TestSnapshotContainsNoUserData' out.txt
 
   fuzz:
     name: Fuzz (smoke)

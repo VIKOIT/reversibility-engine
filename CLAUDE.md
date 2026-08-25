@@ -63,7 +63,7 @@ The v0.2 plan continues the same way. Each session is written up in full in
 | S8 | Git ref resolution: a `gitProvider` behind `--base` / `--head`. | **BUILT — awaiting approval** |
 | S9 | GitHub Action (`action.yml`) + release workflow. | **BUILT — awaiting approval** |
 | S10 | Policy file `.reversibility.yml` with expiring waivers. | **BUILT — awaiting approval** |
-| S11 | Production context snapshots (`revctl snapshot`, `--context`). | |
+| S11 | Production context snapshots (`revctl snapshot`, `--context`). | **BUILT — awaiting approval** |
 | S12 | Terraform plan analyzer. | |
 
 Update the Status column when a session is approved as complete.
@@ -82,6 +82,8 @@ internal/analyzer/kubernetes/
 internal/engine/                     Registry, orchestrator, scorer
 internal/provider/                   FileProvider interface: fs, git, github, fake
 internal/policy/                     .reversibility.yml: parse, validate, apply
+internal/snapshot/                   Snapshot types, canonical JSON, enrichment. NO drivers.
+internal/snapshot/collect/           pgx + client-go live here and ONLY here
 internal/render/                     json, markdown, sarif
 internal/delivery/cli/
 internal/delivery/github/
@@ -110,7 +112,22 @@ testdata/fixtures/
 | `github.com/pganalyze/pg_query_go/v5` | `internal/analyzer/postgres/parser` | S2, **cgo** (in go.mod) |
 | `github.com/google/go-github/v66` | `internal/delivery/github`, `internal/provider` | S6 (in go.mod) |
 | `sigs.k8s.io/yaml` (JSON-typed decode) + `gopkg.in/yaml.v3` (stream decoder) | `internal/analyzer/kubernetes`; `sigs.k8s.io/yaml` alone in `internal/policy` | S3, S10 |
+| `github.com/jackc/pgx/v5` | `internal/snapshot/collect` **only** | S11 |
+| `k8s.io/client-go` (+ `k8s.io/api`, `k8s.io/apimachinery`) | `internal/snapshot/collect` **only** | S11 |
 | `github.com/google/go-cmp` | tests only | S1 |
+
+**The two S11 drivers are quarantined by a test, not by convention.**
+`internal/snapshot/architecture_test.go` fails the build if `internal/domain`,
+`internal/analyzer/...`, `internal/engine`, or `internal/snapshot` can reach either one through
+any number of hops — and separately asserts that `internal/snapshot/collect` still does, so the
+guard cannot become vacuous. client-go is heavy: it took the module graph from 25 to 92. That
+cost buys the `--kube-context` collector and is paid by the `snapshot` command alone; analysis
+links none of it.
+
+Versions are pinned to the newest that still declare `go 1.22` — `pgx v5.6.0` and
+`client-go v0.31.13`. A plain `go get …@latest` silently rewrites the module's own go directive
+to 1.25 and breaks `golang:1.22-bookworm`; if that happens, pin back rather than bumping the
+toolchain without a decision.
 
 Adding anything else requires the owner's approval. `go.mod` is intentionally dependency-free
 until the session that first needs a given module — do not pre-add them.
@@ -152,7 +169,7 @@ type Finding struct {
 }
 
 type ReversibilityCertificate struct {
-    SchemaVersion  string    // "1.1.0" — bump on any breaking field change
+    SchemaVersion  string    // "1.2.0" — bump on any breaking field change
     Grade          Grade     // the measurement; no policy may move it
     EffectiveGrade Grade     // Grade minus waived findings; what CI compares (S10)
     AIGateStatus   string    // PASS | FAIL — follows Grade, never EffectiveGrade
@@ -163,8 +180,13 @@ type ReversibilityCertificate struct {
     Waived         []WaivedFinding // findings a live waiver accepted (S10)
     UndoPlan       []UndoStep
     Blockers       []string  // human-readable reasons for F
+    ContextWarnings []string // stale snapshots and the like (S11)
 }
 ```
+
+Findings gained two fields in S11: `Subject` (how a snapshot is matched to a finding, internal
+only) and `Context` (`*FindingContext` — row estimate, size, estimated duration, note). Both are
+optional and absent unless a snapshot was supplied.
 
 **LockHazard severity ordering** — required to evaluate `>=` and `<=` in the scoring rules.
 Derived from those rules, not invented:
@@ -457,6 +479,56 @@ Glob syntax in `ignore` and `waivers[].path` is `**` for whole segments, `*`/`?`
 one, delegating to `path.Match` per segment. **This is deliberately not git pathspec syntax** —
 pathspecs are what the git provider hands to git, these are what the policy matches, and two
 syntaxes under one name would be worse than two names.
+
+## 11g. Production context — as built in S11
+
+`revctl snapshot` writes a file; `revctl check --context` reads it. See
+[`docs/PRODUCTION-CONTEXT.md`](docs/PRODUCTION-CONTEXT.md) and
+[`docs/ESTIMATES.md`](docs/ESTIMATES.md).
+
+**The engine never connects to anything during analysis.** This is the binding constraint of the
+whole session, and it is enforced by the architecture test in §6, not by discipline. CI never
+needs a production credential, determinism survives, and the analyzers stay pure.
+
+- **Enrichment cannot change a classification.** `snapshot.Enrich` writes only `Finding.Context`;
+  Reversibility and LockHazard are restored after every call, so a future edit that reclassifies
+  from inside enrichment has no effect. The property test therefore asserts **equality** of grade
+  with and without context over every fixture, not merely "never better" — an inequality would
+  still permit somebody to invent a threshold, and equality fails the moment they try.
+- **The permission to raise severity was deliberately not taken up.** The brief says "a large
+  table raises severity", which needs a threshold, and thresholds are scoring weights §14 reserves
+  to the owner. Concrete proposals are in the S11 report; until one is ruled on, size is reported
+  and never scored.
+- **`Finding.Subject` was added so enrichment is possible at all.** Matching context to a finding
+  needs the table, column, or index name, and the only alternative was re-parsing `Statement` —
+  truncated, normalized, and it would take a regex. Analyzers populate it verbatim from the parsed
+  statement; what `Object` means depends on the rule, and the enricher already switches on rule ID.
+  It is serialized in the internal model and deliberately **absent from `pkg/certificate`**: it is
+  how the engine joins a finding to a snapshot, not a promise about how object names are spelled.
+- **An ambiguous subject gets no context.** An unqualified table name matching two schemas, or a
+  claim name matching two namespaces, resolves to nothing rather than to a guess. Context that
+  names the wrong object is worse than none, because context is believed.
+- **Only the six specified rule groups are enriched** — PG006/PG007, PG017, PG014/PG015, PG021,
+  K8S003, K8S004. `TestOnlySpecifiedRulesGainContext` rejects any other.
+- **K8S003 with `reclaimPolicy: Retain` records the fact and keeps the finding IRREVERSIBLE.**
+  The brief's own instruction, and the no-downgrade rule doing its job: recovery is manual, and no
+  snapshot should authorise a tool to grade data loss as reversible on somebody's behalf.
+- **Stale context is used and flagged, never discarded.** Falling back to none would make the
+  certificate quietly less informative exactly when somebody stopped refreshing the snapshot. A
+  **missing** file is not an error at all; a file that exists and cannot be read is exit 2.
+- **The context digest excludes `CollectedAt`.** It moves on every collection while the facts
+  usually do not, and a digest that changed whenever somebody re-ran an unchanged collection would
+  report a different certificate for an identical verdict.
+- **Metadata only, and it is tested rather than asserted.** `TestSnapshotContainsNoUserData` seeds
+  a throwaway database with passwords, API keys, and private-key material, runs the collector, and
+  searches the output for every one. The DSN is used and discarded — never stored, never logged,
+  never hashed into the fingerprint. Driver errors are scrubbed by `collect.Redact` because they
+  quote connection strings into CI logs.
+- **Read-only by construction:** `default_transaction_read_only=on` on the Postgres connection,
+  `List` only against Kubernetes.
+- **Estimates always carry a `~`.** The throughput constants are hard-coded, not configurable: a
+  knob would let somebody tune the estimate until it was reassuring, and a number tuned to
+  reassure is worse than no number.
 
 ## 12. Engineering standards
 

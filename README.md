@@ -160,6 +160,48 @@ grade A is the only verdict that permits an agent to merge.
 
 ---
 
+## Production context
+
+The engine classifies `ALTER COLUMN TYPE` as a table rewrite. Without seeing your
+database it cannot say whether that is 200 milliseconds or 14 minutes.
+
+```console
+$ revctl snapshot --dsn "$REPLICA_DSN" --out .reversibility/pg.json
+$ revctl check ./migrations --context .reversibility/pg.json
+
+- PG017 at 0042_tighten.up.sql:1 — Adding NOT NULL to orders.shipped_at forces a
+  scan of every row under lock…
+  - In production: THIS MIGRATION WILL FAIL. Column orders.shipped_at currently
+    contains nulls (about 31% of rows), and SET NOT NULL rejects the whole
+    statement if any row violates it. Backfill the column first. That is roughly
+    65.7M rows to fix.
+  - Estimated FULL_SCAN lock: ~3m — an approximation from table size, not a
+    measurement.
+```
+
+**The engine never connects to a database or a cluster during analysis.** A
+separate command writes a snapshot file; the analysis reads the file. So CI never
+holds a production credential, a certificate stays byte-identical between runs,
+and the analyzers stay pure functions over a changeset. An architecture test fails
+the build if the drivers can be reached from anywhere but the collector.
+
+**Metadata only.** Table sizes, row estimates, index scan counts, column null
+fractions; storage classes, claim capacities, replica counts. No row of user data,
+no column values, no Secrets, no connection string. That is tested, not asserted:
+CI seeds a throwaway database with passwords and API keys, runs the collector, and
+fails if any of them appears in the output.
+
+**Context never improves a grade — or changes one at all.** It writes one optional
+field on a finding and touches nothing else. A property test runs every fixture
+twice, with and without a snapshot sized to make any size-sensitive rule fire, and
+asserts the grades are identical.
+
+Full detail, including required grants and how to run it on a schedule:
+[`docs/PRODUCTION-CONTEXT.md`](docs/PRODUCTION-CONTEXT.md). Every formula behind
+every number: [`docs/ESTIMATES.md`](docs/ESTIMATES.md).
+
+---
+
 ## Policy — `.reversibility.yml`
 
 A gate with no legitimate escape hatch gets switched off entirely the first time
@@ -427,9 +469,11 @@ cacheable, and safe to use as a merge gate — a rerun never changes the verdict
 Stated plainly, because a safety tool that overstates its coverage is worse than
 none.
 
-- **Static analysis only.** The engine reads files; it never connects to a
-  database or a cluster. It cannot see table sizes, actual row counts, or whether
-  a column is truly unused.
+- **Static analysis only during a check.** The engine reads files; it never
+  connects to a database or a cluster while grading. `revctl snapshot` closes part
+  of the gap by collecting metadata beforehand — see
+  [Production context](#production-context) — but a snapshot is a description of
+  the past, and the classification itself is still made from the source alone.
 - **Git resolution needs the base commit present.** `--base origin/main` compares
   two refs through the merge base, the same comparison a pull request shows — but
   a shallow CI checkout does not contain the base commit. Set `fetch-depth: 0` on
