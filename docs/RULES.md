@@ -3,8 +3,8 @@
 **This document is the specification. The code is written to match it, not the other way
 around.** Where an implementation disagrees with a table below, the implementation is the bug.
 
-Two classification tables and one scoring procedure decide every grade the Reversibility Engine
-emits:
+Three classification tables and one scoring procedure decide every grade the Reversibility
+Engine emits:
 
 | | |
 | --- | --- |
@@ -12,6 +12,7 @@ emits:
 | [§2 Kubernetes](#2-kubernetes--k8s001-to-k8s015) | 15 rules over a structural manifest diff |
 | [§3 Scoring](#3-scoring) | how findings become a grade of A, B, C, or F |
 | [§4 Owner rulings](#4-owner-rulings) | decisions that resolve ambiguities in the above |
+| [§5 Terraform](#5-terraform--tf001-to-tf010) | 10 rules over plan JSON, backed by a resource-type catalog |
 
 ## The rule every other rule defers to
 
@@ -328,4 +329,86 @@ Resolved by the owner. Treat these as spec.
 3. **`type ChangeRef string`** — a commit SHA or PR ref.
    **`type UndoStep string`** — the exact command to run (an SQL statement or a `kubectl`
    invocation), not prose.
+
+## 5. Terraform — TF001 to TF010
+
+**Do not infer, extend, or soften this table.** Input is `terraform show -json` output and
+nothing else — **`terraform.tfstate` is never read**, because state holds provider credentials
+and attribute values in plaintext.
+
+Only destruction is classified. A created or updated-in-place resource has a reverse by
+construction, which is what keeps the catalog finite: the problem was never "hundreds of AWS
+resource types", it is the types whose destruction hurts. TF004 is the one deliberate exception.
+
+| Rule | Change | Reversibility |
+| --- | --- | --- |
+| TF001 | delete of a stateful resource | IRREVERSIBLE |
+| TF002 | forced replacement (delete + create) of a stateful resource | IRREVERSIBLE |
+| ~~TF003~~ | **RETIRED — never reused.** See below. | — |
+| TF004 | a recovery capability was switched off | IRREVERSIBLE |
+| TF005 | delete of a stateless resource | COSTLY |
+| TF006 | replacement of a stateless resource | COSTLY |
+| TF007 | in-place update | REVERSIBLE |
+| TF008 | create | REVERSIBLE |
+| TF009 | unparseable plan or unrecognized format version | UNKNOWN |
+| TF010 | delete of a type the catalog does not classify | UNKNOWN |
+
+Lock hazard is always NONE: Terraform takes no database lock. Plan format versions **1.0 and
+1.1** are read; any other version is TF009, never a best-effort guess.
+
+### The discriminator
+
+> A resource change is IRREVERSIBLE if it destroys data, destroys an identity that re-applying
+> the same configuration cannot recreate, **or destroys a recovery capability that a future
+> rollback would depend on.**
+
+The third clause is what TF004 fires on, and it is what makes TF001 on `aws_db_snapshot`
+coherent: deleting a snapshot destroys no running system, it destroys the undo. Same family.
+
+### Why TF003 is retired
+
+`prevent_destroy` is a `lifecycle` meta-argument, and the JSON configuration representation does
+not carry lifecycle blocks. The signal is also self-erasing: if `prevent_destroy` were still set,
+`terraform plan` fails and emits no plan, so **any plan containing a delete already proves it is
+not set**. Detecting its removal requires the previous configuration, which a plan does not
+contain. TF001 and TF002 catch the destroy itself, at the moment it matters.
+
+The number is never reused. A retired ID with a reason says the case was considered; a gap in the
+sequence reads as an oversight.
+
+### Classification order
+
+1. **Evidence in the plan**, before the catalog. Any of these on the `before` object marks the
+   resource STATEFUL: `allocated_storage`, `backup_retention_period`, `deletion_protection`,
+   `ephemeral_block_device`, `final_snapshot_identifier`, `kms_key_id`, `point_in_time_recovery`,
+   `private_key`, `snapshot_identifier`, `storage_encrypted`, `versioning`.
+   **Evidence may only raise.** Its absence implies nothing, never "stateless".
+   *Presence means present and meaningfully set*: `null`, `""`, `[]` and `{}` are not evidence;
+   `false` and `0` are, because the attribute existing is the schema signal.
+2. `force_destroy: true` or `skip_final_snapshot: true` on a destroyed object elevates to
+   IRREVERSIBLE **whatever the class**, because the author explicitly disabled the mechanism that
+   would have preserved anything.
+3. **The catalog**, `catalog/terraform/aws.yaml`.
+4. **User `terraform_types`** — classify an unknown type or tighten a known one. Never weaken.
+5. Nothing matched → TF010.
+
+**The type name is never matched.** `aws_db_subnet_group` contains "db" and holds nothing.
+
+### TF004 — the closed list
+
+Fires only on these exact paths and only in these directions. Anything else is TF007.
+
+| Path | Transition |
+| --- | --- |
+| `deletion_protection` | true → false |
+| `enable_deletion_protection` | true → false |
+| `skip_final_snapshot` | false → true |
+| `force_destroy` | false → true |
+| `backup_retention_period` | n > 0 → 0 |
+| `deletion_window_in_days` | n > 0 → 0 |
+| `versioning.enabled` | true → false |
+| `point_in_time_recovery.enabled` | true → false |
+
+Two paths reach one level into a block; that is the only nesting permitted. A named path list is
+auditable against this table, and general recursion into a provider-defined object is not.
 

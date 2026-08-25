@@ -18,6 +18,61 @@ move:
 
 ### Added
 
+**Terraform plan analyzer.** `revctl check` now classifies `terraform show -json`
+output: 10 rules (`TF001`–`TF010`) over a plan, backed by a catalog of AWS
+resource types.
+
+**It never reads `terraform.tfstate`.** State holds provider credentials and
+attribute values in plaintext; a plan does not, and there is no code path that
+opens one.
+
+**Only destruction is classified.** A created or updated-in-place resource has a
+reverse by construction, which is what keeps the catalog finite — the problem was
+never "hundreds of AWS resource types", it is the types whose destruction hurts.
+
+The discriminator, in three clauses: a change is irreversible if it destroys data,
+destroys an identity that re-applying the same configuration cannot recreate, **or
+destroys a recovery capability a future rollback would depend on.** The third
+clause is why `TF004` grades a one-line `deletion_protection = false` alongside
+deleting a snapshot — both destroy the undo rather than the system.
+
+Classification runs in layers: evidence in the plan first (an attribute like
+`allocated_storage` marks a type stateful whatever the catalog says), then the
+embedded catalog, then user `terraform_types` in `.reversibility.yml`, then
+`TF010`/UNKNOWN. Evidence and overrides may only ever raise severity. **The type
+name is never matched** — `aws_db_subnet_group` contains "db" and holds nothing.
+
+**92 AWS resource types classified, of roughly 1,400.** The stateless half is
+load-bearing rather than filler: an unclassified deleted type grades F, so the
+network, IAM, load-balancing and compute entries are what stand between a new user
+and an immediate failing gate.
+
+**No telemetry, and `check` never fetches.** The catalog is compiled in and works
+offline for the lifetime of the binary. When a plan destroys a type the catalog
+does not know, the certificate prints **one** `.reversibility.yml` snippet and
+**one** pre-filled issue link covering every unknown type — one, because six paste
+operations is where somebody switches the gate off instead. Nothing is sent
+anywhere; a human chooses to open the link.
+
+`revctl catalog show` prints the catalog's version, digest and coverage.
+`revctl catalog scan` is a maintainer tool that proposes candidates from a
+provider schema — it needs terraform on PATH, says so clearly when it is missing,
+and nothing in the check path depends on it.
+
+`--terraform-plan <path>` analyzes a plan whatever it is named; the default
+convention is `*.tfplan.json`, deliberately narrow so a stray `plan.json` in a
+repository does not grade F.
+
+**`TF003` is retired and its number will never be reused.** `prevent_destroy` is a
+`lifecycle` meta-argument, which the JSON configuration representation does not
+carry — and the signal is self-erasing, since a plan containing a delete already
+proves `prevent_destroy` is not set. `TF001`/`TF002` catch the destroy itself.
+
+**The certificate schema is now `1.4.0`** — `catalogVersion` was added, absent
+unless a plan was analyzed.
+
+### Added — the WILL_FAIL verdict
+
 **`WILL_FAIL` — a new reversibility verdict.** It means the change will not apply
 at all, as distinct from `IRREVERSIBLE`, which means it cannot be undone. One is a
 risk to weigh; the other is a defect, and the fix belongs in the migration rather

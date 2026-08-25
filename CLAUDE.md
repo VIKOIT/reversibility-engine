@@ -65,7 +65,7 @@ The v0.2 plan continues the same way. Each session is written up in full in
 | S10 | Policy file `.reversibility.yml` with expiring waivers. | **BUILT — awaiting approval** |
 | S11 | Production context snapshots (`revctl snapshot`, `--context`). | **DONE** |
 | S11-patch | `WILL_FAIL` verdict + lock duration bands. | **BUILT — awaiting approval** |
-| S12 | Terraform plan analyzer. | |
+| S12 | Terraform plan analyzer. | **BUILT — awaiting approval** |
 
 Update the Status column when a session is approved as complete.
 
@@ -80,6 +80,9 @@ internal/analyzer/                   Analyzer interface
 internal/analyzer/postgres/
 internal/analyzer/postgres/parser/   SQLParser interface, isolates cgo pg_query_go
 internal/analyzer/kubernetes/
+internal/analyzer/terraform/         Plan JSON. Reads plans only, never tfstate.
+catalog/terraform/aws.yaml           Resource-type classifications, embedded (public path
+                                     on purpose: contributors have to be able to find it)
 internal/engine/                     Registry, orchestrator, scorer
 internal/provider/                   FileProvider interface: fs, git, github, fake
 internal/policy/                     .reversibility.yml: parse, validate, apply
@@ -555,6 +558,88 @@ needs a production credential, determinism survives, and the analyzers stay pure
 - **Estimates always carry a `~`.** The throughput constants are hard-coded, not configurable: a
   knob would let somebody tune the estimate until it was reassuring, and a number tuned to
   reassure is worse than no number.
+
+## 11h. Terraform — as built in S12
+
+`internal/analyzer/terraform/` reads `terraform show -json`. **It never reads
+`terraform.tfstate`**: state holds provider credentials and attribute values in plaintext, a
+plan does not, and there is no code path here that opens one. The authoritative table is
+[`docs/RULES.md` §5](docs/RULES.md#5-terraform--tf001-to-tf010).
+
+**Only destruction is classified.** A created or updated-in-place resource has a reverse by
+construction. That is what keeps the catalog finite: the problem was never "hundreds of AWS
+resource types", it is "the types whose destruction hurts". TF004 is the one deliberate
+exception and it is bounded to a closed list of named paths.
+
+**The discriminator, in the owner's three clauses.** A resource change is IRREVERSIBLE if it
+destroys data, destroys an identity that re-applying the same configuration cannot recreate, **or
+destroys a recovery capability a future rollback would depend on.** The third clause is what
+TF004 fires on, and it is also what makes TF001 on `aws_db_snapshot` coherent — deleting a
+snapshot destroys no running system, it destroys the undo. Same family, and the rationale says so
+in as many words, because a user reading an F on a one-line boolean change is owed that.
+
+**TF003 is RETIRED and its number is never reused.** `prevent_destroy` is a `lifecycle`
+meta-argument, and the JSON configuration representation does not carry lifecycle blocks. The
+signal is also self-erasing: if `prevent_destroy` were still set, `terraform plan` would fail and
+produce no plan at all, so any plan containing a delete already proves it is not set. Detecting
+its *removal* needs the previous configuration, which a plan does not contain. Parsing `.tf`
+files was considered and rejected — a different analyzer with a different failure surface, and
+not worth a new dependency for a case TF001/TF002 already catch at the moment it matters. A
+retired ID with its reason tells a contributor the case was considered; a gap in the sequence
+reads as an oversight.
+
+**The layers, in the order they run.**
+
+1. **Evidence from the plan, before the catalog.** An attribute on the `before` object marks the
+   resource STATEFUL whatever the catalog says. Evidence may only RAISE: its absence implies
+   nothing at all, never "stateless".
+2. **The embedded catalog.** `catalog/terraform/aws.yaml`, compiled in via `embed.FS`.
+3. **User overrides** from `.reversibility.yml` `terraform_types`: classify an unknown type, or
+   tighten a known one. Weakening is a configuration error — that path is a waiver, which carries
+   a reason and an expiry and which per §11f changes the gate decision rather than the grade.
+4. Nothing matched → **TF010/UNKNOWN → F.**
+
+- **Presence means present AND meaningfully set.** null, `""`, `[]` and `{}` are not evidence;
+  `false` and `0` are, because the attribute existing at all is the schema signal. This is what
+  makes the `aws_instance` ruling work: `ephemeral_block_device` is present as `[]` on every EC2
+  instance, so key-existence alone would raise all of them and undo the STATELESS classification.
+  The same shape gives `aws_acm_certificate` its `private_key` key.
+- **The type name is NEVER matched.** `aws_db_subnet_group` contains "db" and holds nothing.
+  Names lie, and a regex over them would be a classification nobody could audit.
+- **TF004 is a closed list of named paths, not recursion.** Eight paths, six top-level and two
+  reaching exactly one level into a block (`versioning.enabled`,
+  `point_in_time_recovery.enabled`). A named list is auditable against the table; recursion into
+  a provider-defined object is not. Anything else is TF007/REVERSIBLE.
+- **TF009 and TF010 are different findings with different remedies.** "I cannot read this file"
+  versus "I read it and do not know this type". Both grade F; only TF010 carries the growth-loop
+  snippet.
+- **`*.tfplan.json` only, plus `--terraform-plan`.** Claiming `plan.json` would grade F on any
+  repository that happens to have one, because a file the analyzer claims and cannot read is
+  UNKNOWN. The flag is the escape hatch for a plan named otherwise; it matches by path suffix in
+  either direction, because a flag is typed relative to a shell and `Supports` is asked about the
+  changeset-relative path.
+- **The catalog is an input to the verdict, and reaches the certificate only when it was used.**
+  `CatalogVersion` on the certificate and the catalog digest in `InputDigest` — mixed in only when
+  an analyzer implementing `analyzer.CatalogVersioner` actually claimed a file. Registering the
+  analyzer therefore changed no existing digest and `verdicts.txt` did not move.
+
+**STRICTLY NO TELEMETRY, and `check` never fetches.** Nothing in this codebase sends anything
+anywhere. `revctl catalog update` is explicit and user-initiated; `revctl check` has no network
+path at all — not on a cache miss, not when the catalog is old, not ever — and the embedded
+catalog stays fully functional offline for the lifetime of the binary. The Layer 5 output is a
+URL printed in a certificate the reader is already looking at; a human chooses to open it.
+
+**`catalog scan` is a maintainer tool.** It shells out to `terraform providers schema -json`,
+fails with a message naming what to install when terraform is absent, skips its tests cleanly on
+a machine without it, and nothing in the check path depends on it. Its output is a proposal:
+every candidate has an empty evidence field, and an entry without one fails the build, which is
+what stops generated output being merged unread.
+
+**Coverage is published honestly.** 92 of roughly 1,400 AWS resource types. The raw count and the
+denominator both go in the docs — a project that knows its own limits reads better than one
+quoting a flattering ratio. The STATELESS half is load-bearing rather than filler: an
+unclassified deleted type grades F, so the network, IAM, load-balancing and compute groups are
+what stand between a new user and an immediate failing gate.
 
 ## 12. Engineering standards
 

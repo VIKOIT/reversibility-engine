@@ -274,6 +274,7 @@ how you see what the gate says without it.
 | --- | --- |
 | PostgreSQL `.sql` migrations | 27 classified rules (PG001–PG027) over a real PostgreSQL AST — dropped tables and columns, truncation, `CASCADE`, narrowing type changes, unqualified `DELETE`/`UPDATE`, lock hazards, and down-migration presence |
 | Rendered Kubernetes `.yaml` | 15 classified rules (K8S001–K8S015) over a structural diff — volume claim templates, selector mutations, PVC and storage-class changes, digest-pinned vs. floating images, removed probes, and workload strategy changes |
+| Terraform `*.tfplan.json` | 10 classified rules (TF001–TF010) over `terraform show -json`, backed by a catalog of 92 AWS resource types. Only destruction is classified — a create or an in-place update has a reverse by construction. **State files are never read**: they hold credentials in plaintext |
 
 The full, authoritative rule tables live in [`docs/RULES.md`](docs/RULES.md).
 They are the specification, not documentation of the code — the code is written
