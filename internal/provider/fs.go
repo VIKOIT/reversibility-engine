@@ -97,7 +97,7 @@ func (f *FS) readTrees(roots []string) (map[string][]byte, error) {
 		// A single file is addressed by its own name, so that "revctl check migrations/x.sql"
 		// reports the path the user typed.
 		if !info.IsDir() {
-			if f.included(root) {
+			if f.included(filepath.ToSlash(filepath.Base(root))) {
 				content, err := os.ReadFile(root)
 				if err != nil {
 					return nil, fmt.Errorf("fs provider: reading %s: %w", root, err)
@@ -130,7 +130,17 @@ func (f *FS) walk(root string, out map[string][]byte) error {
 			return nil
 		}
 
-		if !f.included(p) {
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return fmt.Errorf("relativising %s: %w", p, err)
+		}
+		rel = filepath.ToSlash(rel)
+
+		// The predicate is given the path as it will appear in the changeset, not the path on
+		// this machine. A caller matching "legacy/**" means the directory in the repository,
+		// and testing that against an absolute temp-directory path would silently match
+		// nothing — which for an ignore rule means analyzing exactly what was excluded.
+		if !f.included(rel) {
 			return nil
 		}
 
@@ -139,12 +149,7 @@ func (f *FS) walk(root string, out map[string][]byte) error {
 			return fmt.Errorf("reading %s: %w", p, err)
 		}
 
-		rel, err := filepath.Rel(root, p)
-		if err != nil {
-			return fmt.Errorf("relativising %s: %w", p, err)
-		}
-
-		out[filepath.ToSlash(rel)] = content
+		out[rel] = content
 		return nil
 	})
 	if err != nil {
