@@ -28,6 +28,11 @@ type Policy struct {
 	Waivers   []Waiver
 	Overrides []Override
 
+	// TerraformTypes classify Terraform resource types the catalog does not know, or tighten
+	// ones it does. The asymmetry — classify or tighten, never loosen — is enforced by the
+	// Terraform analyzer, which is the only thing that can see the catalog to compare against.
+	TerraformTypes []TerraformType
+
 	// Digest is the SHA-256 over the resolved policy. It goes into the certificate so that a
 	// verdict is attributable to the configuration that produced it as well as to the input.
 	Digest string
@@ -63,6 +68,16 @@ type Waiver struct {
 type Override struct {
 	Rule     string               `json:"rule"`
 	Severity domain.Reversibility `json:"severity"`
+}
+
+// TerraformType classifies a Terraform resource type.
+//
+// Permitted: naming a type the catalog does not carry, or tightening one it does. Prohibited:
+// weakening a catalog classification — that path is a waiver, which carries a reason and an
+// expiry and which changes the gate decision rather than the grade.
+type TerraformType struct {
+	Type  string `json:"type"`
+	Class string `json:"class"`
 }
 
 // Decision is the outcome of applying a policy to a set of findings.

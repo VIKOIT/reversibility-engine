@@ -45,11 +45,12 @@ const dateLayout = "2006-01-02"
 // file is the on-disk shape. It is separate from Policy so that decoding cannot populate the
 // resolved fields, and so unknown keys can be rejected against exactly the documented schema.
 type file struct {
-	Version   int        `json:"version"`
-	Gate      string     `json:"gate"`
-	Ignore    []string   `json:"ignore"`
-	Waivers   []Waiver   `json:"waivers"`
-	Overrides []Override `json:"overrides"`
+	Version        int             `json:"version"`
+	Gate           string          `json:"gate"`
+	Ignore         []string        `json:"ignore"`
+	Waivers        []Waiver        `json:"waivers"`
+	Overrides      []Override      `json:"overrides"`
+	TerraformTypes []TerraformType `json:"terraform_types"`
 }
 
 // Discover walks up from a starting directory looking for a policy file.
@@ -152,6 +153,18 @@ func Parse(raw []byte, path string, today time.Time) (*Policy, error) {
 		p.Overrides = append(p.Overrides, resolved)
 	}
 
+	for i, tt := range f.TerraformTypes {
+		if strings.TrimSpace(tt.Type) == "" {
+			return nil, fmt.Errorf("%w: %s: terraform_types[%d] names no type", domain.ErrInvalidPolicy, path, i)
+		}
+		class := strings.ToUpper(strings.TrimSpace(tt.Class))
+		if class != "STATEFUL" && class != "STATELESS" {
+			return nil, fmt.Errorf("%w: %s: terraform_types[%d] (%s) has class %q; want STATEFUL or STATELESS",
+				domain.ErrInvalidPolicy, path, i, tt.Type, tt.Class)
+		}
+		p.TerraformTypes = append(p.TerraformTypes, TerraformType{Type: strings.TrimSpace(tt.Type), Class: class})
+	}
+
 	p.Digest = digest(p)
 	return p, nil
 }
@@ -248,6 +261,10 @@ func digest(p *Policy) string {
 	for _, o := range p.Overrides {
 		writeField(h, []byte(o.Rule))
 		writeField(h, []byte(o.Severity))
+	}
+	for _, tt := range p.TerraformTypes {
+		writeField(h, []byte(tt.Type))
+		writeField(h, []byte(tt.Class))
 	}
 
 	return hex.EncodeToString(h.Sum(nil))

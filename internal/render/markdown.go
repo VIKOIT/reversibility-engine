@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/VIKOIT/reversibility-engine/internal/analyzer/terraform"
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
@@ -51,6 +52,7 @@ func (Markdown) Render(w io.Writer, cert domain.ReversibilityCertificate) error 
 	writeUndoPlan(&b, cert)
 	writeDownMigrations(&b, cert)
 	writeContextWarnings(&b, cert)
+	writeUnclassifiedTypes(&b, cert)
 	writeFooter(&b, cert)
 
 	if _, err := io.WriteString(w, b.String()); err != nil {
@@ -313,4 +315,40 @@ func mdCode(s string) string {
 		"\n", " ",
 	)
 	return replacer.Replace(s)
+}
+
+// writeUnclassifiedTypes is the growth loop: when a plan destroys a resource type the catalog
+// does not know, the certificate hands back everything needed to contribute it.
+//
+// ONE snippet and ONE link covering every unknown type in the plan. Six unknown types meaning
+// six paste operations is where somebody gives up and disables the gate instead, which costs
+// more safety than any one classification buys back.
+//
+// Nothing is sent anywhere. This is a link in output the reader is already looking at.
+func writeUnclassifiedTypes(b *strings.Builder, cert domain.ReversibilityCertificate) {
+	types := terraform.UnclassifiedTypes(allCertificateFindings(cert))
+	if len(types) == 0 {
+		return
+	}
+
+	b.WriteString("### Unclassified Terraform types\n\n")
+	fmt.Fprintf(b, "This plan destroys %d resource type(s) the catalog does not classify, so the engine cannot say what destroying them costs. Classify them locally, and please contribute them upstream so nobody else hits the same gap.\n\n",
+		len(types))
+
+	b.WriteString("Add to `.reversibility.yml`:\n\n```yaml\n")
+	b.WriteString(terraform.PolicySnippet(types))
+	b.WriteString("```\n\n")
+
+	fmt.Fprintf(b, "[Contribute these to the catalog](%s)\n\n", terraform.IssueURL(types, cert.CatalogVersion))
+}
+
+// allCertificateFindings returns findings and waived findings together, so a waived TF010 still
+// contributes its type to the suggestion. The gap in the catalog is the same gap either way.
+func allCertificateFindings(cert domain.ReversibilityCertificate) []domain.Finding {
+	out := make([]domain.Finding, 0, len(cert.Findings)+len(cert.Waived))
+	out = append(out, cert.Findings...)
+	for _, w := range cert.Waived {
+		out = append(out, w.Finding)
+	}
+	return out
 }

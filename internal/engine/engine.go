@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/VIKOIT/reversibility-engine/internal/analyzer"
@@ -113,6 +114,11 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 		digest = combineDigests(digest, e.context.Digest)
 	}
 
+	catalogVersion, catalogDigest := e.catalogs(files)
+	if catalogDigest != "" {
+		digest = combineDigests(digest, catalogDigest)
+	}
+
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -184,6 +190,7 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 		Applicable:      applicable,
 		InputDigest:     digest,
 		PolicyDigest:    e.policyDigest(),
+		CatalogVersion:  catalogVersion,
 		Findings:        nonNilFindings(decision.Findings),
 		Waived:          nonNilWaived(decision.Waived),
 		UndoPlan:        nonNilPlan(buildUndoPlan(decision.All)),
@@ -403,4 +410,43 @@ func (e *Engine) contextWarnings() []string {
 		return nil
 	}
 	return append([]string(nil), e.context.Warnings...)
+}
+
+// catalogs reports the identity of every data-table catalog that actually applied to this
+// changeset.
+//
+// "Actually applied" is the whole point. A catalog is an input to a verdict only when the
+// analyzer that owns it claimed a file, so the digest is mixed in only then — which keeps every
+// digest ever produced for a changeset with no Terraform plan exactly as it was, and keeps a
+// stored certificate comparable against a rerun.
+func (e *Engine) catalogs(files []domain.ChangedFile) (version, digest string) {
+	var versions, digests []string
+
+	for _, a := range e.analyzers {
+		versioner, ok := a.(analyzer.CatalogVersioner)
+		if !ok {
+			continue
+		}
+
+		claimed := false
+		for _, f := range files {
+			if a.Supports(f.Path) {
+				claimed = true
+				break
+			}
+		}
+		if !claimed {
+			continue
+		}
+
+		versions = append(versions, versioner.CatalogVersion())
+		digests = append(digests, versioner.CatalogDigest())
+	}
+
+	if len(versions) == 0 {
+		return "", ""
+	}
+
+	// The registry is already sorted by analyzer name, so these are stable.
+	return strings.Join(versions, ","), strings.Join(digests, ",")
 }

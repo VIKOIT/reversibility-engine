@@ -235,12 +235,11 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 	// Downstream merge gates parse this. Changing it is a deliberate, breaking act — if this
 	// test fails, the version was bumped, and that must be intentional.
 	//
-	// 1.3.0 added the WILL_FAIL reversibility and the lock duration band. WILL_FAIL is a NEW
-	// enum value, so a consumer that switches exhaustively on reversibility has a case it has
-	// not seen — which is why it is called out here rather than treated as another quiet
-	// addition. Every 1.0.0 field still means what it meant.
-	if domain.SchemaVersion != "1.3.0" {
-		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.3.0")
+	// 1.4.0 added CatalogVersion, which identifies the Terraform resource-type catalog that
+	// classified a plan. Additive and optional: it is absent unless a plan was analyzed. The
+	// version before it, 1.3.0, is the one that added a new enum value.
+	if domain.SchemaVersion != "1.4.0" {
+		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.4.0")
 	}
 }
 

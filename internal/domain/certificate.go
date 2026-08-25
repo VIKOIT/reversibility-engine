@@ -5,7 +5,7 @@ package domain
 
 // SchemaVersion is the version of the certificate wire format. It follows semantic versioning
 // and is bumped on any breaking field change, because downstream merge gates parse this.
-const SchemaVersion = "1.3.0"
+const SchemaVersion = "1.4.0"
 
 // DownMigrationStatus records the outcome of down-migration validation for one migration pair,
 // at the three levels defined in docs/RULES.md §1.
@@ -87,6 +87,11 @@ type ReversibilityCertificate struct {
 	// PolicyDigest is the SHA-256 over the resolved policy, or "" when no policy applied. It
 	// makes a verdict attributable to the configuration that produced it, not just the input.
 	PolicyDigest string `json:"policyDigest,omitempty"`
+
+	// CatalogVersion identifies the resource-type catalog that classified a Terraform plan, or
+	// "" when no plan was analyzed. The same plan can grade differently under two catalogs, and
+	// without this there would be no way to tell which one produced the verdict.
+	CatalogVersion string `json:"catalogVersion,omitempty"`
 
 	// ContextWarnings records what was wrong with the production snapshots that were supplied:
 	// a stale one, most often. They are warnings rather than findings because they are about

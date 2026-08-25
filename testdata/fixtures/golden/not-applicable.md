@@ -12,4 +12,4 @@ _No PostgreSQL migrations or Kubernetes manifests were found in this change, so 
 
 ---
 
-<sub>Reversibility Engine · schema 1.3.0 · input digest `fcc5feb8bb9243c71d87a4e66b27fedaa26a1cbf54651d4324ce333b2493f88e`</sub>
+<sub>Reversibility Engine · schema 1.4.0 · input digest `fcc5feb8bb9243c71d87a4e66b27fedaa26a1cbf54651d4324ce333b2493f88e`</sub>

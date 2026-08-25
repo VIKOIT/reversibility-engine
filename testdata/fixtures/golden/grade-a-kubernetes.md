@@ -31,4 +31,4 @@ kubectl set image Deployment/api api=ghcr.io/acme/api@sha256:3f79bb7b435b0532165
 
 ---
 
-<sub>Reversibility Engine · schema 1.3.0 · input digest `b10cfa10960f1f66198e1ea86f4a7555ae112d13269f365cbf63ca311e4eeb96`</sub>
+<sub>Reversibility Engine · schema 1.4.0 · input digest `b10cfa10960f1f66198e1ea86f4a7555ae112d13269f365cbf63ca311e4eeb96`</sub>

@@ -36,6 +36,7 @@ func NewFake(root string) *Fake { return &Fake{root: root} }
 // The subdirectory names that give a fixture its shape.
 const (
 	migrationsDir = "migrations"
+	planDir       = "plan"
 	oldDir        = "old"
 	newDir        = "new"
 )
@@ -62,6 +63,14 @@ func (f *Fake) ChangedFiles(ctx context.Context, ref domain.ChangeRef) ([]domain
 		if err != nil {
 			return nil, err
 		}
+	} else if _, err := os.Stat(filepath.Join(dir, planDir)); err == nil {
+		// A Terraform plan fixture: one generated document, added. Same shape as migrations/
+		// but named for what it holds, because calling a plan a migration would mislead every
+		// contributor who opened the directory.
+		files, err = f.readAllAdded(dir, planDir)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		files, err = f.readTreePair(dir)
 		if err != nil {
@@ -79,9 +88,18 @@ func (f *Fake) ChangedFiles(ctx context.Context, ref domain.ChangeRef) ([]domain
 // readMigrations treats every file under migrations/ as newly added, which is what a migration
 // pull request actually looks like.
 func (f *Fake) readMigrations(dir string) ([]domain.ChangedFile, error) {
+	return f.readAllAdded(dir, migrationsDir)
+}
+
+// readAllAdded treats every file under one subdirectory as newly added.
+//
+// Two fixture shapes use it: migrations/ for SQL and plan/ for a Terraform plan document. They
+// are the same operation and differ only in what the directory is called, which matters because
+// a contributor opening the directory should see the word for what is in it.
+func (f *Fake) readAllAdded(dir, sub string) ([]domain.ChangedFile, error) {
 	var out []domain.ChangedFile
 
-	root := filepath.Join(dir, migrationsDir)
+	root := filepath.Join(dir, sub)
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -108,7 +126,7 @@ func (f *Fake) readMigrations(dir string) ([]domain.ChangedFile, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("fake provider: reading migrations: %w", err)
+		return nil, fmt.Errorf("fake provider: reading %s: %w", sub, err)
 	}
 	return out, nil
 }

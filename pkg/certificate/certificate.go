@@ -193,6 +193,10 @@ type Certificate struct {
 	// PolicyDigest is the SHA-256 over the resolved policy, or "" when none applied.
 	PolicyDigest string `json:"policyDigest,omitempty"`
 
+	// CatalogVersion identifies the Terraform resource-type catalog that classified a plan, or
+	// "" when no plan was analyzed. The same plan can grade differently under two catalogs.
+	CatalogVersion string `json:"catalogVersion,omitempty"`
+
 	// ContextWarnings records what was wrong with the production snapshots supplied — a stale
 	// one, most often. Stale context is used and flagged rather than discarded, because silently
 	// falling back to none would make a certificate quietly less informative at exactly the
@@ -228,6 +232,7 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 		Applicable:      in.Applicable,
 		InputDigest:     in.InputDigest,
 		PolicyDigest:    in.PolicyDigest,
+		CatalogVersion:  in.CatalogVersion,
 		ContextWarnings: in.ContextWarnings,
 		Findings:        make([]Finding, 0, len(in.Findings)),
 		Waived:          make([]WaivedFinding, 0, len(in.Waived)),
