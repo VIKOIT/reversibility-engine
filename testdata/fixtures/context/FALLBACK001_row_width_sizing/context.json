@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "postgres",
+  "environment": "fixture",
+  "collectedAt": "2026-08-25T00:00:00Z",
+  "sourceFingerprint": "fixture00000000000000000000000000000000000000000000000000000000",
+  "postgres": {
+    "tables": [{"schema":"public","name":"orders","rowEstimate":20000000,"sizeBytes":0,"totalSizeBytes":0}],
+    "indexes": [],
+    "columns": [
+      {"schema":"public","table":"orders","name":"id","nullFraction":0,"averageWidth":8},
+      {"schema":"public","table":"orders","name":"total","nullFraction":0,"averageWidth":8},
+      {"schema":"public","table":"orders","name":"region","nullFraction":0,"averageWidth":64},
+      {"schema":"public","table":"orders","name":"notes","nullFraction":0,"averageWidth":32}
+    ]
+  }
+}

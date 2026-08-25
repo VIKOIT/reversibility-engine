@@ -1,0 +1,9 @@
+{
+  "rule": "OUTAGE",
+  "note": "200 GiB scanned at 200 MiB/s is roughly seventeen minutes of held lock. This is the one band that lowers a grade in practice: B becomes C.",
+  "grade": "C",
+  "gradeWithoutContext": "B",
+  "findings": [
+    {"ruleId":"PG021","file":"migrations/0001_validate.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"FULL_SCAN","wantUndoStep":true,"lockDurationBand":"OUTAGE"}
+  ]
+}

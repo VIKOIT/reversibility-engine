@@ -1,0 +1,9 @@
+{
+  "rule": "INCOMPLETE",
+  "note": "A row count with no size and no column widths cannot be turned into bytes. The engine does not guess: the context is treated as absent for this finding, so there is no band and no note, and the grade is exactly what it is with no snapshot at all. Absence of evidence is not evidence of safety — it is simply absence.",
+  "grade": "B",
+  "gradeWithoutContext": "B",
+  "findings": [
+    {"ruleId":"PG021","file":"migrations/0001_validate.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"FULL_SCAN","wantUndoStep":true}
+  ]
+}

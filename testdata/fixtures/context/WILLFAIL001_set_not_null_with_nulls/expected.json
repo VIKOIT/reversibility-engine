@@ -1,0 +1,9 @@
+{
+  "rule": "WILL_FAIL",
+  "note": "31% of rows have a null region, so SET NOT NULL aborts and rolls the transaction back. That is a certainty rather than a risk, so the classification is WILL_FAIL and the grade is F. No band is computed: the statement never holds a lock for any length of time, and a duration beside 'this will not run' would be noise dressed as precision.",
+  "grade": "F",
+  "gradeWithoutContext": "B",
+  "findings": [
+    {"ruleId":"PG017","file":"migrations/0001_region_not_null.up.sql","line":1,"reversibility":"WILL_FAIL","lockHazard":"FULL_SCAN","wantUndoStep":true}
+  ]
+}

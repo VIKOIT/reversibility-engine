@@ -1,0 +1,9 @@
+{
+  "rule": "FALLBACK",
+  "note": "pg_relation_size is unavailable, so the size is derived from 20M rows times the SUMMED per-column avg_width (8+8+64+32 = 112 bytes). That is 2.24 GB, roughly eleven seconds at 200 MiB/s: NOTICEABLE. Summing matters — one column's width is not a row width, and using avg_width of a single column would have understated this table fourteenfold.",
+  "grade": "B",
+  "gradeWithoutContext": "B",
+  "findings": [
+    {"ruleId":"PG021","file":"migrations/0001_validate.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"FULL_SCAN","wantUndoStep":true,"lockDurationBand":"NOTICEABLE"}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "rule": "PG017",
+  "note": "The same migration against a column with no nulls. The classification is exactly what it is without any snapshot — COSTLY, FULL_SCAN — and the only difference is a NEGLIGIBLE band and a note. This is the fixture that proves context did not become a way to fail migrations that are fine.",
+  "grade": "B",
+  "gradeWithoutContext": "B",
+  "findings": [
+    {"ruleId":"PG017","file":"migrations/0001_region_not_null.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"FULL_SCAN","wantUndoStep":true,"lockDurationBand":"NEGLIGIBLE"}
+  ]
+}

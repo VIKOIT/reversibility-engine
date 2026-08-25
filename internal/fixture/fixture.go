@@ -18,6 +18,17 @@ import (
 // ExpectationFile is the name of the expectation document inside every fixture directory.
 const ExpectationFile = "expected.json"
 
+// ContextFile is the optional production snapshot inside a fixture directory.
+//
+// Only fixtures in the "context" group carry one. It exists so that band scoring and WILL_FAIL
+// are pinned as data rather than as Go literals, the same way every classification already is.
+const ContextFile = "context.json"
+
+// ContextPath returns the snapshot path for a fixture, whether or not one exists.
+func ContextPath(root, group, name string) string {
+	return filepath.Join(root, group, name, ContextFile)
+}
+
 // Root locates testdata/fixtures by walking up from the working directory to the module root.
 //
 // Tests run with the working directory set to their own package, so a relative path would
@@ -56,6 +67,11 @@ type Finding struct {
 	// WantUndoStep asserts only presence or absence. An IRREVERSIBLE finding must carry no
 	// undo step, because offering one would be a lie.
 	WantUndoStep bool `json:"wantUndoStep"`
+
+	// LockDurationBand is asserted only by fixtures that supply a production snapshot. Empty
+	// means "assert that no band was computed", which is what the fixtures for absent and
+	// underivable context exist to prove.
+	LockDurationBand domain.LockDurationBand `json:"lockDurationBand,omitempty"`
 }
 
 // DownMigration is the asserted outcome of down-migration validation for one migration pair.
@@ -80,6 +96,17 @@ type Expectation struct {
 	// DownMigrations is asserted only by the fixtures that exist to test down-migration
 	// validation; elsewhere it is nil and not compared.
 	DownMigrations []DownMigration `json:"downMigrations"`
+
+	// Grade is the whole-changeset grade, asserted only by context fixtures. Band scoring is a
+	// property of the certificate rather than of any one finding, so it can only be pinned here.
+	Grade domain.Grade `json:"grade,omitempty"`
+
+	// GradeWithoutContext is what the same changeset grades with the snapshot withheld.
+	//
+	// Writing both down is what makes the direction of the rule visible as data: every context
+	// fixture states the grade it had before and the grade it has after, and a test asserts the
+	// second is never better than the first.
+	GradeWithoutContext domain.Grade `json:"gradeWithoutContext,omitempty"`
 }
 
 // Case is one fixture: its directory name, the reference that resolves it, and what it asserts.

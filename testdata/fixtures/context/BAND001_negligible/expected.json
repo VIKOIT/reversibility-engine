@@ -1,0 +1,9 @@
+{
+  "rule": "NEGLIGIBLE",
+  "note": "A FULL_SCAN validation against a table sized to land in the NEGLIGIBLE band. Scanning runs at 200 MiB/s, so 104857600 bytes is what that band means in practice.",
+  "grade": "B",
+  "gradeWithoutContext": "B",
+  "findings": [
+    {"ruleId":"PG021","file":"migrations/0001_validate.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"FULL_SCAN","wantUndoStep":true,"lockDurationBand":"NEGLIGIBLE"}
+  ]
+}

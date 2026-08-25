@@ -69,16 +69,17 @@ func productionContext(t *testing.T) *snapshot.Set {
 	return set
 }
 
-// THE PROPERTY THE SESSION BRIEF DEMANDS, in its strongest form.
+// THE PROPERTY THE WHOLE FEATURE RESTS ON.
 //
-// Context may never improve a grade. As built it cannot change one at all — enrichment writes
-// only the Context field — so this asserts equality rather than an inequality. That is a
-// stronger and much easier property to keep: an inequality would still permit a future edit to
-// invent a threshold, and equality fails the moment anybody tries.
+// Context may LOWER a grade — A to B to C to F — and may never RAISE one. The vocabulary is the
+// trap here, so concretely: with a snapshot, the grade may get worse or stay the same, and it
+// must never get better. A small table does not turn a C into a B, because the absence of
+// evidence of a problem is not evidence of safety.
 //
-// Every fixture in the repository is run twice, with and without a snapshot sized to make any
-// size-sensitive rule fire if one existed.
-func TestContextNeverChangesAGradeForAnyFixture(t *testing.T) {
+// Every fixture in the repository is run twice, with and without a snapshot deliberately sized
+// to trip every band, and the ranks are compared. Grade.Rank orders A high and F low, so "never
+// better" is "rank never increases".
+func TestContextNeverRaisesAGradeForAnyFixture(t *testing.T) {
 	t.Parallel()
 
 	root, err := fixture.Root()
@@ -113,32 +114,35 @@ func TestContextNeverChangesAGradeForAnyFixture(t *testing.T) {
 				before, _ := plain.Certify(context.Background(), changed)
 				after, _ := enriched.Certify(context.Background(), changed)
 
-				if after.Grade != before.Grade {
-					t.Errorf("context changed the grade: %q without, %q with", before.Grade, after.Grade)
+				if after.Grade.Rank() > before.Grade.Rank() {
+					t.Errorf("context RAISED the grade from %q to %q; it may only lower one",
+						before.Grade, after.Grade)
 				}
-				if after.EffectiveGrade != before.EffectiveGrade {
-					t.Errorf("context changed the effective grade: %q without, %q with",
+				if after.EffectiveGrade.Rank() > before.EffectiveGrade.Rank() {
+					t.Errorf("context raised the effective grade from %q to %q",
 						before.EffectiveGrade, after.EffectiveGrade)
 				}
-				if after.AIGateStatus != before.AIGateStatus {
-					t.Errorf("context changed the AI merge gate: %q without, %q with",
-						before.AIGateStatus, after.AIGateStatus)
+				if before.AIGateStatus == domain.GateFail && after.AIGateStatus == domain.GatePass {
+					t.Error("context opened the AI merge gate on a change that failed it without one")
 				}
 				if len(after.Findings) != len(before.Findings) {
 					t.Errorf("context changed the number of findings: %d without, %d with",
 						len(before.Findings), len(after.Findings))
 				}
 
-				// The classification of every finding must survive untouched, not just the
-				// aggregate. A pair of compensating changes would keep the grade and still be
-				// a reclassification.
+				// Per finding, the same one-way rule: a classification may only get more severe.
+				// A pair of compensating changes would keep the grade and still have weakened
+				// something.
 				for i := range after.Findings {
-					if after.Findings[i].Reversibility != before.Findings[i].Reversibility ||
-						after.Findings[i].LockHazard != before.Findings[i].LockHazard {
-						t.Errorf("context reclassified %s: %s/%s became %s/%s",
-							before.Findings[i].RuleID,
-							before.Findings[i].Reversibility, before.Findings[i].LockHazard,
-							after.Findings[i].Reversibility, after.Findings[i].LockHazard)
+					a, b := after.Findings[i], before.Findings[i]
+					if a.Reversibility.Severity() < b.Reversibility.Severity() {
+						t.Errorf("context weakened %s from %s to %s",
+							b.RuleID, b.Reversibility, a.Reversibility)
+					}
+					if a.LockHazard != b.LockHazard {
+						t.Errorf("context changed the lock hazard on %s from %s to %s; "+
+							"context describes how long a lock is held, never which lock is taken",
+							b.RuleID, b.LockHazard, a.LockHazard)
 					}
 				}
 			})
@@ -266,4 +270,79 @@ func TestStaleContextWarnsOnTheCertificate(t *testing.T) {
 	if cert.Grade != plain.Grade {
 		t.Errorf("a stale snapshot changed the grade: %q, want %q", cert.Grade, plain.Grade)
 	}
+}
+
+// MANDATORY REGRESSION. Every fixture must grade exactly as it did before production context
+// existed, when no snapshot is supplied.
+//
+// The band caps and WILL_FAIL are reached only from a snapshot, so a repository that never
+// collects one must see a byte-identical verdict. testdata/fixtures/golden/verdicts.txt pins the
+// grade, gate, counts, and digest of all 46 fixtures and is regenerated deliberately; this
+// asserts the same property directly, so a failure names the fixture rather than showing a diff.
+func TestNoContextGradesIdenticallyToTheGoldenVerdicts(t *testing.T) {
+	t.Parallel()
+
+	root, err := fixture.Root()
+	if err != nil {
+		t.Fatalf("locating fixtures: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, "golden", "verdicts.txt"))
+	if err != nil {
+		t.Fatalf("reading the verdict snapshot: %v", err)
+	}
+
+	// The golden file lists one fixture per line as "<ref> <grade> <gate> …". Only the grade is
+	// compared here; the rest is the golden test's business.
+	want := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		// The golden file spells each column "key=value"; only the grade is compared here.
+		want[parts[0]] = strings.TrimPrefix(parts[1], "grade=")
+	}
+	if len(want) == 0 {
+		t.Fatal("the verdict snapshot yielded no fixtures; the format changed and this test is now vacuous")
+	}
+
+	files := provider.NewFake(root)
+	eng := engine.New([]analyzer.Analyzer{postgres.New(), kubernetes.New()})
+
+	checked := 0
+	for _, group := range []string{"postgres", "kubernetes"} {
+		cases, err := fixture.Cases(root, group)
+		if err != nil {
+			t.Fatalf("loading %s fixtures: %v", group, err)
+		}
+
+		for _, tc := range cases {
+			expected, ok := want[string(tc.Ref)]
+			if !ok {
+				continue
+			}
+
+			changed, err := files.ChangedFiles(context.Background(), tc.Ref)
+			if err != nil {
+				t.Fatalf("%s: reading the fixture: %v", tc.Ref, err)
+			}
+
+			cert, _ := eng.Certify(context.Background(), changed)
+			if string(cert.Grade) != expected {
+				t.Errorf("%s grades %q with no context, but the pinned verdict is %q",
+					tc.Ref, cert.Grade, expected)
+			}
+			checked++
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("no fixture was compared against the verdict snapshot")
+	}
+	t.Logf("%d fixtures grade identically with no context", checked)
 }

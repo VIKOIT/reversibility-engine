@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "postgres",
+  "environment": "fixture",
+  "collectedAt": "2026-08-25T00:00:00Z",
+  "sourceFingerprint": "fixture00000000000000000000000000000000000000000000000000000000",
+  "postgres": {
+    "tables": [{"schema":"public","name":"orders","rowEstimate":1000000,"sizeBytes":2147483648,"totalSizeBytes":2147483648}],
+    "indexes": [],
+    "columns": []
+  }
+}
