@@ -17,8 +17,27 @@ emits:
 
 **Unknown means unsafe.** An error, a panic, an unparseable file, or a construct no rule
 describes must never become a passing grade. Every such path terminates in **F**. There is no
-"probably fine": a verdict is `REVERSIBLE`, `COSTLY`, `IRREVERSIBLE`, or `UNKNOWN`, and `UNKNOWN`
-fails.
+"probably fine": a verdict is `REVERSIBLE`, `COSTLY`, `IRREVERSIBLE`, `UNKNOWN`, or `WILL_FAIL`,
+and the last three all fail.
+
+### The verdicts
+
+| Verdict | Means | Severity |
+| --- | --- | --- |
+| `REVERSIBLE` | The change can be undone with no data loss. | 0 |
+| `COSTLY` | It can be undone, but the undo is expensive, slow, or only correct within a window. | 1 |
+| `UNKNOWN` | The engine could not determine the verdict. Treated as unsafe, never as safe. | 2 |
+| `IRREVERSIBLE` | **You cannot undo this.** Undoing it cannot restore the prior state. | 3 |
+| `WILL_FAIL` | **This will not even apply.** Production state has been checked and the statement is certain to abort. | 4 |
+
+`WILL_FAIL` and `IRREVERSIBLE` are different failures and are reported as different failures.
+One says the change cannot be reversed; the other says it will never happen, so there is nothing
+to reverse and the fix belongs in the migration rather than in the rollback plan. A reader who
+confuses them fixes the wrong thing.
+
+`WILL_FAIL` is the only verdict that requires evidence beyond the source. It is never reached
+from a guess: it exists because a production snapshot proved the statement cannot succeed. With
+no snapshot, no rule in this document produces it.
 
 ## Changing a rule
 
@@ -70,6 +89,14 @@ one by guessing.
 | PG025 | `CREATE TABLE` / `CREATE VIEW` / `CREATE TYPE` | REVERSIBLE | NONE |
 | PG026 | `ALTER COLUMN DROP NOT NULL` / `SET DEFAULT` / `DROP DEFAULT` | REVERSIBLE | SHORT |
 | PG027 | unparsed or unrecognized statement | UNKNOWN | EXCLUSIVE |
+
+**PG017 with a production snapshot.** When `pg_stats.null_frac > 0` for the column being
+constrained, `SET NOT NULL` validates every existing row, finds a violation, and aborts —
+rolling the transaction back. That is a certainty rather than a risk, so the verdict becomes
+`WILL_FAIL` and the grade becomes **F**. Table size stops mattering at that point and no duration
+band is computed: the statement never holds a lock for any length of time, and printing a
+duration beside "this will not run" would be noise dressed as precision. With `null_frac == 0`,
+or with no snapshot, PG017 is exactly what the table above says.
 
 **Rationale notes that must be embedded in output:**
 
@@ -196,6 +223,7 @@ K8S015 applies only when the new image carries an explicit `@sha256:` (or `@sha5
 ```
 Any IRREVERSIBLE  -> F
 Any UNKNOWN       -> F        (fail-closed, no exceptions)
+Any WILL_FAIL     -> F        (the migration cannot apply)
 Any analyzer error -> F       (never degrade to a passing grade)
 
 Otherwise:
@@ -204,7 +232,37 @@ Otherwise:
   1-2 COSTLY findings                        -> B
   LockHazard >= TABLE_REWRITE present        -> cap at B
   all REVERSIBLE, lock <= SHORT, down.sql ok -> A
+
+With a production snapshot, additionally:
+  LockDurationBand == DISRUPTIVE             -> cap at B
+  LockDurationBand == OUTAGE                 -> cap at C
 ```
+
+### Lock duration bands
+
+A band is computed **only** when both hold: the lock hazard is at least `FULL_SCAN`, and a
+production snapshot established the size of what the lock covers.
+
+| Band | Estimated duration | Effect on the grade |
+| --- | --- | --- |
+| `NEGLIGIBLE` | under 1s | none |
+| `NOTICEABLE` | 1s – 30s | none |
+| `DISRUPTIVE` | 30s – 5m | cap at B |
+| `OUTAGE` | over 5m | cap at C |
+
+**A band may only lower a grade, never raise one.** "Lower" means worse: A → B → C → F. A
+`NEGLIGIBLE` band imposes nothing at all — a small table does not turn a C into a B, because the
+absence of evidence of a problem is not evidence of safety. The same is true of an absent band: a
+missing snapshot, a stale one, or a table the snapshot does not describe all leave the grade
+exactly where it was.
+
+Note that `DISRUPTIVE`'s ceiling is already implied by the `FULL_SCAN` condition that gates the
+band in the first place, so in practice `OUTAGE` is the only band that moves a grade. The cap is
+implemented anyway, so that the two rules stay independent.
+
+Durations come from `size_bytes / rate`, with the rate chosen by lock hazard and both rates
+documented in [`ESTIMATES.md`](ESTIMATES.md). **They are estimates and are labelled as estimates
+wherever they appear.**
 
 ```
 AIGateStatus = PASS  <=>  Grade == A

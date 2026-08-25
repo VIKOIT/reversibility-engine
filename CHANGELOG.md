@@ -18,6 +18,52 @@ move:
 
 ### Added
 
+**`WILL_FAIL` — a new reversibility verdict.** It means the change will not apply
+at all, as distinct from `IRREVERSIBLE`, which means it cannot be undone. One is a
+risk to weigh; the other is a defect, and the fix belongs in the migration rather
+than in the rollback plan. It ranks above `IRREVERSIBLE`, always grades **F**, and
+is reported separately in the blockers, the undo plan, SARIF, and Markdown.
+
+It is reached from evidence only. Today that means one thing: `SET NOT NULL`
+against a column a production snapshot shows contains nulls. Postgres validates
+every existing row and a single violation aborts the statement and rolls the
+transaction back, so this is a certainty rather than a risk — and no lock duration
+is estimated for it, because the statement never gets far enough to hold one.
+
+**Lock duration bands.** With a snapshot, a lock hazard of `FULL_SCAN` or heavier
+is bucketed by how long it is expected to be held:
+
+| Band | Duration | Effect |
+| --- | --- | --- |
+| `NEGLIGIBLE` | under 1s | none |
+| `NOTICEABLE` | 1s – 30s | none |
+| `DISRUPTIVE` | 30s – 5m | grade no better than B |
+| `OUTAGE` | over 5m | grade no better than C |
+
+**A band may only lower a grade, never raise one** — lower meaning worse. A small
+table does not turn a C into a B; the absence of evidence of a problem is not
+evidence of safety. A missing snapshot, a stale one, or a fingerprint that does
+not match is treated as absent, never as reassurance.
+
+When `pg_relation_size` is unavailable, size falls back to
+`reltuples × Σ(avg_width across ALL columns of the table)`. `avg_width` is per
+column and the sum matters: one column's width is not a row width. When neither is
+available the engine does not guess — the context is treated as absent for that
+finding.
+
+New fixture group `testdata/fixtures/context/`, one fixture per band plus both
+`SET NOT NULL` cases, the fallback path, and an incomplete snapshot. Each names the
+grade it has with the snapshot and without it, so the direction of the rule is
+checkable as data. A mandatory regression asserts all 47 existing fixtures grade
+identically when no snapshot is supplied.
+
+**The certificate schema is now `1.3.0`.** `WILL_FAIL` is a new value in an
+existing enum, so a consumer that switches exhaustively on reversibility has a case
+it has not seen — the one change here that warrants attention rather than a
+footnote.
+
+### Added — production context
+
 **Production context — `revctl snapshot` and `revctl check --context`.** The
 engine can now say that a rewrite covers 212M rows and roughly 48 GiB, that
 dropping an index nothing has read is genuinely cheap, and — most usefully — that

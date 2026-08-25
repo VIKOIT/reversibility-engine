@@ -23,6 +23,31 @@ that has since moved on.
 
 ---
 
+## Bands, and what they change
+
+An estimate is bucketed before it is scored. A band is the most precision the arithmetic
+supports, and scoring against a bucket means a 10% error in the estimate almost never changes a
+verdict.
+
+| Band | Estimated duration | Effect on the grade |
+| --- | --- | --- |
+| `NEGLIGIBLE` | under 1s | none |
+| `NOTICEABLE` | 1s – 30s | none |
+| `DISRUPTIVE` | 30s – 5m | cap at B |
+| `OUTAGE` | over 5m | cap at C |
+
+A band is computed **only** when the lock hazard is at least `FULL_SCAN` **and** a snapshot
+established a size. It may only lower a grade — A → B → C → F — and never raise one.
+
+Two consequences worth stating plainly:
+
+- **A small table changes nothing.** `NEGLIGIBLE` imposes no ceiling. The absence of evidence of
+  a problem is not evidence of safety, so a C stays a C.
+- **`DISRUPTIVE` rarely moves anything in practice.** Any finding with a `FULL_SCAN` or heavier
+  lock is already capped at B by the scoring rules, so `DISRUPTIVE`'s own cap of B is usually
+  already satisfied. `OUTAGE` is the band that actually changes a verdict. The cap is implemented
+  anyway, so the two rules stay independent of each other.
+
 ## The formulas
 
 ### Table rewrite — `PG006`, `PG007`
@@ -49,10 +74,43 @@ duration ≈ pg_relation_size / 200 MiB/s
 **200 MiB/s** assumes the table is not in cache. A table already in shared buffers is far faster;
 a table on cold storage under contention is slower.
 
+### When `pg_relation_size` is missing — the fallback
+
+```
+size_bytes ≈ reltuples × Σ(pg_stats.avg_width across ALL columns of the table)
+```
+
+then divided by the same rate as above.
+
+**`avg_width` is per column.** The widths of every column the snapshot knows about are summed to
+make a row width. One column's width is not a row width, and using it as one would understate a
+fourteen-column table by roughly fourteen times — which would silently drop an `OUTAGE` to
+`NEGLIGIBLE`.
+
+`pg_stats` only lists columns that have been analyzed, so the sum can still understate a wide
+table. That is the safe direction: a smaller estimate produces a milder band, a milder band
+imposes a weaker ceiling, and a weaker ceiling can only leave a grade where it already was.
+
+**If neither a size nor any column width is available, the engine does not guess.** The context
+is treated as absent for that finding: no band, no note, and exactly the grade the change would
+have had with no snapshot at all.
+
 ### No estimate at all — `PG014`, `PG015`
 
 Dropping an index is fast regardless of size. What matters is the lock and the rebuild cost, so
 the index's size and scan count are reported and no duration is invented.
+
+This is why a rate is defined for `TABLE_REWRITE` and `FULL_SCAN` and for nothing else. `PG014`
+takes an `EXCLUSIVE` lock, which is more severe than `FULL_SCAN` and therefore passes the band
+gate — but an index drop is not slower for being large, and applying a scan rate to it would
+report a two-gigabyte index as an `OUTAGE` and cap the grade at C for an operation that finishes
+in milliseconds. A band exists only where duration genuinely scales with size.
+
+### No estimate at all — `PG017` when it will fail
+
+When a snapshot proves the column contains nulls, `SET NOT NULL` aborts. The verdict becomes
+`WILL_FAIL` and no duration is computed: the statement never holds a lock for any length of time,
+and a number beside "this will not run" would be noise dressed as precision.
 
 ---
 

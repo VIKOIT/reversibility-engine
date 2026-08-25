@@ -63,7 +63,8 @@ The v0.2 plan continues the same way. Each session is written up in full in
 | S8 | Git ref resolution: a `gitProvider` behind `--base` / `--head`. | **BUILT — awaiting approval** |
 | S9 | GitHub Action (`action.yml`) + release workflow. | **BUILT — awaiting approval** |
 | S10 | Policy file `.reversibility.yml` with expiring waivers. | **BUILT — awaiting approval** |
-| S11 | Production context snapshots (`revctl snapshot`, `--context`). | **BUILT — awaiting approval** |
+| S11 | Production context snapshots (`revctl snapshot`, `--context`). | **DONE** |
+| S11-patch | `WILL_FAIL` verdict + lock duration bands. | **BUILT — awaiting approval** |
 | S12 | Terraform plan analyzer. | |
 
 Update the Status column when a session is approved as complete.
@@ -153,7 +154,7 @@ placeholder fetch code — use `fakeProvider`.
 ## 8. Domain types
 
 ```go
-type Reversibility string // REVERSIBLE, COSTLY, IRREVERSIBLE, UNKNOWN
+type Reversibility string // REVERSIBLE, COSTLY, IRREVERSIBLE, UNKNOWN, WILL_FAIL
 type LockHazard   string // NONE, SHORT, FULL_SCAN, TABLE_REWRITE, EXCLUSIVE
 type Grade        string // A, B, C, F
 
@@ -185,8 +186,15 @@ type ReversibilityCertificate struct {
 ```
 
 Findings gained two fields in S11: `Subject` (how a snapshot is matched to a finding, internal
-only) and `Context` (`*FindingContext` — row estimate, size, estimated duration, note). Both are
-optional and absent unless a snapshot was supplied.
+only) and `Context` (`*FindingContext` — row estimate, size, estimated duration, band, note).
+Both are optional and absent unless a snapshot was supplied.
+
+**Reversibility severity ordering** — used for rule precedence and for the one-way ratchet on
+enrichment. `WILL_FAIL` outranks everything an analyzer can produce from source alone:
+
+```
+REVERSIBLE < COSTLY < UNKNOWN < IRREVERSIBLE < WILL_FAIL
+```
 
 **LockHazard severity ordering** — required to evaluate `>=` and `<=` in the scoring rules.
 Derived from those rules, not invented:
@@ -490,15 +498,33 @@ syntaxes under one name would be worse than two names.
 whole session, and it is enforced by the architecture test in §6, not by discipline. CI never
 needs a production credential, determinism survives, and the analyzers stay pure.
 
-- **Enrichment cannot change a classification.** `snapshot.Enrich` writes only `Finding.Context`;
-  Reversibility and LockHazard are restored after every call, so a future edit that reclassifies
-  from inside enrichment has no effect. The property test therefore asserts **equality** of grade
-  with and without context over every fixture, not merely "never better" — an inequality would
-  still permit somebody to invent a threshold, and equality fails the moment they try.
-- **The permission to raise severity was deliberately not taken up.** The brief says "a large
-  table raises severity", which needs a threshold, and thresholds are scoring weights §14 reserves
-  to the owner. Concrete proposals are in the S11 report; until one is ruled on, size is reported
-  and never scored.
+- **Enrichment is a one-way ratchet.** `snapshot.Enrich` may make a finding *more* severe and
+  never less: a classification whose severity would drop is discarded rather than applied, and
+  the LockHazard is restored unconditionally because context describes how long a lock is held,
+  never which lock is taken. The property test asserts the grade with context is **never better**
+  than without, over every fixture, using a snapshot sized to trip every band.
+- **The vocabulary, because it has been ambiguous.** *Lowering* a grade means making it worse
+  (A → B → C → F) and is permitted. *Raising* one means making it better (C → B) and never
+  happens. A missing snapshot, a stale one, or a fingerprint that does not match is treated as
+  **absent** — never as a signal that the change is safe.
+- **Only two things reach a verdict from a snapshot,** both owner-specified in the S11 patch:
+  `WILL_FAIL` for a `SET NOT NULL` that production proves will abort, and the lock duration
+  bands. Everything else context produces is prose and numbers beside a finding.
+- **`WILL_FAIL` is reported apart from `IRREVERSIBLE` everywhere** — blockers, undo plan, SARIF,
+  Markdown. One means you cannot undo the change; the other means it will not happen at all, so
+  the fix belongs in the migration. A reader who confuses them fixes the wrong thing.
+- **A waiver cannot cover `WILL_FAIL`,** the same as `UNKNOWN` and for a related reason: a waiver
+  accepts a trade-off, and there is no trade-off in a statement that cannot apply. Waiving it
+  would document a bug rather than accept one, and the pipeline it unblocked would fail at deploy
+  instead of at review. **This was not specified in the patch — it is a judgment call, and it is
+  a one-line change in `waiverFor` to reverse.**
+- **A band exists only where duration scales with size.** `PG014` takes an `EXCLUSIVE` lock,
+  which passes the "at least FULL_SCAN" gate, but an index drop is not slower for being large and
+  no rate is defined for it. Applying a scan rate there would cap a grade at C for an operation
+  that finishes in milliseconds.
+- **`DISRUPTIVE`'s cap is usually already satisfied.** Any `FULL_SCAN` finding is capped at B by
+  the existing scoring rules, so in practice `OUTAGE` is the only band that moves a grade. Both
+  caps are implemented anyway so the two rules stay independent.
 - **`Finding.Subject` was added so enrichment is possible at all.** Matching context to a finding
   needs the table, column, or index name, and the only alternative was re-parsing `Statement` —
   truncated, normalized, and it would take a regex. Analyzers populate it verbatim from the parsed
@@ -653,6 +679,13 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    Confirm or reject. Rejecting is a one-line change in `unreversibleFindings`.
 
 ## 17. Fixture conventions
+
+The `context/` group is a fourth shape, added by the S11 patch: a changeset plus a `context.json`
+snapshot plus an `expected.json` that names **both** grades — `grade` with the snapshot and
+`gradeWithoutContext` without it. Writing both down is what makes the direction of the rule
+visible as data rather than only as prose, and the test asserts the first is never better than
+the second. `TestEveryRuleHasAFixture` scans only `postgres/` and `kubernetes/`, so these are
+free to reuse rule IDs.
 
 47 fixture directories under `testdata/fixtures/`: 27 Postgres rules, 15 Kubernetes rules,
 4 `DOWN*` fixtures for the three down-migration validation levels plus the directory form, and
