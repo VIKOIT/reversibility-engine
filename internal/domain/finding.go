@@ -109,6 +109,63 @@ type FindingContext struct {
 	// ContextNote states a fact the snapshot established, in one sentence. It is the field that
 	// carries a finding the context made *worse* as well as one it merely explained.
 	ContextNote string `json:"contextNote,omitempty"`
+
+	// LockDurationBand is how long the lock is expected to be held, bucketed. Empty when no
+	// band was computed — which is the case for every finding without a snapshot, and for any
+	// whose size could not be established.
+	//
+	// Unlike the other fields here, this one has scoring consequences: see Cap.
+	LockDurationBand LockDurationBand `json:"lockDurationBand,omitempty"`
+}
+
+// LockDurationBand buckets an estimated lock duration.
+//
+// Bands rather than numbers, because the underlying estimate is derived from planner statistics
+// and a hard-coded throughput assumption. A band is the most precision that arithmetic supports,
+// and scoring against a bucket means a 10% error in the estimate almost never changes a verdict.
+type LockDurationBand string
+
+// The complete set of bands, in increasing severity.
+const (
+	// BandNegligible is under a second: nobody will notice.
+	BandNegligible LockDurationBand = "NEGLIGIBLE"
+
+	// BandNoticeable is one to thirty seconds: visible in latency graphs, survivable.
+	BandNoticeable LockDurationBand = "NOTICEABLE"
+
+	// BandDisruptive is thirty seconds to five minutes: requests will fail.
+	BandDisruptive LockDurationBand = "DISRUPTIVE"
+
+	// BandOutage is over five minutes: this needs a maintenance window.
+	BandOutage LockDurationBand = "OUTAGE"
+)
+
+// Valid reports whether b is a defined band. The zero value is not a band; it means no band was
+// computed, which is different from a band of zero duration.
+func (b LockDurationBand) Valid() bool {
+	switch b {
+	case BandNegligible, BandNoticeable, BandDisruptive, BandOutage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Cap returns the best grade this band permits, or "" when the band imposes no ceiling.
+//
+// This is the one place production context touches scoring, and it only ever LOWERS a grade —
+// makes it worse. There is no band that improves anything: a small table does not turn a C into
+// a B, because the absence of evidence of a problem is not evidence of safety.
+func (b LockDurationBand) Cap() Grade {
+	switch b {
+	case BandDisruptive:
+		return GradeB
+	case BandOutage:
+		return GradeC
+	default:
+		// NEGLIGIBLE and NOTICEABLE impose nothing, and neither does an uncomputed band.
+		return ""
+	}
 }
 
 // SortFindings orders findings canonically by File, then Line, then RuleID.

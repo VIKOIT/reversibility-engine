@@ -235,11 +235,12 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 	// Downstream merge gates parse this. Changing it is a deliberate, breaking act — if this
 	// test fails, the version was bumped, and that must be intentional.
 	//
-	// 1.2.0 added optional per-finding production context and ContextWarnings, on top of 1.1.0's
-	// EffectiveGrade, Waived, and PolicyDigest. Both are minor bumps: nothing was removed or
-	// given a new meaning, so a consumer reading 1.0.0 fields still gets exactly what it did.
-	if domain.SchemaVersion != "1.2.0" {
-		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.2.0")
+	// 1.3.0 added the WILL_FAIL reversibility and the lock duration band. WILL_FAIL is a NEW
+	// enum value, so a consumer that switches exhaustively on reversibility has a case it has
+	// not seen — which is why it is called out here rather than treated as another quiet
+	// addition. Every 1.0.0 field still means what it meant.
+	if domain.SchemaVersion != "1.3.0" {
+		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.3.0")
 	}
 }
 

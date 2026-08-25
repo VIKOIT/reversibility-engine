@@ -22,6 +22,18 @@ const (
 	// ReversibilityUnknown means the engine could not determine the verdict. It is treated as
 	// unsafe, never as safe.
 	ReversibilityUnknown Reversibility = "UNKNOWN"
+
+	// ReversibilityWillFail means the change will not apply at all: production state has been
+	// checked and the statement is certain to abort.
+	//
+	// It is a different failure from IRREVERSIBLE and is reported as one. IRREVERSIBLE means
+	// "you cannot undo this". WILL_FAIL means "this will not even run" — there is nothing to
+	// undo because nothing will have happened, and the fix is to the migration rather than to
+	// the rollback plan.
+	//
+	// It is only ever reached from evidence, never from a guess: today that means a production
+	// snapshot showing nulls in a column a migration is about to constrain.
+	ReversibilityWillFail Reversibility = "WILL_FAIL"
 )
 
 // Valid reports whether r is one of the defined verdicts.
@@ -30,7 +42,8 @@ const (
 // REVERSIBLE simply because nobody set the field.
 func (r Reversibility) Valid() bool {
 	switch r {
-	case ReversibilityReversible, ReversibilityCostly, ReversibilityIrreversible, ReversibilityUnknown:
+	case ReversibilityReversible, ReversibilityCostly, ReversibilityIrreversible,
+		ReversibilityUnknown, ReversibilityWillFail:
 		return true
 	default:
 		return false
@@ -52,10 +65,15 @@ func (r Reversibility) Severity() int {
 		return 2
 	case ReversibilityIrreversible:
 		return 3
+	case ReversibilityWillFail:
+		// Above IRREVERSIBLE. A change that cannot be undone is a risk to weigh; a change that
+		// will not apply is a defect, and when both describe one statement the defect is the
+		// thing to say first.
+		return 4
 	default:
 		// An unset or corrupt verdict outranks everything, so it can never be silently
 		// discarded in favour of a milder one.
-		return 4
+		return 5
 	}
 }
 
