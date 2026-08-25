@@ -1,0 +1,7 @@
+{
+  "rule": "TF004",
+  "note": "The one-line boolean change that grades F. Restoring the setting is trivial; the recovery capability it protected is what was destroyed, which is the third clause of the discriminator and the same family as deleting a snapshot.",
+  "findings": [
+    {"ruleId":"TF004","file":"plan/main.tfplan.json","line":0,"reversibility":"IRREVERSIBLE","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

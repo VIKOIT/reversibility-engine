@@ -19,7 +19,7 @@ import (
 
 // ruleIDPattern matches the classification rule IDs, as distinct from the DOWN* fixtures which
 // exercise down-migration validation rather than a row in either table.
-var ruleIDPattern = regexp.MustCompile(`^(PG|K8S)\d{3}$`)
+var ruleIDPattern = regexp.MustCompile(`^(PG|K8S|TF)\d{3}$`)
 
 func expectedRules(prefix string, n int) []string {
 	out := make([]string, 0, n)
@@ -41,9 +41,16 @@ func TestEveryRuleHasAFixture(t *testing.T) {
 		group  string
 		prefix string
 		count  int
+
+		// retired are rule IDs that were considered and deliberately not implemented. They are
+		// never reused and never renumbered: a retired ID with its reason in docs/RULES.md tells
+		// a future contributor the case was thought about, where a gap in the sequence reads as
+		// an oversight.
+		retired map[string]bool
 	}{
-		{"postgres", "PG", 27},
-		{"kubernetes", "K8S", 15},
+		{group: "postgres", prefix: "PG", count: 27},
+		{group: "kubernetes", prefix: "K8S", count: 15},
+		{group: "terraform", prefix: "TF", count: 10, retired: map[string]bool{"TF003": true}},
 	}
 
 	for _, g := range groups {
@@ -64,6 +71,12 @@ func TestEveryRuleHasAFixture(t *testing.T) {
 			}
 
 			for _, rule := range expectedRules(g.prefix, g.count) {
+				if g.retired[rule] {
+					if name, present := covered[rule]; present {
+						t.Errorf("rule %s is retired and must never be reused, but fixture %s claims it", rule, name)
+					}
+					continue
+				}
 				if _, ok := covered[rule]; !ok {
 					t.Errorf("rule %s has no fixture; per CLAUDE.md §13 it therefore does not exist", rule)
 				}
@@ -82,7 +95,7 @@ func TestFixtureClaimsMatchTheirFindings(t *testing.T) {
 		t.Fatalf("locating fixture root: %v", err)
 	}
 
-	for _, group := range []string{"postgres", "kubernetes"} {
+	for _, group := range []string{"postgres", "kubernetes", "terraform"} {
 		cases, err := fixture.Cases(root, group)
 		if err != nil {
 			t.Fatalf("loading %s fixtures: %v", group, err)
@@ -129,7 +142,7 @@ func TestFixtureAssertionsAreWellFormed(t *testing.T) {
 		t.Fatalf("locating fixture root: %v", err)
 	}
 
-	for _, group := range []string{"postgres", "kubernetes"} {
+	for _, group := range []string{"postgres", "kubernetes", "terraform"} {
 		cases, err := fixture.Cases(root, group)
 		if err != nil {
 			t.Fatalf("loading %s fixtures: %v", group, err)

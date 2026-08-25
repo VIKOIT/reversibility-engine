@@ -1,0 +1,18 @@
+{
+  "format_version": "1.1",
+  "terraform_version": "1.9.5",
+  "resource_changes": [
+    {
+      "address": "aws_db_instance.orders",
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "orders",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["update"],
+        "before": {"id": "orders-prod", "deletion_protection": true},
+        "after": {"id": "orders-prod", "deletion_protection": false}
+      }
+    }
+  ]
+}

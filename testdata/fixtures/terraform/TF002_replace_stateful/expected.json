@@ -1,0 +1,7 @@
+{
+  "rule": "TF002",
+  "note": "A forced replacement destroys the existing cluster before creating its successor. The new one is empty, which is why replacement is not an update.",
+  "findings": [
+    {"ruleId":"TF002","file":"plan/main.tfplan.json","line":0,"reversibility":"IRREVERSIBLE","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

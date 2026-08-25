@@ -1,0 +1,18 @@
+{
+  "format_version": "1.1",
+  "terraform_version": "1.9.5",
+  "resource_changes": [
+    {
+      "address": "aws_rds_cluster.analytics",
+      "mode": "managed",
+      "type": "aws_rds_cluster",
+      "name": "analytics",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["delete", "create"],
+        "before": {"id": "analytics-prod", "engine": "aurora-postgresql"},
+        "after": {"engine": "aurora-postgresql"}
+      }
+    }
+  ]
+}

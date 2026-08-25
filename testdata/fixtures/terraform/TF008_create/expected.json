@@ -1,0 +1,7 @@
+{
+  "rule": "TF008",
+  "note": "Creating a stateful resource is still reversible: destroying it is the reverse Terraform already generates. This fixture proves the catalog is consulted for destruction only.",
+  "findings": [
+    {"ruleId":"TF008","file":"plan/main.tfplan.json","line":0,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

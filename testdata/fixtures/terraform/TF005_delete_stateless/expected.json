@@ -1,0 +1,7 @@
+{
+  "rule": "TF005",
+  "note": "Re-applying recreates the group, so it is costly rather than irreversible. Everything depending on it is broken until that happens.",
+  "findings": [
+    {"ruleId":"TF005","file":"plan/main.tfplan.json","line":0,"reversibility":"COSTLY","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

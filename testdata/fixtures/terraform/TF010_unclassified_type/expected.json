@@ -1,0 +1,7 @@
+{
+  "rule": "TF010",
+  "note": "A destroyed type the catalog does not carry and which shows no stateful evidence. Distinct from TF009: the plan read perfectly, the type is simply unknown, and only this rule carries the contribution snippet.",
+  "findings": [
+    {"ruleId":"TF010","file":"plan/main.tfplan.json","line":0,"reversibility":"UNKNOWN","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

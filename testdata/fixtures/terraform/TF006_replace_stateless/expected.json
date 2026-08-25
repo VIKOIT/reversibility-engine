@@ -1,0 +1,7 @@
+{
+  "rule": "TF006",
+  "note": "create_before_destroy orders the actions the other way round and it is still a replacement: the existing load balancer is destroyed.",
+  "findings": [
+    {"ruleId":"TF006","file":"plan/main.tfplan.json","line":0,"reversibility":"COSTLY","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

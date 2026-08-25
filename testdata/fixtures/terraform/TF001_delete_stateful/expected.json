@@ -1,0 +1,7 @@
+{
+  "rule": "TF001",
+  "note": "Destroying a database destroys the rows. No undo step is offered, because offering one would be a lie.",
+  "findings": [
+    {"ruleId":"TF001","file":"plan/main.tfplan.json","line":0,"reversibility":"IRREVERSIBLE","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

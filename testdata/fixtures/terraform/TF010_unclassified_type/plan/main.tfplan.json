@@ -1,0 +1,18 @@
+{
+  "format_version": "1.1",
+  "terraform_version": "1.9.5",
+  "resource_changes": [
+    {
+      "address": "aws_quantum_ledger_thing.archive",
+      "mode": "managed",
+      "type": "aws_quantum_ledger_thing",
+      "name": "archive",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["delete"],
+        "before": {"id": "qlt-1", "name": "archive"},
+        "after": null
+      }
+    }
+  ]
+}

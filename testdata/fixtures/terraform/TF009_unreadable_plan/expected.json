@@ -1,0 +1,7 @@
+{
+  "rule": "TF009",
+  "note": "A format version this build was not written against. A field this analyzer reads may have moved, so nothing in the file is classified, including the delete it plainly contains.",
+  "findings": [
+    {"ruleId":"TF009","file":"plan/main.tfplan.json","line":0,"reversibility":"UNKNOWN","lockHazard":"NONE","wantUndoStep":false}
+  ]
+}

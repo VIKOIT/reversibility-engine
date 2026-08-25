@@ -1,0 +1,7 @@
+{
+  "rule": "TF007",
+  "note": "An in-place update on a property outside the TF004 list. Its reverse exists by construction, which is why updates are not classified against the catalog at all.",
+  "findings": [
+    {"ruleId":"TF007","file":"plan/main.tfplan.json","line":0,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

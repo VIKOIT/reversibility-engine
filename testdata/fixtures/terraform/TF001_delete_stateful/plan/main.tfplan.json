@@ -1,0 +1,24 @@
+{
+  "format_version": "1.1",
+  "terraform_version": "1.9.5",
+  "resource_changes": [
+    {
+      "address": "aws_db_instance.orders",
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "orders",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["delete"],
+        "before": {
+          "id": "orders-prod",
+          "allocated_storage": 500,
+          "storage_encrypted": true,
+          "deletion_protection": false,
+          "backup_retention_period": 7
+        },
+        "after": null
+      }
+    }
+  ]
+}
