@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/VIKOIT/reversibility-engine/internal/delivery/cli"
 	"github.com/VIKOIT/reversibility-engine/pkg/certificate"
@@ -548,5 +549,303 @@ func TestCheckReportsAnUnknownRefAsABrokenRun(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "does-not-exist") {
 		t.Errorf("stderr does not name the ref:\n%s", stderr)
+	}
+}
+
+// writePolicy writes a .reversibility.yml into dir and returns its path.
+//
+// Expiry dates are computed from the real clock rather than written as literals. The CLI reads
+// the system date — that is what it does in production — so a literal would turn this suite into
+// something that starts failing on a particular morning.
+func writePolicy(t *testing.T, dir, body string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, ".reversibility.yml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the policy: %v", err)
+	}
+	return path
+}
+
+func soon(t *testing.T) string {
+	t.Helper()
+	return time.Now().AddDate(0, 0, 30).Format("2006-01-02")
+}
+
+// A waiver unblocks the pipeline without rewriting the measurement. This is the whole contract
+// of the policy file in one test.
+func TestPolicyWaiverUnblocksTheGateWithoutMovingTheGrade(t *testing.T) {
+	t.Parallel()
+
+	root := destructiveMigrations(t)
+	policyPath := writePolicy(t, t.TempDir(), fmt.Sprintf(`version: 1
+waivers:
+  - rule: PG001
+    reason: "the table was already empty; verified in #482"
+    expires: %s
+    approved_by: "vikoit"
+`, soon(t)))
+
+	stdout, stderr, code := run("check", "--config", policyPath, "--min-grade", "A", "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d (the waiver should unblock the gate)\n%s", code, cli.ExitOK, stderr)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+
+	if cert.Grade != certificate.GradeF {
+		t.Errorf("Grade = %q, want F; a waiver must not move the measurement", cert.Grade)
+	}
+	if cert.EffectiveGrade != certificate.GradeA {
+		t.Errorf("EffectiveGrade = %q, want A", cert.EffectiveGrade)
+	}
+	if cert.Passed() {
+		t.Error("the AI merge gate passed on a waived irreversible change; a waiver must never let an agent merge")
+	}
+	if len(cert.Waived) != 1 {
+		t.Fatalf("Waived = %+v, want the finding reported rather than suppressed", cert.Waived)
+	}
+	if cert.Waived[0].Reason == "" || cert.Waived[0].Expires == "" {
+		t.Errorf("the waived finding lost its justification: %+v", cert.Waived[0])
+	}
+	if cert.PolicyDigest == "" {
+		t.Error("PolicyDigest is empty despite a policy being applied")
+	}
+}
+
+// The certificate a human reads has to show what was accepted, why, and until when.
+func TestMarkdownReportsWaivedFindings(t *testing.T) {
+	t.Parallel()
+
+	root := destructiveMigrations(t)
+	policyPath := writePolicy(t, t.TempDir(), fmt.Sprintf(`version: 1
+waivers:
+  - rule: PG001
+    reason: "expand-contract; old code removed in #482"
+    expires: %s
+    approved_by: "vikoit"
+`, soon(t)))
+
+	stdout, _, code := run("check", "--config", policyPath, root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d", code)
+	}
+
+	for _, want := range []string{"### Waived", "expand-contract; old code removed in #482", "vikoit", "Grade after waivers"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("the certificate does not mention %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestPolicyDiscoveryAndOverrides(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		args     func(root, policyPath string) []string
+		wantCode int
+		wantSay  string
+	}{
+		{
+			// The policy beside the migrations is found without being named.
+			name:     "a discovered policy applies",
+			args:     func(root, _ string) []string { return []string{"check", "--min-grade", "A", root} },
+			wantCode: cli.ExitOK,
+		},
+		{
+			// --no-config is the documented way to see what the gate says without the policy.
+			name:     "--no-config discards it",
+			args:     func(root, _ string) []string { return []string{"check", "--no-config", "--min-grade", "A", root} },
+			wantCode: cli.ExitGateFailed,
+		},
+		{
+			name: "--config and --no-config together are refused",
+			args: func(root, policyPath string) []string {
+				return []string{"check", "--config", policyPath, "--no-config", root}
+			},
+			wantCode: cli.ExitError,
+			wantSay:  "--config",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := destructiveMigrations(t)
+			policyPath := writePolicy(t, root, fmt.Sprintf(`version: 1
+waivers:
+  - rule: PG001
+    reason: "the table was already empty; verified in #482"
+    expires: %s
+`, soon(t)))
+
+			_, stderr, code := run(tc.args(root, policyPath)...)
+			if code != tc.wantCode {
+				t.Fatalf("exit code = %d, want %d\n%s", code, tc.wantCode, stderr)
+			}
+			if tc.wantSay != "" && !strings.Contains(stderr, tc.wantSay) {
+				t.Errorf("stderr does not explain the problem (%q):\n%s", tc.wantSay, stderr)
+			}
+		})
+	}
+}
+
+// A policy that cannot be resolved is a broken run, not an unsafe change: exit 2, not exit 1.
+// Every one of these is an error rather than a warning, because a warning in a CI log is not
+// read and the policy would take effect anyway.
+func TestBrokenPolicyIsABrokenRun(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		body    string
+		mustSay string
+	}{
+		{
+			name:    "a waiver with no reason",
+			body:    "version: 1\nwaivers:\n  - rule: PG001\n    expires: 2026-10-01\n",
+			mustSay: "reason is required",
+		},
+		{
+			name:    "a waiver with no expiry",
+			body:    "version: 1\nwaivers:\n  - rule: PG001\n    reason: \"later\"\n",
+			mustSay: "expires is required",
+		},
+		{
+			name:    "a waiver that outlives the window",
+			body:    "version: 1\nwaivers:\n  - rule: PG001\n    reason: \"forever\"\n    expires: 2099-01-01\n",
+			mustSay: "more than 180 days away",
+		},
+		{
+			name:    "an override that loosens",
+			body:    "version: 1\noverrides:\n  - rule: PG001\n    severity: REVERSIBLE\n",
+			mustSay: "stricter",
+		},
+		{
+			name:    "an unknown key",
+			body:    "version: 1\nwaivers:\n  - rule: PG001\n    reason: \"x\"\n    expiress: 2026-10-01\n",
+			mustSay: "expiress",
+		},
+		{
+			name:    "a version this build does not know",
+			body:    "version: 99\n",
+			mustSay: "not supported",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := safeMigrations(t)
+			policyPath := writePolicy(t, t.TempDir(), tc.body)
+
+			_, stderr, code := run("check", "--config", policyPath, root)
+			if code != cli.ExitError {
+				t.Fatalf("exit code = %d, want %d (a broken policy is a broken run)\n%s", code, cli.ExitError, stderr)
+			}
+			if !strings.Contains(stderr, tc.mustSay) {
+				t.Errorf("stderr does not explain the problem (%q):\n%s", tc.mustSay, stderr)
+			}
+		})
+	}
+}
+
+// An ignored file is never read, so it never reaches an analyzer and never comes back as
+// context either.
+func TestPolicyIgnoreExcludesFilesFromAnalysis(t *testing.T) {
+	t.Parallel()
+
+	root := writeTree(t, map[string]string{
+		"legacy/0001_drop.up.sql":     "DROP TABLE legacy_orders;\n",
+		"current/0001_index.up.sql":   "CREATE INDEX CONCURRENTLY idx ON orders (status);\n",
+		"current/0001_index.down.sql": "DROP INDEX CONCURRENTLY idx;\n",
+	})
+	writePolicy(t, root, "version: 1\nignore:\n  - \"legacy/**\"\n")
+
+	stdout, stderr, code := run("check", "--min-grade", "A", "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitOK, stderr)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+
+	for _, f := range cert.Findings {
+		if strings.HasPrefix(f.File, "legacy/") {
+			t.Errorf("an ignored file was analyzed anyway: %+v", f)
+		}
+	}
+	if len(cert.Waived) != 0 {
+		t.Errorf("an ignored file was reported as waived rather than skipped: %+v", cert.Waived)
+	}
+}
+
+// The policy can set the threshold, and an explicit flag still wins: somebody who typed a
+// threshold is making a decision about this run.
+func TestPolicyGateIsOverriddenByTheFlag(t *testing.T) {
+	t.Parallel()
+
+	root := destructiveMigrations(t)
+	writePolicy(t, root, "version: 1\ngate: F\n")
+
+	if _, _, code := run("check", root); code != cli.ExitOK {
+		t.Errorf("exit code = %d, want %d; gate F accepts everything", code, cli.ExitOK)
+	}
+	if _, _, code := run("check", "--min-grade", "A", root); code != cli.ExitGateFailed {
+		t.Errorf("exit code = %d, want %d; --min-grade must beat the policy", code, cli.ExitGateFailed)
+	}
+}
+
+// A waiver's path matches the finding's file exactly as the certificate prints it, and a pattern
+// that matches nothing is inert. Over-matching a waiver is the one direction this must not fail
+// in, so the mismatch is deliberately a no-op rather than a near-miss that applies anyway.
+func TestWaiverPathMatchesTheFindingAsReported(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		path     string
+		wantCode int
+	}{
+		{
+			// `revctl check ./migrations` reports files relative to the directory named.
+			name:     "a pattern matching the reported path applies",
+			path:     "0001_*.sql",
+			wantCode: cli.ExitOK,
+		},
+		{
+			// The same waiver written for a repository-relative path matches nothing here.
+			name:     "a pattern matching nothing is inert",
+			path:     "migrations/0001_*.sql",
+			wantCode: cli.ExitGateFailed,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := destructiveMigrations(t)
+			policyPath := writePolicy(t, t.TempDir(), fmt.Sprintf(`version: 1
+waivers:
+  - rule: PG001
+    path: %q
+    reason: "the table was already empty; verified in #482"
+    expires: %s
+`, tc.path, soon(t)))
+
+			_, stderr, code := run("check", "--config", policyPath, "--min-grade", "A", root)
+			if code != tc.wantCode {
+				t.Fatalf("exit code = %d, want %d\n%s", code, tc.wantCode, stderr)
+			}
+		})
 	}
 }
