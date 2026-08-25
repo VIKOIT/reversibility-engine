@@ -141,6 +141,13 @@ func (a *Analyzer) analyzeFile(ctx context.Context, f domain.ChangedFile, sch *s
 			LockHazard:    c.lock,
 			Rationale:     c.rationale,
 			UndoStep:      c.undo,
+
+			// Carried verbatim from the parsed statement rather than re-derived per rule. What
+			// Object means depends on the rule — a column here, an index there — and the reader
+			// already switches on the rule ID, so translating it twice would be two places to
+			// disagree. Nothing in this package consumes it; it exists so production context
+			// can be matched to a finding without re-parsing the SQL.
+			Subject: domain.Subject{Relation: s.Relation, Object: s.Object},
 		})
 	}
 	return out, nil

@@ -56,6 +56,59 @@ type Finding struct {
 
 	// UndoStep is empty when no undo is possible.
 	UndoStep UndoStep `json:"undoStep,omitempty"`
+
+	// Subject names what the change acts on, so that a later stage can look the object up
+	// without re-reading the source.
+	//
+	// It exists because production context has to be matched to a finding by object name, and
+	// the only alternative would be re-parsing Statement — which is truncated, normalized, and
+	// would need a regex. Analyzers already know these names; this is them saying so.
+	//
+	// It is serialized here but deliberately absent from pkg/certificate: it is how the engine
+	// joins a finding to a snapshot, not a promise to external consumers about how object names
+	// are spelled.
+	Subject Subject `json:"subject,omitempty"`
+
+	// Context is what a production snapshot added, if one was supplied. Every field is optional
+	// and absent by default: the engine works exactly as it did before snapshots existed.
+	Context *FindingContext `json:"context,omitempty"`
+}
+
+// Subject identifies the object a finding is about.
+//
+// The meaning of Object depends on the rule — a column for a type change, an index for a drop,
+// a constraint for a validation. Interpreting it is the reader's job, because the alternative is
+// one field per kind of object and a struct nobody can read.
+type Subject struct {
+	// Relation is the table, or the Kubernetes object's namespaced name, the change acts on.
+	Relation string `json:"relation,omitempty"`
+
+	// Object is the thing within that relation: a column, an index, a constraint. Empty when
+	// the change is about the relation itself.
+	Object string `json:"object,omitempty"`
+}
+
+// FindingContext is what a production snapshot told the engine about a finding's subject.
+//
+// EVERY NUMBER HERE IS AN ESTIMATE derived from planner statistics, which Postgres itself keeps
+// approximately and updates lazily. They exist to turn "this rewrites the table" into "this
+// rewrites a table of roughly this size", which is a different and much more useful sentence —
+// not to promise how long anything will take. See docs/ESTIMATES.md.
+type FindingContext struct {
+	// RowEstimate is the planner's row count for the subject relation. Negative means unknown;
+	// Postgres reports -1 for a relation that has never been analyzed.
+	RowEstimate int64 `json:"rowEstimate,omitempty"`
+
+	// SizeBytes is the on-disk size of the subject, table or index.
+	SizeBytes int64 `json:"sizeBytes,omitempty"`
+
+	// EstimatedLockDuration is a human-readable approximation such as "~14m", always rendered
+	// with a leading tilde so it cannot be mistaken for a measurement.
+	EstimatedLockDuration string `json:"estimatedLockDuration,omitempty"`
+
+	// ContextNote states a fact the snapshot established, in one sentence. It is the field that
+	// carries a finding the context made *worse* as well as one it merely explained.
+	ContextNote string `json:"contextNote,omitempty"`
 }
 
 // SortFindings orders findings canonically by File, then Line, then RuleID.

@@ -60,7 +60,24 @@ func (c change) finding(ruleID string, rev domain.Reversibility, rationale strin
 		LockHazard:    domain.LockNone,
 		Rationale:     rationale,
 		UndoStep:      undo,
+
+		// Namespaced so a production snapshot can find the same object: two namespaces very
+		// often hold a claim of the same name, and matching on the bare name would attach one
+		// cluster's volume to the other's manifest. Nothing in this package reads it.
+		Subject: domain.Subject{
+			Relation: namespaced(c.object().namespace, c.object().name),
+			Object:   c.object().kind,
+		},
 	}
+}
+
+// namespaced renders the identity a snapshot looks objects up by. A cluster-scoped object such
+// as a StorageClass has no namespace and is named alone.
+func namespaced(namespace, name string) string {
+	if namespace == "" {
+		return name
+	}
+	return namespace + "/" + name
 }
 
 // classify applies every rule to one changed object.

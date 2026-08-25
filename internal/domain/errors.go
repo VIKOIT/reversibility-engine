@@ -39,4 +39,12 @@ var (
 	// permitted to ask for. It is never survivable: a run that could not resolve its own
 	// configuration does not know what it was supposed to enforce.
 	ErrInvalidPolicy = errors.New("domain: invalid policy")
+
+	// ErrInvalidContext means a production snapshot could not be read, or describes a different
+	// source than another snapshot of the same kind.
+	//
+	// A MISSING snapshot is not this error and is not an error at all — context is an
+	// enhancement, and the engine works without it. This is for a snapshot that exists and
+	// cannot be trusted, which is worse than none, because context is believed.
+	ErrInvalidContext = errors.New("domain: invalid production context")
 )
