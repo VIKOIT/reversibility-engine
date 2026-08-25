@@ -12,12 +12,16 @@ import (
 
 // Enrich attaches production facts to the findings a snapshot can speak to.
 //
-// IT NEVER CHANGES A CLASSIFICATION. Reversibility and LockHazard are exactly what the analyzer
-// decided, before and after; only the Context field is written. That is a stronger guarantee
-// than "context may not improve a grade" — it makes the grade *identical* with and without a
-// snapshot, so no configuration of the collector and no state of the database can move a
-// verdict. See docs/ESTIMATES.md and CLAUDE.md §11g for why the permission to raise severity was
-// not taken up: doing so needs a threshold, and thresholds are scoring weights the owner owns.
+// It may make a finding WORSE and may never make one better. Concretely it may do exactly two
+// things: raise a classification to WILL_FAIL when production state proves the statement cannot
+// apply, and attach a lock duration band that caps the grade. Both directions are guarded — a
+// classification whose severity would drop is discarded rather than applied, so an edit that
+// weakens a finding from inside enrichment has no effect rather than a subtle one.
+//
+// "Worse" and "better" are the trap in this vocabulary, so: lowering a grade means A -> B -> C
+// -> F, and that is permitted. Raising one means C -> B, and that never happens here. A small
+// table does not turn a C into a B; the absence of evidence of a problem is not evidence of
+// safety.
 //
 // A finding whose subject cannot be resolved unambiguously is left alone. Context that names the
 // wrong table is worse than no context, because context is believed.
@@ -30,44 +34,43 @@ func (s *Set) Enrich(findings []domain.Finding) []domain.Finding {
 	copy(out, findings)
 
 	for i := range out {
-		before := out[i].Reversibility
-		beforeLock := out[i].LockHazard
+		before := out[i]
 
-		if c := s.contextFor(out[i]); c != nil {
-			out[i].Context = c
+		s.enrich(&out[i])
+
+		// The one-way ratchet, asserted here rather than only in a test.
+		if out[i].Reversibility.Severity() < before.Reversibility.Severity() {
+			out[i].Reversibility = before.Reversibility
+			out[i].Rationale = before.Rationale
 		}
 
-		// Belt and braces. The invariant above is what the whole feature rests on, so it is
-		// asserted here rather than only in a test: a future edit that reclassifies from inside
-		// enrichment restores the classification instead of taking effect.
-		out[i].Reversibility = before
-		out[i].LockHazard = beforeLock
+		// The lock hazard is the analyzer's alone. Context describes how long a lock is held,
+		// never which lock is taken.
+		out[i].LockHazard = before.LockHazard
 	}
 
 	return out
 }
 
-// contextFor returns what the snapshot knows about one finding, or nil.
+// enrich applies the rules that gain context, in place.
 //
-// The rules that gain context are exactly those listed in the session brief. A rule not named
-// here gets nothing, deliberately: inventing enrichment for a rule nobody specified would be
-// inventing an interpretation of that rule.
-func (s *Set) contextFor(f domain.Finding) *domain.FindingContext {
+// The rules named here are exactly those the session specified. A rule not named gets nothing,
+// deliberately: inventing enrichment for a rule nobody specified would be inventing an
+// interpretation of that rule.
+func (s *Set) enrich(f *domain.Finding) {
 	switch f.RuleID {
 	case "PG006", "PG007":
-		return s.typeChangeContext(f)
+		f.Context = s.typeChangeContext(*f)
 	case "PG017":
-		return s.setNotNullContext(f)
+		s.setNotNull(f)
 	case "PG014", "PG015":
-		return s.dropIndexContext(f)
+		f.Context = s.dropIndexContext(*f)
 	case "PG021":
-		return s.validationContext(f)
+		f.Context = s.validationContext(*f)
 	case "K8S003":
-		return s.claimRemovalContext(f)
+		f.Context = s.claimRemovalContext(*f)
 	case "K8S004":
-		return s.storageDecreaseContext(f)
-	default:
-		return nil
+		f.Context = s.storageDecreaseContext(*f)
 	}
 }
 
@@ -79,61 +82,89 @@ func (s *Set) typeChangeContext(f domain.Finding) *domain.FindingContext {
 		return nil
 	}
 
+	size, sized := s.tableSize(t)
+	if !sized {
+		// Neither a recorded size nor a row width to derive one from. Guessing would be worse
+		// than saying nothing, so the context is treated as absent for this finding.
+		return nil
+	}
+
+	note := fmt.Sprintf("Rewrites the whole of %s: about %s rows, %s of heap",
+		qualify(t.Schema, t.Name), formatRows(t.RowEstimate), formatBytes(size))
+	if t.TotalSizeBytes > size {
+		note += fmt.Sprintf(" and %s including indexes", formatBytes(t.TotalSizeBytes))
+	}
+	note += "."
+
 	return &domain.FindingContext{
 		RowEstimate:           t.RowEstimate,
-		SizeBytes:             t.TotalSizeBytes,
-		EstimatedLockDuration: estimate(t.TotalSizeBytes, rewriteBytesPerSecond),
-		ContextNote: fmt.Sprintf(
-			"Rewrites the whole of %s: about %s rows, %s on disk including indexes.",
-			qualify(t.Schema, t.Name), formatRows(t.RowEstimate), formatBytes(t.TotalSizeBytes)),
+		SizeBytes:             size,
+		EstimatedLockDuration: estimateFor(size, f.LockHazard),
+		LockDurationBand:      bandFor(size, f.LockHazard),
+		ContextNote:           note,
 	}
 }
 
-// setNotNullContext is the highest-value check here: it turns "this takes a lock" into "this
-// will fail", before it fails, using a statistic the database already keeps.
-func (s *Set) setNotNullContext(f domain.Finding) *domain.FindingContext {
+// setNotNull is the highest-value check in the engine: it turns "this takes a lock" into "this
+// will not run", before it runs, from a statistic the database already keeps.
+//
+// A null in the column is not a risk to weigh. SET NOT NULL validates every existing row and a
+// single violation aborts the statement and rolls back the transaction, so the classification
+// becomes WILL_FAIL and the grade becomes F. Table size stops mattering at that point: the
+// statement never gets far enough to hold a lock for any length of time, and printing a duration
+// beside "this will not run" would be noise dressed as precision.
+func (s *Set) setNotNull(f *domain.Finding) {
 	t, tableOK := s.table(f.Subject.Relation)
-
 	col, colOK := s.column(f.Subject.Relation, f.Subject.Object)
-	if !colOK {
-		if !tableOK {
-			return nil
-		}
-		return &domain.FindingContext{
-			RowEstimate:           t.RowEstimate,
-			SizeBytes:             t.SizeBytes,
-			EstimatedLockDuration: estimate(t.SizeBytes, scanBytesPerSecond),
-			ContextNote: fmt.Sprintf(
-				"Scans about %s rows of %s under lock. No statistics exist for column %s, so whether it contains nulls is unknown.",
-				formatRows(t.RowEstimate), qualify(t.Schema, t.Name), f.Subject.Object),
-		}
-	}
 
-	c := &domain.FindingContext{}
-	if tableOK {
-		c.RowEstimate = t.RowEstimate
-		c.SizeBytes = t.SizeBytes
-		c.EstimatedLockDuration = estimate(t.SizeBytes, scanBytesPerSecond)
-	}
+	if colOK && col.NullFraction > 0 {
+		f.Reversibility = domain.ReversibilityWillFail
+		f.Rationale = fmt.Sprintf(
+			"NULL values exist in %s; SET NOT NULL will fail and roll back the transaction.",
+			qualified(f.Subject.Relation, col.Name))
 
-	if col.NullFraction > 0 {
-		// Stated as a certainty because it is one: SET NOT NULL validates every existing row,
-		// and a single null aborts it. The estimate is in how many, never in whether.
 		note := fmt.Sprintf(
-			"THIS MIGRATION WILL FAIL. Column %s currently contains nulls (about %s of rows), and SET NOT NULL rejects the whole statement if any row violates it. Backfill the column first.",
-			qualified(f.Subject.Relation, col.Name), formatPercent(col.NullFraction))
+			"Confirmed against production: about %s of rows in %s are null.",
+			formatPercent(col.NullFraction), qualified(f.Subject.Relation, col.Name))
 		if tableOK && t.RowEstimate > 0 {
-			note += fmt.Sprintf(" That is roughly %s rows to fix.",
+			note += fmt.Sprintf(" That is roughly %s rows to backfill before this migration can apply.",
 				formatRows(int64(col.NullFraction*float64(t.RowEstimate))))
 		}
-		c.ContextNote = note
-		return c
+
+		f.Context = &domain.FindingContext{
+			RowEstimate: t.RowEstimate,
+			ContextNote: note,
+		}
+		return
 	}
 
-	c.ContextNote = fmt.Sprintf(
-		"Column %s has no nulls in the snapshot, so the constraint should validate — though any null written between the snapshot and the migration will still abort it.",
-		qualified(f.Subject.Relation, col.Name))
-	return c
+	if !tableOK {
+		return
+	}
+
+	size, sized := s.tableSize(t)
+	if !sized {
+		return
+	}
+
+	c := &domain.FindingContext{
+		RowEstimate:           t.RowEstimate,
+		SizeBytes:             size,
+		EstimatedLockDuration: estimateFor(size, f.LockHazard),
+		LockDurationBand:      bandFor(size, f.LockHazard),
+	}
+
+	if colOK {
+		c.ContextNote = fmt.Sprintf(
+			"Column %s has no nulls in the snapshot, so the constraint should validate — though any null written between the snapshot and the migration will still abort it. The scan covers about %s rows.",
+			qualified(f.Subject.Relation, col.Name), formatRows(t.RowEstimate))
+	} else {
+		c.ContextNote = fmt.Sprintf(
+			"Scans about %s rows of %s under lock. No statistics exist for column %s, so whether it contains nulls is unknown.",
+			formatRows(t.RowEstimate), qualify(t.Schema, t.Name), f.Subject.Object)
+	}
+
+	f.Context = c
 }
 
 // dropIndexContext reports what the index costs and whether anything reads it.
@@ -173,14 +204,68 @@ func (s *Set) validationContext(f domain.Finding) *domain.FindingContext {
 		return nil
 	}
 
+	size, sized := s.tableSize(t)
+	if !sized {
+		return nil
+	}
+
 	return &domain.FindingContext{
 		RowEstimate:           t.RowEstimate,
-		SizeBytes:             t.SizeBytes,
-		EstimatedLockDuration: estimate(t.SizeBytes, scanBytesPerSecond),
+		SizeBytes:             size,
+		EstimatedLockDuration: estimateFor(size, f.LockHazard),
+		LockDurationBand:      bandFor(size, f.LockHazard),
 		ContextNote: fmt.Sprintf(
 			"Validating this constraint scans about %s rows of %s (%s) while holding a lock.",
-			formatRows(t.RowEstimate), qualify(t.Schema, t.Name), formatBytes(t.SizeBytes)),
+			formatRows(t.RowEstimate), qualify(t.Schema, t.Name), formatBytes(size)),
 	}
+}
+
+// tableSize establishes how many bytes the work has to move.
+//
+// pg_relation_size is used when the snapshot recorded one. When it did not, the size is derived
+// from the row count and the summed per-column average width — avg_width is PER COLUMN, so the
+// widths of every column the snapshot knows about are added together to make a row width. One
+// column's width is not a row width, and using it as one would understate the table by however
+// many columns it has.
+//
+// When neither is available the caller is told so, and treats the context as absent for that
+// finding rather than guessing. An understated size can only ever produce a milder band, which
+// the caps make harmless — a milder band imposes a weaker ceiling, and a weaker ceiling can only
+// leave the grade where it already was.
+func (s *Set) tableSize(t Table) (int64, bool) {
+	if t.SizeBytes > 0 {
+		return t.SizeBytes, true
+	}
+
+	if t.RowEstimate <= 0 {
+		return 0, false
+	}
+
+	width := s.rowWidth(t.Schema, t.Name)
+	if width <= 0 {
+		return 0, false
+	}
+
+	return t.RowEstimate * width, true
+}
+
+// rowWidth sums pg_stats.avg_width across every column of a table the snapshot carries.
+//
+// pg_stats only lists columns that have been analyzed, so this can understate a wide table. That
+// is the safe direction: it can only shrink an estimate, and a smaller estimate can only impose
+// a weaker ceiling on the grade.
+func (s *Set) rowWidth(schema, name string) int64 {
+	if s.Postgres == nil {
+		return 0
+	}
+
+	var width int64
+	for _, c := range s.Postgres.Columns {
+		if strings.EqualFold(c.Schema, schema) && strings.EqualFold(c.Table, name) {
+			width += int64(c.AverageWidth)
+		}
+	}
+	return width
 }
 
 // claimRemovalContext replaces the analyzer's guess at a reclaim policy with the cluster's

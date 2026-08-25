@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // Throughput assumptions behind every duration this package prints.
@@ -28,6 +30,70 @@ const (
 	// constraint validation do. No writing, so several times faster than a rewrite.
 	scanBytesPerSecond = 200 << 20 // 200 MiB/s
 )
+
+// Band boundaries. They are the owner's, not this package's, and are written here in the units
+// the rules were stated in.
+const (
+	negligibleUnder = 1 * time.Second
+	noticeableUnder = 30 * time.Second
+	disruptiveUnder = 5 * time.Minute
+)
+
+// rateFor picks the throughput assumption for a lock hazard.
+//
+// Only two rates are defined, because only two kinds of work are size-proportional: rewriting a
+// table and scanning one. An EXCLUSIVE lock that is not one of those — dropping an index, say —
+// is not slower for being large, and inventing a rate for it would produce an OUTAGE band for an
+// operation that takes milliseconds.
+func rateFor(lock domain.LockHazard) (int64, bool) {
+	switch lock {
+	case domain.LockTableRewrite:
+		return rewriteBytesPerSecond, true
+	case domain.LockFullScan:
+		return scanBytesPerSecond, true
+	default:
+		return 0, false
+	}
+}
+
+// bandFor buckets an estimated duration.
+//
+// A band is only ever computed when the lock is at least FULL_SCAN and a snapshot established a
+// size. Everything else returns the zero band, which imposes no ceiling — the absence of a band
+// is the absence of evidence, and that is never treated as evidence of safety.
+func bandFor(sizeBytes int64, lock domain.LockHazard) domain.LockDurationBand {
+	if !lock.AtLeast(domain.LockFullScan) || sizeBytes <= 0 {
+		return ""
+	}
+
+	rate, ok := rateFor(lock)
+	if !ok {
+		return ""
+	}
+
+	d := time.Duration(float64(sizeBytes) / float64(rate) * float64(time.Second))
+
+	switch {
+	case d < negligibleUnder:
+		return domain.BandNegligible
+	case d < noticeableUnder:
+		return domain.BandNoticeable
+	case d < disruptiveUnder:
+		return domain.BandDisruptive
+	default:
+		return domain.BandOutage
+	}
+}
+
+// estimateFor renders the duration for a lock hazard, or "" when the hazard is not one whose
+// cost scales with size.
+func estimateFor(sizeBytes int64, lock domain.LockHazard) string {
+	rate, ok := rateFor(lock)
+	if !ok {
+		return ""
+	}
+	return estimate(sizeBytes, rate)
+}
 
 // estimate renders an approximate duration for moving sizeBytes at the given rate.
 //

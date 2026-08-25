@@ -56,10 +56,12 @@ func enrichOne(t *testing.T, set *snapshot.Set, f domain.Finding) *domain.Findin
 	return out[0].Context
 }
 
-// THE INVARIANT THE WHOLE FEATURE RESTS ON. Context explains a finding; it never reclassifies
-// one. Because enrichment cannot touch Reversibility or LockHazard, no snapshot — of any
-// database, in any state — can move a grade in either direction.
-func TestEnrichmentNeverChangesAClassification(t *testing.T) {
+// THE ONE-WAY RATCHET. Enrichment may make a finding more severe and may never make one less
+// severe, so no snapshot — of any database, in any state — can improve a verdict.
+//
+// The lock hazard is stricter still: context describes how long a lock is held, never which lock
+// is taken, so it must come through untouched in both directions.
+func TestEnrichmentOnlyEverRaisesSeverity(t *testing.T) {
 	t.Parallel()
 
 	set := loadSet(t, "pg.json", "k8s.json")
@@ -68,6 +70,7 @@ func TestEnrichmentNeverChangesAClassification(t *testing.T) {
 		finding("PG006", "orders", "total", domain.ReversibilityIrreversible, domain.LockTableRewrite),
 		finding("PG007", "orders", "total", domain.ReversibilityCostly, domain.LockTableRewrite),
 		finding("PG017", "orders", "shipped_at", domain.ReversibilityCostly, domain.LockFullScan),
+		finding("PG017", "orders", "id", domain.ReversibilityCostly, domain.LockFullScan),
 		finding("PG014", "", "idx_orders_status", domain.ReversibilityCostly, domain.LockExclusive),
 		finding("PG021", "orders", "orders_fk", domain.ReversibilityCostly, domain.LockFullScan),
 		finding("K8S003", "shop/orders-data", "PersistentVolumeClaim", domain.ReversibilityIrreversible, domain.LockNone),
@@ -79,8 +82,8 @@ func TestEnrichmentNeverChangesAClassification(t *testing.T) {
 
 	for i, got := range enriched {
 		want := findings[i]
-		if got.Reversibility != want.Reversibility {
-			t.Errorf("%s: Reversibility became %q, was %q", want.RuleID, got.Reversibility, want.Reversibility)
+		if got.Reversibility.Severity() < want.Reversibility.Severity() {
+			t.Errorf("%s: enrichment weakened %q to %q", want.RuleID, want.Reversibility, got.Reversibility)
 		}
 		if got.LockHazard != want.LockHazard {
 			t.Errorf("%s: LockHazard became %q, was %q", want.RuleID, got.LockHazard, want.LockHazard)
@@ -88,6 +91,66 @@ func TestEnrichmentNeverChangesAClassification(t *testing.T) {
 		if got.RuleID != want.RuleID || got.File != want.File || got.Line != want.Line {
 			t.Errorf("%s: identity changed: %+v", want.RuleID, got)
 		}
+	}
+
+	// Exactly one of these is expected to move, and it is the one with nulls in production.
+	if enriched[2].Reversibility != domain.ReversibilityWillFail {
+		t.Errorf("SET NOT NULL against a column with nulls stayed %q, want WILL_FAIL", enriched[2].Reversibility)
+	}
+	if enriched[3].Reversibility != domain.ReversibilityCostly {
+		t.Errorf("SET NOT NULL against a clean column became %q, want it unchanged", enriched[3].Reversibility)
+	}
+}
+
+// A band never exists without a snapshot, and never for a lock whose cost does not scale with
+// size. That second half is what keeps a two-gigabyte index drop from being reported as an
+// OUTAGE for an operation that takes milliseconds.
+func TestBandsOnlyExistWhereDurationScalesWithSize(t *testing.T) {
+	t.Parallel()
+
+	set := loadSet(t, "pg.json")
+
+	tests := []struct {
+		name string
+		in   domain.Finding
+		want domain.LockDurationBand
+	}{
+		{
+			name: "a table rewrite is banded",
+			in:   finding("PG006", "orders", "total", domain.ReversibilityIrreversible, domain.LockTableRewrite),
+			want: domain.BandOutage,
+		},
+		{
+			name: "a full scan is banded",
+			in:   finding("PG021", "orders", "c", domain.ReversibilityCostly, domain.LockFullScan),
+			want: domain.BandDisruptive,
+		},
+		{
+			// EXCLUSIVE is above FULL_SCAN in severity, but dropping an index is not slower for
+			// being large, and there is no rate defined for it.
+			name: "an exclusive index drop is not banded",
+			in:   finding("PG014", "orders", "idx_orders_status", domain.ReversibilityCostly, domain.LockExclusive),
+			want: "",
+		},
+		{
+			name: "a lock below FULL_SCAN is not banded",
+			in:   finding("PG015", "orders", "idx_orders_hot", domain.ReversibilityCostly, domain.LockNone),
+			want: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := domain.LockDurationBand("")
+			if c := enrichOne(t, set, tc.in); c != nil {
+				got = c.LockDurationBand
+			}
+			if got != tc.want {
+				t.Errorf("band = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -129,16 +192,16 @@ func TestPostgresEnrichment(t *testing.T) {
 			name:      "a type change reports the whole table",
 			finding:   finding("PG006", "orders", "total", domain.ReversibilityIrreversible, domain.LockTableRewrite),
 			wantRows:  212000000,
-			wantBytes: 51539607552,
-			mustSay:   []string{"212M", "48.0 GiB", "Rewrites the whole of orders"},
+			wantBytes: 34359738368,
+			mustSay:   []string{"212M", "32.0 GiB", "48.0 GiB including indexes", "Rewrites the whole of orders"},
 		},
 		{
 			// The highest-value single check in the session: a fact the database already knows,
 			// turned into a sentence before the migration runs rather than after it fails.
-			name:     "SET NOT NULL on a column with nulls says the migration will fail",
+			name:     "SET NOT NULL on a column with nulls reports what has to be backfilled",
 			finding:  finding("PG017", "orders", "shipped_at", domain.ReversibilityCostly, domain.LockFullScan),
 			wantRows: 212000000,
-			mustSay:  []string{"WILL FAIL", "31%", "Backfill"},
+			mustSay:  []string{"Confirmed against production", "31%", "backfill"},
 		},
 		{
 			name:      "SET NOT NULL on a clean column says the constraint should validate",
@@ -150,9 +213,9 @@ func TestPostgresEnrichment(t *testing.T) {
 		{
 			// A fraction that rounds to zero still fails the migration. Reporting it as 0% would
 			// be the single most misleading thing this package could print.
-			name:    "a vanishingly small null fraction still says the migration will fail",
+			name:    "a vanishingly small null fraction is still reported, never rounded away",
 			finding: finding("PG017", "orders", "rare_null", domain.ReversibilityCostly, domain.LockFullScan),
-			mustSay: []string{"WILL FAIL", "<0.01%"},
+			mustSay: []string{"<0.01%"},
 		},
 		{
 			name:      "an unused index is reported as genuinely cheap to drop",
@@ -208,9 +271,11 @@ func TestDurationsAreAlwaysMarkedAsEstimates(t *testing.T) {
 
 	set := loadSet(t, "pg.json")
 
+	// PG017 is represented by its clean column: one with nulls becomes WILL_FAIL and carries no
+	// duration at all, which is asserted separately.
 	for _, f := range []domain.Finding{
 		finding("PG006", "orders", "total", domain.ReversibilityIrreversible, domain.LockTableRewrite),
-		finding("PG017", "orders", "shipped_at", domain.ReversibilityCostly, domain.LockFullScan),
+		finding("PG017", "orders", "id", domain.ReversibilityCostly, domain.LockFullScan),
 		finding("PG021", "orders", "c", domain.ReversibilityCostly, domain.LockFullScan),
 	} {
 		c := enrichOne(t, set, f)
