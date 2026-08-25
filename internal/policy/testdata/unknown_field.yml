@@ -1,0 +1,7 @@
+# A misspelled key must fail loudly. Decoded as unknown and dropped, this waiver would have
+# no expiry at all.
+version: 1
+waivers:
+  - rule: PG012
+    reason: "expand-contract"
+    expiress: 2026-10-01

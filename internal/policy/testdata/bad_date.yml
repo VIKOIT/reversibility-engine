@@ -1,0 +1,5 @@
+version: 1
+waivers:
+  - rule: PG012
+    reason: "expand-contract"
+    expires: "next tuesday"

@@ -1,0 +1,6 @@
+# A duration renews itself every time the file is read, so it never expires at all.
+version: 1
+waivers:
+  - rule: PG012
+    reason: "expand-contract"
+    expires: "90d"

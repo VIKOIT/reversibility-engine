@@ -1,0 +1,4 @@
+version: 1
+waivers:
+  - reason: "cover everything, apparently"
+    expires: 2026-10-01

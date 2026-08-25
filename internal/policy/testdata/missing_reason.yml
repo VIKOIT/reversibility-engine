@@ -1,0 +1,4 @@
+version: 1
+waivers:
+  - rule: PG012
+    expires: 2026-10-01

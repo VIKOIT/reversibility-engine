@@ -1,0 +1,4 @@
+version: 1
+waivers:
+  - rule: PG012
+    reason: "we will get to it"

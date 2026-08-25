@@ -1,0 +1,3 @@
+version: 1
+ignore:
+  - "db/[0-9.sql"

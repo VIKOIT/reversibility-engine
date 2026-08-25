@@ -1,0 +1,19 @@
+# The example from the documentation, verbatim. If this file stops loading, every policy
+# written from the README stops loading with it.
+version: 1
+gate: A
+
+ignore:
+  - "legacy/**"
+  - "**/*.generated.sql"
+
+waivers:
+  - rule: PG012
+    path: "migrations/0031_*.sql"
+    reason: "expand-contract; old code removed in #482"
+    expires: 2026-10-01
+    approved_by: "vikoit"
+
+overrides:
+  - rule: K8S008
+    severity: IRREVERSIBLE

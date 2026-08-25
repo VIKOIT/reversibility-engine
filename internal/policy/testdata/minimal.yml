@@ -1,0 +1,2 @@
+# A policy that configures nothing must still load. Version alone is a valid file.
+version: 1

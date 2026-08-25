@@ -1,0 +1,5 @@
+version: 1
+waivers:
+  - rule: PG012
+    reason: "this is a permanent exception in all but name"
+    expires: 2027-12-31
