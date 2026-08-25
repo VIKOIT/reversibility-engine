@@ -36,6 +36,46 @@ not complete, never a passing grade.
 
 The certificate schema is unchanged.
 
+**Prebuilt binaries.** Releases now publish `revctl` and `revsrv` for linux and
+darwin on amd64 and arm64, and windows on amd64, with a `checksums.txt` covering
+all of them. Each target is compiled on a runner of its own architecture, because
+`CGO_ENABLED=1` is mandatory and the darwin targets need an SDK that cannot be
+put on a Linux runner. Every build verifies that it still classifies a
+`DROP TABLE` before it is packaged — a binary that quietly lost the parser would
+grade every migration A for lack of findings.
+
+### Changed
+
+**The GitHub Action is now a composite action, published as `@v2`.** `@v1`
+remains a Docker container action and is unaffected; it is frozen, not removed.
+
+The action downloads the released binary for whichever runner it is on and
+verifies its SHA-256 against the release's `checksums.txt` before executing it. A
+mismatch, or a missing checksum line, installs nothing and fails the job. The
+practical gain is that the action is no longer restricted to Linux runners and no
+longer pays a container pull per run.
+
+It also analyzes a git range now rather than a reconstructed pair of directories.
+That fixes a real gap: the v1 staging pass filtered deletions out of the changeset,
+so `K8S003`, `K8S006`, and every other removal rule could not fire on a pull
+request. They now do.
+
+New inputs: `base`, `format`, `sarif-upload`, `version`, and `config` — the last
+reserved for the policy file and currently an error rather than a no-op, because a
+policy file that was silently ignored would leave a user believing their waivers
+applied. New outputs: `gate-status`, `findings-count`, `certificate-path`.
+Findings are additionally emitted as annotations and appear inline on the diff.
+
+`min-grade` is now `gate` and `include` is now `path`. Both old names still work
+and emit a deprecation warning. Setting a name together with its replacement is an
+error rather than a silent choice between them.
+
+### Removed
+
+**`entrypoint.sh`.** It existed to drive the container action, which the composite
+action replaces. The published image remains, with `revctl` itself as its
+entrypoint, as the way to run the CLI without installing a toolchain.
+
 ## [0.1.0] - 2026-08-20 — Initial Release
 
 First public release. Usable end to end; the certificate schema and CLI flags may

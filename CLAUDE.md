@@ -61,7 +61,7 @@ The v0.2 plan continues the same way. Each session is written up in full in
 | Session | Deliverable | Status |
 | --- | --- | --- |
 | S8 | Git ref resolution: a `gitProvider` behind `--base` / `--head`. | **BUILT — awaiting approval** |
-| S9 | GitHub Action (`action.yml`) + goreleaser release workflow. | |
+| S9 | GitHub Action (`action.yml`) + release workflow. | **BUILT — awaiting approval** |
 | S10 | Policy file `.reversibility.yml` with expiring waivers. | |
 | S11 | Production context snapshots (`revctl snapshot`, `--context`). | |
 | S12 | Terraform plan analyzer. | |
@@ -332,6 +332,53 @@ from two directories. Path arguments become git pathspecs, scoping the compariso
 - **Failures name the fix.** Not a repository, unknown ref, ambiguous ref, and — the common CI
   case — a shallow clone missing the base commit, which says `fetch-depth: 0` in the message.
   All of them reach the caller as a failure to fetch the changeset, which is grade F and exit 2.
+
+## 11e. GitHub Action and releases — as built in S9
+
+The action is a **composite** action at the repo root, with its shell in `action/`. v1 was a
+Docker container action; that tag still is one, and is frozen.
+
+- **A released binary, verified, not a container and never `go install`.** A container pinned
+  the action to Linux runners and paid an image pull per run; `go install` would need a Go
+  toolchain and a C compiler on every consumer's runner, because of cgo. The action downloads
+  the release asset for the runner's OS and architecture and **refuses to execute anything whose
+  SHA-256 does not match the release's `checksums.txt`** — this binary decides whether changes
+  merge, so an unverified one does not run. A missing checksum line is equally fatal: there is
+  nothing to verify against.
+- **`latest` is deliberately not cached.** An `actions/cache` key is immutable once written, so
+  a key containing "latest" would pin the first binary it ever saw and keep serving it. Pinning
+  a version is what earns the cache.
+- **The action analyzes a git range (`--base`), not a staged pair of trees.** v1 reconstructed
+  two directories by copying changed files, which passed `--diff-filter=d` and therefore **never
+  showed the analyzer a deleted file** — K8S003, K8S006, and every other removal rule could not
+  fire on a real pull request. S8's provider removed the need for any of it.
+- **Deprecated input names are kept but never merged.** `min-grade` → `gate`, `include` →
+  `path`. Setting a name and its replacement together is an **error**, not a precedence
+  decision: resolving it silently would pick one during exactly the upgrade that introduced the
+  mistake. A gate that breaks on upgrade gets deleted rather than fixed, which is why the old
+  names still work at all.
+- **`config` is an error, not a no-op.** The policy file arrives in S10. An input that was read
+  by nothing would leave a user believing their waivers applied — a failure in the permissive
+  direction, which is the one this product exists to prevent.
+- **The verdict is read back from the JSON certificate, never re-derived in shell.** A second
+  definition of the grade is a second chance to get it wrong in the permissive direction.
+- **`jq` is checked for up front.** Without the check, a runner lacking it yields an empty grade
+  read from nowhere — the one shape of failure that can look like a pass.
+
+**Releases** (`.github/workflows/release.yml`) build each target on a runner of its own
+architecture. This is forced, not chosen: `CGO_ENABLED=1` is mandatory, cross-compiling cgo
+needs a toolchain per target, and the darwin targets need the macOS SDK, which cannot be put on
+a Linux runner. **goreleaser's OSS edition cannot split a build across runners** — that is a Pro
+feature — so the matrix does it directly and one job merges the per-target checksums. Every
+target verifies its own binary still classifies a `DROP TABLE` before it is packaged: a build
+that silently lost the parser would grade every migration A for lack of findings.
+
+No `-ldflags` version stamping anywhere. A build stamp reaching rendered output would break the
+byte-identical guarantee (§11b).
+
+`.github/workflows/action-selftest.yml` runs the action against this repository's own fixtures
+and asserts the grade, the gate status, the finding count, **and that a grade F actually fails
+the job**. An action that reports F and exits zero is not a gate.
 
 ## 12. Engineering standards
 
