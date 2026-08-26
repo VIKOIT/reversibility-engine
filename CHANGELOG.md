@@ -16,6 +16,14 @@ move:
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [v1.1.2] - 2026-08-26
+
+The first release since `0.1.0` to publish binaries. `v1.0.0`–`v1.1.0` were cut as
+tags and are not removed, but their release runs did not complete, so everything
+below ships here.
+
 ### Security — a gate that reported success having analyzed nothing
 
 **If you consume `VIKOIT/reversibility-engine@v1`, your gate passed without
@@ -421,5 +429,6 @@ that runs the engine 100× over every fixture.
 - Kubernetes findings carry no line numbers — a structural diff has no single
   line to blame.
 
-[Unreleased]: https://github.com/VIKOIT/reversibility-engine/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/VIKOIT/reversibility-engine/compare/v1.1.2...HEAD
+[v1.1.2]: https://github.com/VIKOIT/reversibility-engine/releases/tag/v1.1.2
 [0.1.0]: https://github.com/VIKOIT/reversibility-engine/releases/tag/v0.1.0

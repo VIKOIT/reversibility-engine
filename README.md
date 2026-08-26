@@ -97,7 +97,7 @@ Or download a prebuilt binary — no Go toolchain, no C compiler:
 
 ```bash
 # Linux amd64; swap the asset name for your platform.
-VERSION=v1.1.1
+VERSION=v1.1.2
 curl -fsSLO "https://github.com/VIKOIT/reversibility-engine/releases/download/$VERSION/revctl_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/VIKOIT/reversibility-engine/releases/download/$VERSION/checksums.txt"
 
