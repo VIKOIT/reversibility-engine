@@ -3,7 +3,7 @@
 # CGO_ENABLED=1 is mandatory and non-negotiable: the Postgres analyzer links the real
 # PostgreSQL parser via pganalyze/pg_query_go. A CGO_ENABLED=0 build would silently lose
 # the parser, and this project must never trade analysis depth for a green build.
-# See CLAUDE.md §9 and ADR/0001-parser-choice.md.
+# See docs/SPECIFICATION.md §9 and ADR/0001-parser-choice.md.
 
 SHELL := /bin/sh
 .DEFAULT_GOAL := help

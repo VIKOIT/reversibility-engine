@@ -20,7 +20,7 @@ env:
   GO_VERSION: "1.22"
 
 jobs:
-  # Rule 1 of CLAUDE.md §6 is mechanically checkable, so it is checked mechanically
+  # Rule 1 of docs/SPECIFICATION.md §6 is mechanically checkable, so it is checked mechanically
   # rather than trusted to review.
   architecture:
     name: Architecture rules

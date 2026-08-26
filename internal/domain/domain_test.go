@@ -67,7 +67,7 @@ func TestZeroValuesAreNeverSafe(t *testing.T) {
 func TestLockHazardOrdering(t *testing.T) {
 	t.Parallel()
 
-	// The order mandated by CLAUDE.md §8.
+	// The order mandated by docs/SPECIFICATION.md §8.
 	ordered := []domain.LockHazard{
 		domain.LockNone,
 		domain.LockShort,

@@ -12,7 +12,8 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/fixture"
 )
 
-// CLAUDE.md §13: a rule with no fixture does not exist. This file is where that is enforced.
+// docs/SPECIFICATION.md §13: a rule with no fixture does not exist. This file is where that is
+// enforced.
 //
 // It is the one test in the repository that must stay green from S1 onward, because it is what
 // stops a rule table from quietly growing entries nobody ever proved.
@@ -78,7 +79,7 @@ func TestEveryRuleHasAFixture(t *testing.T) {
 					continue
 				}
 				if _, ok := covered[rule]; !ok {
-					t.Errorf("rule %s has no fixture; per CLAUDE.md §13 it therefore does not exist", rule)
+					t.Errorf("rule %s has no fixture; per docs/SPECIFICATION.md §13 it therefore does not exist", rule)
 				}
 			}
 		})

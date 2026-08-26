@@ -144,7 +144,8 @@ func TestCertificateContainsNothingVolatile(t *testing.T) {
 //
 // Statements are appended, not prepended. Order is meaningful: a CREATE TABLE placed *before* an
 // ALTER COLUMN TYPE legitimately improves the verdict by supplying the prior type the classifier
-// needs (CLAUDE.md §16.3). Appending cannot retroactively explain an earlier statement.
+// needs (docs/SPECIFICATION.md §16.3). Appending cannot retroactively explain an earlier
+// statement.
 func TestAddingAStatementNeverRaisesTheGrade(t *testing.T) {
 	t.Parallel()
 

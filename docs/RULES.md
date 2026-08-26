@@ -15,9 +15,9 @@ Engine emits:
 | [§5 Terraform](#5-terraform--tf001-to-tf010) | over plan JSON, backed by a resource-type catalog | **9 active** (`TF003` retired) |
 
 **A section number in this document is written `§n`. A section number in
-[`CLAUDE.md`](../CLAUDE.md) is always written `CLAUDE.md §n`.** Both files number their sections
-from 1, and an unqualified reference to the wrong one sends a reader to a section that exists and
-says something else.
+[`docs/SPECIFICATION.md`](SPECIFICATION.md) is always written `docs/SPECIFICATION.md §n`.** Both
+files number their sections from 1, and an unqualified reference to the wrong one sends a reader
+to a section that exists and says something else.
 
 ## The rule every other rule defers to
 
@@ -31,7 +31,7 @@ and the last three all fail.
 permissive outcome in the system, because "no findings" and "no analysis" produced the same green
 check. So the second invariant is about the **shape of the run**, not the verdict: **no
 certificate produced means exit 2, never exit 0.** Absence of output is never success. See
-[CLAUDE.md §2](../CLAUDE.md) for the incident that established it.
+[docs/SPECIFICATION.md §2](SPECIFICATION.md) for the incident that established it.
 
 ### The verdicts
 
@@ -95,9 +95,9 @@ precisely because a certificate exists to say so.
 4. Disagreement about a classification is the most valuable contribution there is. Open an issue
    arguing the case; the tables are the product.
 
-Process, layout, and engineering standards live in [`CLAUDE.md`](../CLAUDE.md). Open questions
-about rules that have not been settled are in [`CLAUDE.md`](../CLAUDE.md) §16 — do not resolve
-one by guessing.
+Process, layout, and engineering standards live in
+[`docs/SPECIFICATION.md`](SPECIFICATION.md). Open questions about rules that have not been settled
+are in [`docs/SPECIFICATION.md`](SPECIFICATION.md) §16 — do not resolve one by guessing.
 
 ---
 
@@ -191,7 +191,8 @@ Validate three levels and **record which passed**:
   down migration is treated as an up migration, which is the safe direction.
 - **A multi-command `ALTER TABLE` is flattened into one finding per command.** Collapsing them
   would hide the destructive half of `ALTER TABLE t ADD COLUMN a int, DROP COLUMN b`. This does
-  not contradict CLAUDE.md §16.2: that rule is about overlapping rules on one *command*.
+  not contradict docs/SPECIFICATION.md §16.2: that rule is about overlapping rules on one
+  *command*.
 - **A file that fails to parse yields one PG027 finding for that file, not an analyzer error.**
   One malformed migration must not erase the findings of the others; the certificate should show
   everything that is wrong at once. A parse failure still grades F via UNKNOWN.
@@ -251,7 +252,7 @@ K8S015 applies only when the new image carries an explicit `@sha256:` (or `@sha5
 - **A changed object matching no rule yields K8S014/UNKNOWN** — the Kubernetes analogue of PG027.
   Silence about a change the engine does not understand is indistinguishable from a safe change,
   and the product rests on those two never being confused. See the consequence in
-  CLAUDE.md §16.5, and what it does to the undo plan in §3 below.
+  docs/SPECIFICATION.md §16.5, and what it does to the undo plan in §3 below.
 - **Only an explicit `reclaimPolicy: Retain` prevents K8S003.** Absent, empty, or unresolvable is
   treated exactly like `Delete`, as the table above requires.
 - **Quantities are compared numerically with correct scales.** `1Gi` (2^30) is not `1G` (10^9); a
@@ -337,8 +338,8 @@ carry different reasons and are printed with different wording, because the reme
 | `WILL_FAIL` | will not apply, so there is nothing to undo; fix the migration instead | The statement aborts and rolls its transaction back, so nothing it did survives to be undone — and neither does anything else in the same migration. A rollback script here would describe a state the database is never going to be in. |
 
 Extending the replacement from `IRREVERSIBLE` to `UNKNOWN` was resolved in S4 and is recorded as
-CLAUDE.md §16.6; `WILL_FAIL` was added with the verdict itself. Both affect presentation only —
-each of the three already grades **F**.
+docs/SPECIFICATION.md §16.6; `WILL_FAIL` was added with the verdict itself. Both affect
+presentation only — each of the three already grades **F**.
 
 The replacement is written as SQL comments so the plan stays a pasteable script. An operator who
 copies the whole thing under pressure then runs the steps that exist and reads the warning,
@@ -370,8 +371,9 @@ rather than hitting a syntax error and losing both.
   `FULL_SCAN`, which fails "lock <= SHORT" but does not reach the `TABLE_REWRITE` cap.
 - **Down-migration status travels through the optional `analyzer.DownMigrationValidator`
   interface**, type-asserted by the orchestrator. The engine never imports an analyzer package;
-  the delivery layer wires them (CLAUDE.md §16.1, resolved).
-- **`Blockers` are populated only for grade F**, per CLAUDE.md §8. Findings explain B and C.
+  the delivery layer wires them (docs/SPECIFICATION.md §16.1, resolved).
+- **`Blockers` are populated only for grade F**, per docs/SPECIFICATION.md §8. Findings explain B
+  and C.
 - **`InputDigest` hashes length-prefixed fields over both sides of every change** — path,
   previous path, status, previous content, current content — sorted by path. Length prefixing
   stops `"ab"+"c"` from colliding with `"a"+"bc"`; hashing the previous side keeps two changesets

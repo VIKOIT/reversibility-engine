@@ -1,6 +1,6 @@
 {
   "rule": "DOWN004",
-  "note": "The alternate layout from CLAUDE.md 9: migrations/NNN/up.sql plus migrations/NNN/down.sql. All three levels pass. Combined with PG024 this is the canonical grade A changeset.",
+  "note": "The alternate layout from docs/SPECIFICATION.md 9: migrations/NNN/up.sql plus migrations/NNN/down.sql. All three levels pass. Combined with PG024 this is the canonical grade A changeset.",
   "findings": [
     {"ruleId":"PG024","file":"migrations/0001/up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
   ],

@@ -8,7 +8,7 @@
 ## Context
 
 The Postgres analyzer must decide, for every statement in a migration, which of the 27 rules in
-CLAUDE.md §9 applies. That decision is the product. A wrong "REVERSIBLE" verdict on a
+docs/SPECIFICATION.md §9 applies. That decision is the product. A wrong "REVERSIBLE" verdict on a
 `DROP TABLE` is not a bug report, it is a customer with a deleted table and a support ticket
 that ends the relationship.
 
@@ -39,7 +39,7 @@ Options considered:
 **Use `github.com/pganalyze/pg_query_go/v5`, isolated behind an internal `SQLParser` interface
 in `internal/analyzer/postgres/parser`.**
 
-Option 3 is rejected outright and is on the Do-Not list in CLAUDE.md §14.
+Option 3 is rejected outright and is on the Do-Not list in docs/SPECIFICATION.md §14.
 
 Option 2 was rejected because the available pure-Go parsers target MySQL or CockroachDB
 dialects. Their divergence from real PostgreSQL grammar — `ALTER TABLE ... SET NOT NULL`,
@@ -126,7 +126,7 @@ This buys three things:
 ### Failure behaviour
 
 If the parser is unavailable, errors, or cannot produce a tree, the analyzer returns an error.
-Per CLAUDE.md §11 an analyzer error grades **F**. There is no regex fallback and no
+Per docs/SPECIFICATION.md §11 an analyzer error grades **F**. There is no regex fallback and no
 best-effort mode: the engine either knows what a statement does, or it refuses to bless it.
 
 ## Revisit when

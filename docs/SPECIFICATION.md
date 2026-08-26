@@ -1,4 +1,4 @@
-# CLAUDE.md — Reversibility Engine
+# docs/SPECIFICATION.md — Reversibility Engine
 
 **This file is the contract.** A fresh session with zero memory of prior work must be able to
 read this file alone and continue correctly. If something here conflicts with your instinct,
@@ -82,7 +82,7 @@ N+1 until the owner approves.
 
 | Session | Deliverable | Status |
 | --- | --- | --- |
-| S0 | Repo bootstrap, CLAUDE.md, Makefile, CI workflow, module layout with empty packages. No logic. | **DONE** |
+| S0 | Repo bootstrap, docs/SPECIFICATION.md, Makefile, CI workflow, module layout with empty packages. No logic. | **DONE** |
 | S1 | `internal/domain` types + full test fixtures in `testdata/` + failing tests. No analyzer logic. | **DONE** |
 | S2 | Postgres analyzer until all its fixtures pass. | **DONE** |
 | S3 | Kubernetes analyzer until all its fixtures pass. | **DONE** |
@@ -320,16 +320,16 @@ classified must never read as harmless. `TestZeroValuesAreNeverSafe` enforces th
 ## 9-11, 15. Classification and scoring — moved
 
 **The rule tables, the scoring procedure, and the owner rulings now live in
-[`docs/RULES.md`](docs/RULES.md).** They are the product specification and are read by
+[`docs/RULES.md`](RULES.md).** They are the product specification and are read by
 contributors who are not working through this file, so they were given a document of their own.
 
 | Was | Now |
 | --- | --- |
-| §9 AUTHORITATIVE Classification — PostgreSQL | [`docs/RULES.md` §1](docs/RULES.md#1-postgresql--pg001-to-pg027) |
-| §10 AUTHORITATIVE Classification — Kubernetes | [`docs/RULES.md` §2](docs/RULES.md#2-kubernetes--k8s001-to-k8s015) |
-| §11 AUTHORITATIVE Scoring | [`docs/RULES.md` §3](docs/RULES.md#3-scoring) |
-| §15 Owner rulings | [`docs/RULES.md` §4](docs/RULES.md#4-owner-rulings) |
-| — (new in S12) | [`docs/RULES.md` §5](docs/RULES.md#5-terraform--tf001-to-tf010) — Terraform, TF001–TF010 |
+| §9 AUTHORITATIVE Classification — PostgreSQL | [`docs/RULES.md` §1](RULES.md#1-postgresql--pg001-to-pg027) |
+| §10 AUTHORITATIVE Classification — Kubernetes | [`docs/RULES.md` §2](RULES.md#2-kubernetes--k8s001-to-k8s015) |
+| §11 AUTHORITATIVE Scoring | [`docs/RULES.md` §3](RULES.md#3-scoring) |
+| §15 Owner rulings | [`docs/RULES.md` §4](RULES.md#4-owner-rulings) |
+| — (new in S12) | [`docs/RULES.md` §5](RULES.md#5-terraform--tf001-to-tf010) — Terraform, TF001–TF010 |
 
 Nothing about them changed in the move except the section numbers, and every code comment that
 cited the old numbering was rewritten in the same commit. **Those tables remain authoritative:
@@ -676,8 +676,8 @@ syntaxes under one name would be worse than two names.
 ## 11g. Production context — as built in S11
 
 `revctl snapshot` writes a file; `revctl check --context` reads it. See
-[`docs/PRODUCTION-CONTEXT.md`](docs/PRODUCTION-CONTEXT.md) and
-[`docs/ESTIMATES.md`](docs/ESTIMATES.md).
+[`docs/PRODUCTION-CONTEXT.md`](PRODUCTION-CONTEXT.md) and
+[`docs/ESTIMATES.md`](ESTIMATES.md).
 
 **The engine never connects to anything during analysis.** This is the binding constraint of the
 whole session, and it is enforced by the architecture test in §6, not by discipline. CI never
@@ -763,7 +763,7 @@ needs a production credential, determinism survives, and the analyzers stay pure
 `internal/analyzer/terraform/` reads `terraform show -json`. **It never reads
 `terraform.tfstate`**: state holds provider credentials and attribute values in plaintext, a
 plan does not, and there is no code path here that opens one. The authoritative table is
-[`docs/RULES.md` §5](docs/RULES.md#5-terraform--tf001-to-tf010).
+[`docs/RULES.md` §5](RULES.md#5-terraform--tf001-to-tf010).
 
 **Only destruction is classified.** A created or updated-in-place resource has a reverse by
 construction. That is what keeps the catalog finite: the problem was never "hundreds of AWS
@@ -859,7 +859,7 @@ what stand between a new user and an immediate failing gate.
   9 active Terraform rules. **A rule with no fixture does not exist.**
   The one exception is a **retired** ID, declared in `internal/fixture/coverage_test.go`, which
   has no fixture and is never reused or renumbered. `TF003` is the only one; see
-  [`docs/RULES.md` §5](docs/RULES.md#5-terraform--tf001-to-tf010).
+  [`docs/RULES.md` §5](RULES.md#5-terraform--tf001-to-tf010).
 - Golden-file tests for the Markdown and JSON renderers.
   As built: golden files exist for **all three** renderers across 8 scenarios spanning every
   grade plus the not-applicable case, in `testdata/fixtures/golden/`. Regenerate deliberately
@@ -984,7 +984,7 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    prevent. It affects presentation only; the grade was already F either way.
 
    **Still open — confirm or reject.** What changed is only where it is written down.
-   [`docs/RULES.md` §3](docs/RULES.md#undoplan) previously said the plan is replaced "if any
+   [`docs/RULES.md` §3](RULES.md#undoplan) previously said the plan is replaced "if any
    finding is IRREVERSIBLE", which made the shipped behaviour formally a spec violation in a
    document whose own rule is that the code is the bug where the two disagree. §3 now states all
    three verdicts and the distinct wording each produces, so the spec describes what v1.1.2 does.

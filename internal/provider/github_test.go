@@ -155,9 +155,9 @@ func TestGitHubFetchesBothSidesOfAChange(t *testing.T) {
 	}
 }
 
-// CLAUDE.md §16.4: K8S003 needs the StorageClass behind a deleted claim and K8S009 needs the
-// workload still mounting a deleted ConfigMap. Neither is in the diff, because neither was
-// edited. Without this fetch both rules go blind.
+// docs/SPECIFICATION.md §16.4: K8S003 needs the StorageClass behind a deleted claim and K8S009
+// needs the workload still mounting a deleted ConfigMap. Neither is in the diff, because neither
+// was edited. Without this fetch both rules go blind.
 func TestGitHubFetchesUnchangedContextFiles(t *testing.T) {
 	t.Parallel()
 

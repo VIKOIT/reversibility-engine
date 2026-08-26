@@ -34,9 +34,9 @@ type classification struct {
 
 // classify maps a parsed statement onto exactly one rule.
 //
-// Precedence, per CLAUDE.md §16.2: one finding per statement, and CASCADE (PG005) overrides any
-// rule it overlays, because the set of objects CASCADE will destroy is not knowable from the
-// migration text.
+// Precedence, per docs/SPECIFICATION.md §16.2: one finding per statement, and CASCADE (PG005)
+// overrides any rule it overlays, because the set of objects CASCADE will destroy is not knowable
+// from the migration text.
 func classify(s parser.Statement, sch *schema) classification {
 	if s.Cascade {
 		return classification{

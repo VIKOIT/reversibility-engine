@@ -52,7 +52,7 @@ jobs:
           - { runner: windows-latest,   goos: windows, goarch: amd64, archive: zip }
 
           # darwin/amd64 is deliberately absent. It is a scope decision, not an exception to
-          # the native-build rule below — see CLAUDE.md §11e.
+          # the native-build rule below — see docs/SPECIFICATION.md §11e.
           #
           # The macos-13 runner is the only hosted Intel Mac, and on the v1.1.1 release it sat
           # in the queue for over two hours before the run had to be cancelled by hand. Nothing

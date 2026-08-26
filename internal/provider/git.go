@@ -397,9 +397,9 @@ func (g *Git) readChanges(ctx context.Context, changes []gitChange, previousRev,
 // Some rules cannot be decided from the changed files alone: K8S003 needs the StorageClass
 // behind a deleted claim, and K8S009 needs the workload that still mounts a deleted ConfigMap.
 // Neither appears in a diff, because neither was edited. The GitHub provider already supplies
-// them (CLAUDE.md §11c); without the same behaviour here, the same pull request would grade
-// differently from the CLI than from the app, and the more permissive of the two answers would
-// be the one a developer saw first.
+// them (docs/SPECIFICATION.md §11c); without the same behaviour here, the same pull request
+// would grade differently from the CLI than from the app, and the more permissive of the two
+// answers would be the one a developer saw first.
 //
 // The search is bounded to the directories the change already touches. A rule whose context lies
 // outside that scope still sees nothing and must return UNKNOWN rather than assume safety.

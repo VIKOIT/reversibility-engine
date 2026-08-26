@@ -16,8 +16,8 @@ import (
 // widens or narrows. The prior type has to come from a CREATE TABLE or ADD COLUMN earlier in
 // the changeset. When it does not, the verdict is UNKNOWN — never a guess.
 //
-// See CLAUDE.md §16.3: a schema baseline supplied from a live database would be a different
-// design, and is out of scope (CLAUDE.md §3).
+// See docs/SPECIFICATION.md §16.3: a schema baseline supplied from a live database would be a
+// different design, and is out of scope (docs/SPECIFICATION.md §3).
 type schema struct {
 	// tables maps a lower-cased table name to its known column types.
 	tables map[string]map[string]parser.Type

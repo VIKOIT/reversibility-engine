@@ -136,7 +136,8 @@ func (f *Fake) readAllAdded(dir, sub string) ([]domain.ChangedFile, error) {
 // Files present and byte-identical on both sides are still returned, as MODIFIED. That is
 // deliberate: rules such as K8S009 ask whether a workload still references a ConfigMap the
 // changeset deletes, and that question cannot be answered from the deleted file alone. See the
-// open question in CLAUDE.md about whether the real providers must supply this context too.
+// open question in docs/SPECIFICATION.md about whether the real providers must supply this
+// context too.
 func (f *Fake) readTreePair(dir string) ([]domain.ChangedFile, error) {
 	oldFiles, err := readTree(filepath.Join(dir, oldDir))
 	if err != nil {

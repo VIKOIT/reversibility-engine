@@ -1,6 +1,6 @@
 {
   "rule": "PG012",
-  "note": "MANDATED RATIONALE (CLAUDE.md 9). COSTLY because a rename breaks the previous application version: rolling the code back fails while the schema is renamed. The rationale text must say so.",
+  "note": "MANDATED RATIONALE (docs/SPECIFICATION.md 9). COSTLY because a rename breaks the previous application version: rolling the code back fails while the schema is renamed. The rationale text must say so.",
   "findings": [
     {"ruleId":"PG012","file":"migrations/0001_rename_orders.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":true},
     {"ruleId":"PG012","file":"migrations/0001_rename_orders.up.sql","line":2,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":true}

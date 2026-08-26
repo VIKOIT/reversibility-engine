@@ -1,6 +1,6 @@
 {
   "rule": "PG005",
-  "note": "PRECEDENCE FIXTURE (CLAUDE.md 16.2, ASSUMED). CASCADE overlays DROP TABLE, which alone would be PG001. The assumption under test is that CASCADE wins and exactly one finding is emitted, because the blast radius of CASCADE is unbounded and unknowable from the migration alone.",
+  "note": "PRECEDENCE FIXTURE (docs/SPECIFICATION.md 16.2, ASSUMED). CASCADE overlays DROP TABLE, which alone would be PG001. The assumption under test is that CASCADE wins and exactly one finding is emitted, because the blast radius of CASCADE is unbounded and unknowable from the migration alone.",
   "findings": [
     {"ruleId":"PG005","file":"migrations/0001_drop_payments_cascade.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":false}
   ]

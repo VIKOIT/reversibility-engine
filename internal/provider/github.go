@@ -204,7 +204,7 @@ func (g *GitHub) fetchChanged(ctx context.Context, r parsedRef, changed []*githu
 // The search is bounded to the directories the change already touches. That covers the layout
 // these rules actually care about — a chart or kustomize directory holding related manifests —
 // without walking the repository. A rule whose context lies outside that scope still sees
-// nothing, and per CLAUDE.md §16.4 must return UNKNOWN rather than assume safety.
+// nothing, and per docs/SPECIFICATION.md §16.4 must return UNKNOWN rather than assume safety.
 func (g *GitHub) fetchContext(ctx context.Context, r parsedRef, changed []domain.ChangedFile) ([]domain.ChangedFile, error) {
 	known := make(map[string]bool, len(changed))
 	dirs := map[string]bool{}

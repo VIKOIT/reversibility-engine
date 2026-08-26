@@ -1,6 +1,6 @@
 {
   "rule": "DOWN001",
-  "note": "Level 1 failure. The statement itself is the safest change in the table (PG020, REVERSIBLE, NONE), so the only thing that can stop this reaching grade A is the missing down migration. Per CLAUDE.md 11 the cap applies and the grade is C -- this fixture is what proves a cap overrides an assignment.",
+  "note": "Level 1 failure. The statement itself is the safest change in the table (PG020, REVERSIBLE, NONE), so the only thing that can stop this reaching grade A is the missing down migration. Per docs/SPECIFICATION.md 11 the cap applies and the grade is C -- this fixture is what proves a cap overrides an assignment.",
   "findings": [
     {"ruleId":"PG020","file":"migrations/0001_add_notes.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
   ],

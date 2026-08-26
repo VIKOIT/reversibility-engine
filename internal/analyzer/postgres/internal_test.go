@@ -116,7 +116,7 @@ func TestSchemaTracking(t *testing.T) {
 }
 
 // An ALTER COLUMN TYPE whose prior type is unknown must be PG027, never a guess in either
-// direction. This is the fail-closed path for CLAUDE.md §16.3.
+// direction. This is the fail-closed path for docs/SPECIFICATION.md §16.3.
 func TestAlterColumnTypeWithoutPriorTypeIsUnknown(t *testing.T) {
 	t.Parallel()
 
@@ -138,7 +138,7 @@ func TestAlterColumnTypeWithoutPriorTypeIsUnknown(t *testing.T) {
 	}
 }
 
-// CASCADE overrides the rule it overlays, per CLAUDE.md §16.2.
+// CASCADE overrides the rule it overlays, per docs/SPECIFICATION.md §16.2.
 func TestCascadeOverridesBaseRule(t *testing.T) {
 	t.Parallel()
 

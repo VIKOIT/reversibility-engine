@@ -46,7 +46,7 @@ func buildUndoPlan(findings []domain.Finding) []domain.UndoStep {
 // is §2: an UNKNOWN finding is a change nobody understood, so a plan that lists steps for
 // everything else claims a completeness it does not have. Emitting a confident-looking script
 // beside an unclassified change is exactly the wrong-safe-verdict failure this product exists to
-// prevent. Recorded as an open question in CLAUDE.md §16.6.
+// prevent. Recorded as an open question in docs/SPECIFICATION.md §16.6.
 func unreversibleFindings(findings []domain.Finding) []domain.UndoStep {
 	var blocked []domain.UndoStep
 

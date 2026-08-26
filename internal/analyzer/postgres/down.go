@@ -19,7 +19,7 @@ import (
 // It is a separate exported function rather than part of Analyze because the Analyzer interface
 // returns only findings, and down-migration status is not a classification — it is an input to
 // the scorer's cap rules. Keeping it stateless means the analyzer holds no per-run state and
-// stays safe to share across goroutines. Resolves CLAUDE.md §16.1.
+// stays safe to share across goroutines. Resolves docs/SPECIFICATION.md §16.1.
 //
 // The three levels are reported independently, and level 3 is advisory: per docs/RULES.md §1 it
 // must never on its own produce grade F.

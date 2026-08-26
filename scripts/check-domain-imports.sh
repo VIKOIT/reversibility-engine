@@ -1,5 +1,6 @@
 #!/bin/sh
-# Enforces CLAUDE.md §6 rule 1: internal/domain imports nothing outside the standard library.
+# Enforces docs/SPECIFICATION.md §6 rule 1: internal/domain imports nothing outside the standard
+# library.
 #
 # The domain package is the spine every other package depends on. The moment it grows a
 # third-party import, the "types only, depends on nothing" guarantee is gone and the

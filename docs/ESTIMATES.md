@@ -18,8 +18,8 @@ So an estimate that is wrong by 10% almost never changes a verdict, because it h
 band boundary to change anything at all. An estimate that is wrong by an order of magnitude can
 — which is why the fallback in this document errs small, and why the constants err large.
 
-See also [`CLAUDE.md` §11g](../CLAUDE.md) for the design constraint behind all of it: the engine
-never connects to anything during analysis.
+See also [`docs/SPECIFICATION.md` §11g](SPECIFICATION.md) for the design constraint behind all of
+it: the engine never connects to anything during analysis.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "rule": "PG013",
-  "note": "MANDATED RATIONALE (CLAUDE.md 9). COSTLY because rows violating the dropped constraint may be inserted before rollback, making re-adding it impossible. The rationale text must say so.",
+  "note": "MANDATED RATIONALE (docs/SPECIFICATION.md 9). COSTLY because rows violating the dropped constraint may be inserted before rollback, making re-adding it impossible. The rationale text must say so.",
   "findings": [
     {"ruleId":"PG013","file":"migrations/0001_drop_total_check.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":true}
   ]

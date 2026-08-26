@@ -16,9 +16,9 @@ import (
 // production password is a far worse outcome than an unhelpful error, so the message is scrubbed
 // even at the cost of some diagnostic detail.
 //
-// Regex is used here and only here. CLAUDE.md forbids regex for SQL parsing, which this is not:
-// it is redaction of a text string, where a conservative over-match costs nothing and a
-// principled parser would still have to guess at whatever the driver chose to print.
+// Regex is used here and only here. docs/SPECIFICATION.md forbids regex for SQL parsing, which
+// this is not: it is redaction of a text string, where a conservative over-match costs nothing
+// and a principled parser would still have to guess at whatever the driver chose to print.
 var (
 	// A URL with credentials: postgres://user:secret@host/db
 	urlCredentials = regexp.MustCompile(`(?i)\b(postgres(?:ql)?://)[^\s/@]*@`)

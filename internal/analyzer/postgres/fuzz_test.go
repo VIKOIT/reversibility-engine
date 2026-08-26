@@ -63,8 +63,8 @@ var seedCorpus = []string{
 	"DROP TABLE " + strings.Repeat("Ω", 300) + ";",
 }
 
-// FuzzAnalyze asserts the two properties CLAUDE.md §13 requires of the SQL analyzer: it must
-// never panic, and it must never call malformed input REVERSIBLE.
+// FuzzAnalyze asserts the two properties docs/SPECIFICATION.md §13 requires of the SQL analyzer:
+// it must never panic, and it must never call malformed input REVERSIBLE.
 //
 // The second is the one that matters. A crash is loud and gets fixed; a confident "safe" verdict
 // on SQL nobody could parse is the failure that ends the product.

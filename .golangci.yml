@@ -1,7 +1,7 @@
 # golangci-lint v2 configuration.
 #
-# The linter set is chosen to enforce CLAUDE.md §12 mechanically: explicit error handling,
-# wrapped errors, and no panics in library code.
+# The linter set is chosen to enforce docs/SPECIFICATION.md §12 mechanically: explicit error
+# handling, wrapped errors, and no panics in library code.
 
 version: "2"
 
@@ -39,7 +39,7 @@ linters:
     forbidigo:
       forbid:
         - pattern: ^panic$
-          msg: "no panic in library code (CLAUDE.md §12); return an error instead"
+          msg: "no panic in library code (docs/SPECIFICATION.md §12); return an error instead"
     revive:
       rules:
         - name: exported    # §12: every exported symbol documented

@@ -966,8 +966,8 @@ stack-overflow guard, and the musl/Alpine constraint.
 
 ## Contributing
 
-[`CLAUDE.md`](CLAUDE.md) is the contract: classification tables, scoring rules,
-dependency rules, and testing requirements. Read it before changing anything.
+[`docs/SPECIFICATION.md`](docs/SPECIFICATION.md) is the contract: classification tables, scoring
+rules, dependency rules, and testing requirements. Read it before changing anything.
 
 Two rules matter most:
 
