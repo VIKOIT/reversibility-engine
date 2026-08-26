@@ -246,12 +246,12 @@ jobs:
     permissions:
       contents: write
 
-    # Consumers write `uses: VIKOIT/reversibility-engine@v2` and expect it to mean the newest
-    # v2.x. Nothing moves that tag on its own, so until this existed it was a manual step
+    # Consumers write `uses: VIKOIT/reversibility-engine@v1` and expect it to mean the newest
+    # v1.x. Nothing moves that tag on its own, so until this existed it was a manual step
     # after every release — and the failure mode of forgetting is silent: everyone stays on
     # the previous release and the fix they were told to upgrade for never reaches them.
     #
-    # Prereleases are excluded by the `-` check: v2.1.0-rc.1 must not become what @v2 means.
+    # Prereleases are excluded by the `-` check: v1.2.0-rc.1 must not become what @v1 means.
     steps:
       - name: Point the major tag at this release
         env:

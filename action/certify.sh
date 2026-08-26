@@ -143,6 +143,9 @@ set +e
 RC=$?
 set -e
 
+# A gate must prove it ran. No certificate produced means exit 2, never exit 0 — absence of
+# output is never success. This is the post-condition on the whole step, and it holds whatever
+# revctl's own exit code said: a zero from a run that wrote nothing is a zero about nothing.
 if [ ! -s "$CERT" ]; then
     error 'revctl produced no certificate. This is a broken run, not a passing one.'
     emit 'grade' 'F'
@@ -169,12 +172,36 @@ else
     "$REVCTL" check --base "$BASE" --format json --output "$CERT_JSON" "${SPEC[@]}" > /dev/null 2>&1 || true
 fi
 
-if [ -s "$CERT_JSON" ]; then
-    GRADE="$(jq -r '.grade // "F"' "$CERT_JSON")"
-    GATE_STATUS="$(jq -r '.aiGateStatus // "FAIL"' "$CERT_JSON")"
-    APPLICABLE="$(jq -r '.applicable // true' "$CERT_JSON")"
-    FINDINGS="$(jq -r '.findings | length' "$CERT_JSON")"
+# The same post-condition applied to the verdict itself. Without this JSON there is a
+# certificate on disk but no readable grade, so the outputs would report F/FAIL while the step
+# still exited on revctl's code — possibly zero. A step that says FAIL and passes the job has
+# not proved it ran; it has proved only that something was written.
+if [ ! -s "$CERT_JSON" ]; then
+    error 'The certificate could not be read back as JSON, so the verdict cannot be reported. This is a broken run, not a passing one.'
+    emit 'grade' 'F'
+    emit 'gate-status' 'FAIL'
+    emit 'findings-count' '0'
+    emit 'applicable' 'true'
+    emit 'certificate-path' "$CERT"
+    emit 'markdown-path' ''
+    emit 'sarif-path' ''
+    exit 2
 fi
+
+GRADE="$(jq -r '.grade // "F"' "$CERT_JSON")"
+GATE_STATUS="$(jq -r '.aiGateStatus // "FAIL"' "$CERT_JSON")"
+APPLICABLE="$(jq -r '.applicable // true' "$CERT_JSON")"
+FINDINGS="$(jq -r '.findings | length' "$CERT_JSON")"
+
+# An unreadable grade is UNKNOWN by another name, and UNKNOWN fails. jq emits "null" for a
+# missing key rather than failing, so the // defaults above do not catch a malformed document.
+case "$GRADE" in
+    A|B|C|F) ;;
+    *)
+        error "The certificate carries no readable grade (got '$GRADE'). Unknown means unsafe."
+        exit 2
+        ;;
+esac
 
 # Markdown is what a person reads, so the comment always gets it whatever format was asked for.
 MARKDOWN="$CERT"

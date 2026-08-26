@@ -159,7 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: VIKOIT/reversibility-engine@v2   # for the binary
+      - uses: VIKOIT/reversibility-engine@v1   # for the binary
       - run: revctl snapshot --dsn "$REPLICA_DSN" --out .reversibility/pg.json
         env:
           REPLICA_DSN: ${{ secrets.REPLICA_DSN }}

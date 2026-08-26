@@ -336,16 +336,43 @@ func TestCLIOutputIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestBareInvocationPrintsHelp(t *testing.T) {
+// TestBareInvocationIsNotAPass is the regression test for the fail-open that shipped in the
+// v1.1.0 image: revctl with no arguments printed help and exited zero, so the single invocation
+// that analyzes nothing was also the only one that could never fail. A container entrypoint, a
+// wrapper script, or a CI template with an unset variable could therefore report success over no
+// analysis at all — which is what happened, and it graded green for every @v1 consumer.
+//
+// A gate must prove it ran.
+func TestBareInvocationIsNotAPass(t *testing.T) {
 	t.Parallel()
 
-	stdout, _, code := run()
+	stdout, stderr, code := run()
 
-	if code != cli.ExitOK {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitOK)
+	if code != cli.ExitError {
+		t.Errorf("exit code = %d, want %d — a run that analyzed nothing must not succeed", code, cli.ExitError)
 	}
-	if !strings.Contains(stdout, "revctl") || !strings.Contains(stdout, "check") {
-		t.Errorf("bare invocation did not print help:\n%s", stdout)
+
+	// Help is still printed, because a bare invocation is usually a typo and the user needs to
+	// see what to type instead. It goes to stderr: a caller piping stdout into a certificate
+	// must not receive usage text where a verdict belongs.
+	if !strings.Contains(stderr, "revctl") || !strings.Contains(stderr, "check") {
+		t.Errorf("bare invocation did not print help to stderr:\n%s", stderr)
+	}
+	if stdout != "" {
+		t.Errorf("bare invocation wrote to stdout, which is reserved for the certificate:\n%s", stdout)
+	}
+}
+
+// TestHelpIsStillASuccess separates asking for help from failing to give a command. Making the
+// former non-zero would break every `revctl --help` in a Makefile and teach users to ignore the
+// exit code, which is the habit the test above depends on them not having.
+func TestHelpIsStillASuccess(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{{"--help"}, {"help"}, {"help", "check"}} {
+		if _, _, code := run(args...); code != cli.ExitOK {
+			t.Errorf("revctl %v: exit code = %d, want %d", args, code, cli.ExitOK)
+		}
 	}
 }
 

@@ -31,6 +31,27 @@ Two interfaces over one decoupled core:
   passing grade. Every one of those paths terminates in **F**.
 - There is no "probably fine". There is `REVERSIBLE`, `COSTLY`, `IRREVERSIBLE`, `UNKNOWN` — and
   `UNKNOWN` fails.
+- **A gate must prove it ran. No certificate produced means exit 2, never exit 0.** Absence of
+  output is never success.
+
+The last one is newer than the rest and was learned the expensive way, so it is worth saying
+why it is not implied by the others. Every rule above governs what happens once a change has
+been read. None of them says anything about a run that read nothing at all — and that run had
+the most permissive outcome in the system, because "no findings" and "no analysis" produced the
+same green check. The `:v1` image incident (§11e) was exactly this: no rule misfired, no grade
+was wrong, there was simply no grade, and no grade passed.
+
+So the invariant is about the **shape of the run**, not the verdict:
+
+- `revctl` with no arguments exits **2**, not 0. It prints help to stderr, because stdout is
+  where a certificate goes.
+- The action exits **2** if no certificate file was written, and again if the verdict cannot be
+  read back out of one.
+- An image whose no-argument invocation exits 0 is not published.
+- Anything invoking a container names `--entrypoint` and its arguments explicitly. An inherited
+  entrypoint is a silent dependency on a value somebody else can change.
+
+Each of those is enforced by a test that fails when the gate stops gating, not by convention.
 
 ## 3. MVP scope
 
@@ -372,8 +393,24 @@ from two directories. Path arguments become git pathspecs, scoping the compariso
 
 ## 11e. GitHub Action and releases — as built in S9
 
-The action is a **composite** action at the repo root, with its shell in `action/`. v1 was a
-Docker container action; that tag still is one, and is frozen.
+The action is a **composite** action at the repo root, with its shell in `action/`.
+
+**There is one major line and it is v1. There is no v2 and there never was.** This is a ruling,
+recorded here because the ambiguity already caused an incident and would otherwise regenerate:
+several documents described the composite action as `@v2` while every tag ever cut was `v1.x`,
+so the README told people to write a ref that did not exist and the frozen Docker action at
+`v1.0.2` was left looking like the current one.
+
+| Tag | What it is |
+| --- | --- |
+| `v1.0.0` – `v1.0.2` | **Docker container action.** Frozen. Pulls `ghcr.io/…:v1` and names no entrypoint. |
+| `v1.1.0` onward | **Composite action.** Downloads a verified release binary. |
+| `v1` | Moving major tag. Points at the newest non-prerelease `v1.x`. |
+
+Consumers write `@v1` and always have. The transition from container to composite happened
+*within* v1 and needed no new major, because every input kept working — which is the entire
+reason the deprecated aliases exist. **Do not introduce a `v2` in prose, in an example, or as
+an image tag.** If a real v2 is ever cut, this table is what it amends.
 
 - **A released binary, verified, not a container and never `go install`.** A container pinned
   the action to Linux runners and paid an image pull per run; `go install` would need a Go
@@ -389,8 +426,8 @@ Docker container action; that tag still is one, and is frozen.
   way to consume the action, and it has no release of its own — releases are cut as `v1.2.0` and
   the `v1` tag is repointed at them afterwards, so a download from `releases/download/v1/` 404s
   on precisely the tag everybody uses. Major-only refs therefore resolve to `latest`. The
-  caveat, stated rather than hidden: while two major lines are maintained at once, `@v1` would
-  fetch a v2 release. Pin a full version to be immune to that.
+  caveat, stated rather than hidden: should a second major line ever be maintained alongside
+  this one, `@v1` would fetch a release from the newer line. Pin a full version to be immune.
 - **The action analyzes a git range (`--base`), not a staged pair of trees.** v1 reconstructed
   two directories by copying changed files, which passed `--diff-filter=d` and therefore **never
   showed the analyzer a deleted file** — K8S003, K8S006, and every other removal rule could not
@@ -419,15 +456,47 @@ that silently lost the parser would grade every migration A for lack of findings
 No `-ldflags` version stamping anywhere. A build stamp reaching rendered output would break the
 byte-identical guarantee (§11b).
 
-**The major tag moves itself.** Consumers write `@v2` and expect the newest v2.x; nothing in git
+**The major tag moves itself.** Consumers write `@v1` and expect the newest v1.x; nothing in git
 moves that tag, and forgetting to do it by hand fails silently — everyone stays on the previous
 release and the fix they were told to upgrade for never arrives. A final job repoints it through
 the API and then reads it back, because a tag that quietly did not move is the same failure.
-Prereleases are excluded: `v2.1.0-rc.1` must never become what `@v2` means.
+Prereleases are excluded: `v1.2.0-rc.1` must never become what `@v1` means.
 
 `.github/workflows/action-selftest.yml` runs the action against this repository's own fixtures
 and asserts the grade, the gate status, the finding count, **and that a grade F actually fails
 the job**. An action that reports F and exits zero is not a gate.
+
+**The `:v1` image incident — what actually went wrong, and what now prevents it.**
+
+The v1.1.0 release published its image as `ghcr.io/…:v1` alongside the immutable version tags.
+The frozen `v1.0.2` action is a Docker action whose `action.yml` reads
+`image: 'docker://ghcr.io/vikoit/reversibility-engine:v1'` and sets **no `entrypoint:` and no
+`args:`** — it runs whatever the image declares. At 1.0.2 that was `entrypoint.sh`, which did
+the analysis. At 1.1.0 it was `revctl` itself, and **`revctl` with no arguments printed help and
+exited 0**. Every existing `@v1` consumer's gate silently became a green check over nothing.
+
+The moving tag was the vector. **The defect was the exit code**: the one invocation that
+analyzes nothing was also the only one that could never fail.
+
+Four things now stand in the way, and each is a test rather than a convention:
+
+| Guard | Where |
+| --- | --- |
+| Bare `revctl` exits 2, help to stderr | `cli.go`; `TestBareInvocationIsNotAPass` |
+| Asking for help still exits 0 | `TestHelpIsStillASuccess` — without this, users learn to ignore the exit code and the guard above stops protecting anything |
+| An image whose no-argument run exits 0 is never published | `publish-image.yml`, and `analyzing-nothing-is-not-a-pass` in the selftest, which builds the image from the commit rather than pulling one |
+| `--entrypoint` named explicitly at every call site | `publish-image.yml`, the selftest, the README example |
+
+The action publishes **immutable version image tags only** — no `:v1`, no `:latest`. A moving
+alias may come back when nothing consumes the image as an action entrypoint, and not before.
+`.github/workflows/restore-image-tag.yml` repairs an alias from a runner rather than a laptop:
+it copies a manifest with `imagetools create`, reads the digest back, and asserts the restored
+`ENTRYPOINT` is the one the frozen action needs — because the digest proves which bytes, not
+which behaviour.
+
+The certificate post-condition in `certify.sh` is the same invariant one layer up: no
+certificate on disk is exit 2, and a certificate whose grade cannot be read back is also exit 2.
+A step that reports FAIL while passing the job has proved only that something was written.
 
 ## 11f. Policy file — as built in S10
 
@@ -723,6 +792,11 @@ does not move.
 - Do not add dependencies beyond the table in §6.
 - Do not build anything listed under "Out of scope" (§3).
 - Do not let any code path turn an error, a panic, or an unknown into a passing grade.
+- Do not let any code path turn *no analysis* into a passing grade either (§2). A missing
+  argument, a missing certificate, an unreadable verdict, and a lost entrypoint all exit 2.
+- Do not publish a moving image tag, and do not inherit a container's entrypoint (§11e).
+- Do not write `v2` — of the action, of the image, or in an example. There is one line and it
+  is v1 (§11e).
 
 ## 16. Open questions — resolve with the owner, do not guess
 

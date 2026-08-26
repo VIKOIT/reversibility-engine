@@ -175,3 +175,119 @@ jobs:
             exit 1
           fi
           echo 'Grade F failed the job, as it must.'
+
+  analyzing-nothing-is-not-a-pass:
+    name: an invocation that analyzes nothing fails
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # The regression test for the v1.1.0 incident, and the one that would have caught it before
+    # publish.
+    #
+    # Nothing about that failure was a wrong grade. There was no grade. The frozen v1.0.x Docker
+    # action runs the image's ENTRYPOINT with no arguments of its own; that entrypoint changed
+    # from a script that did the analysis to revctl itself, and revctl with no arguments printed
+    # help and exited 0. Every @v1 consumer's gate became a green check over nothing.
+    #
+    # `gate-fails-the-job` above proves a bad change fails. This proves *no* change fails too —
+    # which is the harder half, because a gate that never runs looks exactly like a gate that
+    # found nothing wrong.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build revctl
+        env:
+          CGO_ENABLED: '1'
+        run: go build -o "$RUNNER_TEMP/revctl" ./cmd/revctl
+
+      - name: The binary with no arguments exits 2
+        run: |
+          set -euo pipefail
+
+          set +e
+          "$RUNNER_TEMP/revctl" > out.txt 2> err.txt
+          rc=$?
+          set -e
+
+          if [ "$rc" -ne 2 ]; then
+            echo "::error::revctl with no arguments exited $rc, want 2. A run that analyzed nothing must never report success."
+            cat out.txt err.txt
+            exit 1
+          fi
+
+          # stdout is where a certificate goes. Usage text there would be read as output by
+          # anything redirecting it to a file.
+          if [ -s out.txt ]; then
+            echo '::error::revctl with no arguments wrote to stdout, which is reserved for the certificate.'
+            cat out.txt
+            exit 1
+          fi
+
+          echo 'Bare invocation exits 2 with help on stderr, as it must.'
+
+      - name: Asking for help is still a success
+        run: |
+          set -euo pipefail
+          # Separated deliberately. If `--help` were also non-zero, every Makefile and container
+          # HEALTHCHECK that calls it would break, users would learn to ignore this exit code,
+          # and the assertion above would stop protecting anything.
+          "$RUNNER_TEMP/revctl" --help > /dev/null
+          "$RUNNER_TEMP/revctl" help > /dev/null
+          echo 'Help exits 0, as it must.'
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Built here rather than pulled, so the assertion covers the image this commit *would*
+      # publish rather than one already in the registry. Catching it at publish time is too late:
+      # the tag is what consumers resolve, and by then it has moved.
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: reversibility-engine:selftest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: The image with no arguments is not a pass
+        run: |
+          set -euo pipefail
+
+          set +e
+          docker run --rm reversibility-engine:selftest > image-out.txt 2>&1
+          rc=$?
+          set -e
+
+          if [ "$rc" -eq 0 ]; then
+            echo '::error::The image exits 0 when run with no arguments. A Docker action that names no entrypoint would report a passing gate having analyzed nothing — this is the v1.1.0 fail-open.'
+            cat image-out.txt
+            exit 1
+          fi
+
+          echo "Image with no arguments exits $rc, as it must."
+
+      - name: The image still classifies SQL when told what to do
+        run: |
+          set -euo pipefail
+          printf 'DROP TABLE t;\n' > probe.sql
+
+          # --entrypoint is named explicitly. The image declares one, and inheriting it is the
+          # habit that made the incident invisible at every call site.
+          docker run --rm \
+            --volume "$PWD:/probe" --workdir /probe \
+            --entrypoint /usr/local/bin/revctl \
+            reversibility-engine:selftest check probe.sql --format json > probe.json
+
+          if ! grep -q '"PG001"' probe.json; then
+            echo '::error::the image did not classify DROP TABLE as PG001 — it has lost its cgo parser'
+            cat probe.json
+            exit 1
+          fi
+          echo 'Image classifies SQL correctly.'

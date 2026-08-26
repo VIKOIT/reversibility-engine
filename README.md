@@ -97,7 +97,7 @@ Or download a prebuilt binary — no Go toolchain, no C compiler:
 
 ```bash
 # Linux amd64; swap the asset name for your platform.
-VERSION=v2.0.0
+VERSION=v1.1.1
 curl -fsSLO "https://github.com/VIKOIT/reversibility-engine/releases/download/$VERSION/revctl_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/VIKOIT/reversibility-engine/releases/download/$VERSION/checksums.txt"
 
@@ -140,7 +140,7 @@ jobs:
         with:
           fetch-depth: 0     # the base commit must be reachable to diff against
 
-      - uses: VIKOIT/reversibility-engine@v2
+      - uses: VIKOIT/reversibility-engine@v1
         with:
           gate: B
 ```
@@ -152,11 +152,14 @@ verifies its checksum before running it.
 `gate` is the worst grade that still passes. Autonomous agents must run at `A` —
 grade A is the only verdict that permits an agent to merge.
 
-> **Upgrading from `@v1`.** `@v1` was a Docker container action, so it ran on
-> Linux only. `@v2` is a composite action and runs anywhere. `min-grade` became
-> `gate` and `include` became `path`; both old names still work and warn. Setting
-> a name and its replacement at once is an error rather than a silent choice
-> between them.
+> **Upgrading from `v1.0.x`.** Through `v1.0.2` this was a Docker container
+> action, so it ran on Linux only and paid an image pull every run. From `v1.1.0`
+> it is a composite action and runs anywhere — same `@v1`, nothing to change.
+> `min-grade` became `gate` and `include` became `path`; both old names still work
+> and warn. Setting a name and its replacement at once is an error rather than a
+> silent choice between them.
+>
+> There is no `v2`. `@v1` is the line, and `@v1` is what to write.
 
 ---
 
@@ -345,7 +348,7 @@ is on, verifies its checksum, grades the change, posts the certificate, annotate
 the diff, and fails the job when the grade is below `gate`.
 
 ```yaml
-- uses: VIKOIT/reversibility-engine@v2
+- uses: VIKOIT/reversibility-engine@v1
   with:
     gate: A                            # A, B, C, or F
     path: 'db/migrations k8s'
@@ -386,8 +389,17 @@ be run outside Actions without installing anything:
 
 ```bash
 docker run --rm -v "$PWD:/repo" -w /repo \
-  ghcr.io/vikoit/reversibility-engine:v2 check ./migrations
+  --entrypoint /usr/local/bin/revctl \
+  ghcr.io/vikoit/reversibility-engine:1.1.1 check ./migrations
 ```
+
+**Immutable version tags only, and name the entrypoint.** There is deliberately
+no `:v1` or `:latest` image tag to pull. A moving image tag once pointed a frozen
+Docker action at a newer image whose entrypoint had changed underneath it, and
+the result was a gate that reported success having analyzed nothing — the exact
+failure this tool exists to prevent, introduced by a tag pattern rather than by
+any rule. Naming `--entrypoint` costs one line and means an image change can
+never silently redefine what your command runs.
 
 ### CLI — `revctl`
 

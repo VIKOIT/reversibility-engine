@@ -16,6 +16,53 @@ move:
 
 ## [Unreleased]
 
+### Security — a gate that reported success having analyzed nothing
+
+**If you consume `VIKOIT/reversibility-engine@v1`, your gate passed without
+running between the v1.1.0 image publish and this release.** No grade was wrong.
+There was no grade.
+
+`revctl` invoked with no arguments printed help and exited **0**. The frozen
+`v1.0.x` Docker action pulls `ghcr.io/vikoit/reversibility-engine:v1` and sets no
+`entrypoint:` and no `args:`, so it runs whatever the image declares. That
+entrypoint used to be a script that performed the analysis; from v1.1.0 it was
+`revctl` itself. Publishing the v1.1.0 image under the moving `:v1` tag therefore
+turned every `@v1` consumer's gate into a green check over nothing.
+
+The moving tag was the vector. The defect was the exit code: **the one invocation
+that analyzes nothing was also the only one that could never fail.**
+
+Fixed at the source and at every layer above it:
+
+- `revctl` with no arguments now exits **2** and prints help to stderr — stdout is
+  where a certificate goes. `revctl --help` and `revctl help` still exit 0, so
+  nothing learns to ignore this exit code.
+- The action exits 2 if no certificate was written, and now also if the verdict
+  cannot be read back out of one. A step reporting FAIL while passing the job has
+  proved only that something was written.
+- An image whose no-argument invocation exits 0 is no longer publishable, and the
+  self-test builds the image from the commit and asserts it — so this is caught
+  before a tag moves rather than after.
+- Every `docker run` in this repository and in the README now names
+  `--entrypoint` explicitly. An inherited entrypoint is a silent dependency on a
+  value somebody else can change.
+- **Immutable image tags only.** `:v1` is no longer published;
+  `.github/workflows/restore-image-tag.yml` repoints an alias from a runner, with
+  the digest read back and the restored `ENTRYPOINT` asserted.
+
+New invariant in `CLAUDE.md` §2: **a gate must prove it ran. No certificate
+produced means exit 2, never exit 0.**
+
+### Fixed — documentation named a version that never existed
+
+The README, `docs/PRODUCTION-CONTEXT.md`, and `CLAUDE.md` described the composite
+action as `@v2` and its image as `:v2`. **Neither has ever existed.** Every tag cut
+is `v1.x`: `v1.0.0`–`v1.0.2` are the Docker action, `v1.1.0` onward are the
+composite, and the transition needed no new major because every input kept
+working. Users following the README were told to write a ref that resolves to
+nothing. All references now read `@v1`, and §11e records the one-line ruling so
+the ambiguity cannot regenerate.
+
 ### Added
 
 **Terraform plan analyzer.** `revctl check` now classifies `terraform show -json`

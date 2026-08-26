@@ -68,7 +68,7 @@ fi
 # Version and source
 # ------------------------------------------------------------------------------------------
 
-# The action's own ref is the default version, so `uses: ...@v2.1.0` runs the v2.1.0 binary
+# The action's own ref is the default version, so `uses: ...@v1.2.0` runs the v1.2.0 binary
 # and the two cannot drift. A branch or SHA ref names no release, so those fall back to the
 # latest one rather than guessing a tag that may not exist.
 version="${INPUT_VERSION:-}"
@@ -86,9 +86,10 @@ fi
 # Downloading from releases/download/v1/ therefore 404s on the tag everybody actually uses,
 # while a full pin like @v1.2.0 works. Major-only refs resolve to the newest release instead.
 #
-# The caveat, stated rather than hidden: while two major lines are maintained at once, @v1
-# would resolve to a v2 release. Only one line is maintained today; a build that must be
-# reproducible across that change should pin a full version, which is what `version` is for.
+# The caveat, stated rather than hidden: should a second major line ever be maintained
+# alongside this one, @v1 would resolve to a release from the newer line. Only v1 exists, and
+# a build that must be reproducible across such a change should pin a full version, which is
+# what `version` is for.
 case "$version" in
     v[0-9]) version='latest' ;;
     v[0-9][0-9]) version='latest' ;;
@@ -99,7 +100,7 @@ case "$version" in
     latest)  ;;
     v[0-9]*) ;;
     [0-9]*)  version="v$version" ;;
-    *) fail "The version input must be a release tag such as v2.1.0, or 'latest'; got '$version'." ;;
+    *) fail "The version input must be a release tag such as v1.2.0, or 'latest'; got '$version'." ;;
 esac
 
 # action_repository is empty when the action is referenced by path (`uses: ./`), which is how

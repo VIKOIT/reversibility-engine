@@ -29,6 +29,10 @@ const (
 // errGateFailed signals a failed gate up through cobra without printing a usage message.
 var errGateFailed = errors.New("reversibility gate failed")
 
+// errNoCommand signals a bare invocation. It is an ExitError rather than an ExitOK because a run
+// that analyzed nothing must never be reported as a run that found nothing wrong.
+var errNoCommand = errors.New("no command given: nothing was analyzed, which is not a pass")
+
 // Options configures a CLI invocation. Streams are injected so the command tree is testable
 // without touching the process's own stdout.
 type Options struct {
@@ -80,10 +84,24 @@ func newRootCommand(opts Options) *cobra.Command {
 			"It is fail-closed. An unparseable file, an unrecognized construct, or an analysis that\n" +
 			"errors all grade F. Unknown means unsafe.",
 
-		// Without this, running "revctl" bare prints an error; printing help is friendlier and
-		// still exits zero.
+		// A bare "revctl" prints help and exits 2. The friendlier zero this used to return was a
+		// fail-open, and the most dangerous kind: the one invocation that analyzes nothing was
+		// also the only one that could never fail. Anything that loses its arguments — a
+		// container entrypoint, a wrapper script, a CI template with an unset variable — then
+		// reports success over no analysis at all. That is exactly how the v1.1.0 image turned
+		// every @v1 consumer's gate into a green check; see §11e.
+		//
+		// Help goes to stderr here for the same reason: a caller piping stdout into a
+		// certificate must not receive usage text where a verdict belongs.
+		//
+		// Asking for help is a different act and still succeeds. Cobra handles "--help" and the
+		// "help" subcommand before RunE is reached, so neither passes through this path.
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
+			cmd.SetOut(opts.Stderr)
+			if err := cmd.Help(); err != nil {
+				return fmt.Errorf("printing help: %w", err)
+			}
+			return errNoCommand
 		},
 
 		SilenceErrors: true,

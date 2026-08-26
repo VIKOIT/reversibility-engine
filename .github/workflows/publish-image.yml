@@ -90,16 +90,56 @@ jobs:
       # The image is the product now, so it is checked the way the build stage checks itself:
       # if the published artifact cannot classify a DROP TABLE, it lost its cgo parser and
       # would grade every migration as unanalyzed.
+      #
+      # --entrypoint is passed explicitly. The image declares one, but relying on it is what
+      # broke v1.1.0: a consumer that inherits an entrypoint inherits whatever the entrypoint
+      # became, and the change from entrypoint.sh to revctl was invisible at every call site
+      # that did not name it. Nothing in this repository invokes this image implicitly again.
       - name: Verify the published image still classifies SQL
         run: |
           set -euo pipefail
           image="$(printf '%s' '${{ steps.meta.outputs.tags }}' | head -n 1)"
           echo "Verifying $image"
           printf 'DROP TABLE t;\n' > probe.sql
+
           docker run --rm \
             --volume "$PWD:/probe" --workdir /probe \
-            "$image" check probe.sql --format json | tee /dev/stderr | grep -q '"PG001"'
+            --entrypoint /usr/local/bin/revctl \
+            "$image" check probe.sql --format json > probe.json
+
+          if ! grep -q '"PG001"' probe.json; then
+            echo "::error::the published image did not classify DROP TABLE as PG001 — it has lost its cgo parser"
+            cat probe.json
+            exit 1
+          fi
           echo "Image classifies SQL correctly."
+
+      # The assertion that would have caught the v1.1.0 incident before it was published.
+      #
+      # The frozen v1.0.x Docker action runs this image's ENTRYPOINT with no arguments of its
+      # own. When that entrypoint became revctl — which printed help and exited 0 — the action
+      # reported a passing gate having analyzed nothing. The grade was never wrong; there was
+      # simply no grade, and no grade read as success.
+      #
+      # An image whose default invocation exits 0 is therefore an image that can silently
+      # replace a gate with a green check, and it does not get published.
+      - name: Verify that running the image with no arguments is not a pass
+        run: |
+          set -euo pipefail
+          image="$(printf '%s' '${{ steps.meta.outputs.tags }}' | head -n 1)"
+
+          set +e
+          docker run --rm "$image" > noargs.txt 2>&1
+          rc=$?
+          set -e
+
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::$image exits 0 when run with no arguments. A run that analyzed nothing must never report success — this is the v1.1.0 fail-open."
+            cat noargs.txt
+            exit 1
+          fi
+
+          echo "No-argument invocation exits $rc, as it must."
 
       - name: Summarise
         run: |

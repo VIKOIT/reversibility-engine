@@ -55,9 +55,21 @@ COPY --from=build /out/revctl /usr/local/bin/revctl
 # No USER directive. A mounted workspace is owned by the invoking user, and dropping privileges
 # here would leave the certificate unwritable.
 #
-# The entrypoint is the CLI itself. Until v2 this image was also the GitHub Action, and its
-# entrypoint was a script that reconstructed the changeset and posted the comment; the action
-# is now a composite that downloads a released binary, so that script has no caller and is
-# gone. What remains is the way to run revctl without installing Go — which is what the README
-# documents this image for.
+# The entrypoint is the CLI itself. Through v1.0.x this image was also the GitHub Action, and
+# its entrypoint was a script that reconstructed the changeset and posted the comment; from
+# v1.1.0 the action is a composite that downloads a released binary, so that script has no
+# caller and is gone. What remains is the way to run revctl without installing Go — which is
+# what the README documents this image for.
+#
+# Changing this line silently changed what every caller that did not name an entrypoint was
+# running, and one of those callers was the frozen v1.0.x Docker action. Two things now stand
+# between that and a repeat, and neither is a convention:
+#
+#   1. revctl with no arguments exits 2. A caller that loses its arguments fails closed rather
+#      than reporting a pass over no analysis. See internal/delivery/cli/cli.go.
+#   2. publish-image.yml refuses to publish an image whose no-argument invocation exits 0, and
+#      names --entrypoint explicitly everywhere it runs this image.
+#
+# Do not add a CMD that supplies a default subcommand. It would give this image a plausible
+# no-argument success again and undo both of the above.
 ENTRYPOINT ["/usr/local/bin/revctl"]
