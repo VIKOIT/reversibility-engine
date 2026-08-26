@@ -108,11 +108,16 @@ tar -xzf revctl_linux_amd64.tar.gz revctl
 sudo install revctl /usr/local/bin/
 ```
 
-Releases publish `revctl` and `revsrv` for linux, darwin (amd64 and arm64), and
-windows/amd64, each built on a runner of its own architecture because
-`CGO_ENABLED=1` cannot be cross-compiled to every target. Any container image
-must be glibc-based; musl cannot load the binary — see
+Releases publish `revctl` and `revsrv` for `linux/amd64`, `linux/arm64`,
+`darwin/arm64`, and `windows/amd64` — each built and verified on a runner of its
+own architecture, because `CGO_ENABLED=1` cannot be cross-compiled to every
+target and a binary nobody could execute is a binary nobody has tested. Any
+container image must be glibc-based; musl cannot load the binary — see
 [ADR/0001](ADR/0001-parser-choice.md).
+
+**Intel Macs:** build from source (`CGO_ENABLED=1 go install
+github.com/VIKOIT/reversibility-engine/cmd/revctl@latest`) or use the Docker
+image. Prebuilt binaries target Apple Silicon.
 
 ---
 

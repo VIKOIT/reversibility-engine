@@ -453,6 +453,40 @@ feature — so the matrix does it directly and one job merges the per-target che
 target verifies its own binary still classifies a `DROP TABLE` before it is packaged: a build
 that silently lost the parser would grade every migration A for lack of findings.
 
+**Every published artifact is built and verified on its native architecture. No exceptions.**
+
+**The release matrix is four targets, and `darwin/amd64` is not one of them.** This is a *scope
+decision* — a statement about which platforms this project ships — and explicitly **not** an
+exception to the rule above, which stands unchanged.
+
+| Target | Runner |
+| --- | --- |
+| `linux/amd64` | `ubuntu-latest` |
+| `linux/arm64` | `ubuntu-24.04-arm` |
+| `darwin/arm64` | `macos-14` |
+| `windows/amd64` | `windows-latest` |
+
+Three reasons, and the order matters:
+
+1. **Intel Macs are a shrinking share of this tool's audience.** That is what makes dropping the
+   target reasonable rather than merely convenient.
+2. **`macos-13` is the only hosted Intel Mac runner and it queues indefinitely.** On the v1.1.1
+   release it sat in the queue for over two hours and the run had to be cancelled by hand.
+   `timeout-minutes` does not bound this: that clock starts when a job begins *executing*, so a
+   job waiting for a runner that never arrives is unbounded by construction.
+3. **Cross-compiling was considered and rejected.** It would produce the one artifact nobody
+   could execution-test, and the per-target `DROP TABLE` check is the entire reason the matrix
+   is built per architecture in the first place. In a tool that gates merges, an untested binary
+   is worth less than no binary.
+
+The path for Intel Mac users is documented in the README install section: build from source with
+`CGO_ENABLED=1`, or run the Docker image. It is stated plainly and without apology, because it
+is a supported path rather than a degraded one.
+
+A future session must not restore `darwin/amd64` by cross-compiling it, and must not weaken the
+native-build rule to accommodate it. Adding it back means a native Intel runner is available
+again — nothing else qualifies.
+
 No `-ldflags` version stamping anywhere. A build stamp reaching rendered output would break the
 byte-identical guarantee (§11b).
 

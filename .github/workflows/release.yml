@@ -10,7 +10,7 @@ name: Release
 # not a preference: CGO_ENABLED=1 is mandatory here, because the Postgres analyzer links the
 # real PostgreSQL parser through pganalyze/pg_query_go, and a CGO_ENABLED=0 build would drop
 # the parser and grade every migration as unanalyzed. Cross-compiling cgo needs a toolchain
-# per target, and the two darwin targets need the macOS SDK, which cannot be redistributed
+# per target, and the darwin target needs the macOS SDK, which cannot be redistributed
 # onto a Linux runner. goreleaser's OSS edition cannot split a build across runners — that is
 # a Pro feature — so the matrix does the job directly and a final step assembles one
 # checksums.txt from the parts.
@@ -48,9 +48,24 @@ jobs:
           # Public repositories get the hosted arm64 Linux runner at no cost. A private fork
           # would need a paid plan or a self-hosted runner for this one entry.
           - { runner: ubuntu-24.04-arm, goos: linux,   goarch: arm64, archive: tar.gz }
-          - { runner: macos-13,         goos: darwin,  goarch: amd64, archive: tar.gz }
           - { runner: macos-14,         goos: darwin,  goarch: arm64, archive: tar.gz }
           - { runner: windows-latest,   goos: windows, goarch: amd64, archive: zip }
+
+          # darwin/amd64 is deliberately absent. It is a scope decision, not an exception to
+          # the native-build rule below — see CLAUDE.md §11e.
+          #
+          # The macos-13 runner is the only hosted Intel Mac, and on the v1.1.1 release it sat
+          # in the queue for over two hours before the run had to be cancelled by hand. Nothing
+          # here bounds that: timeout-minutes starts when a job begins executing, so a job
+          # waiting for a runner that never arrives is unbounded by construction.
+          #
+          # Cross-compiling it from macos-14 was considered and rejected. It would ship the one
+          # artifact nobody could execution-test, and the check below — does this binary still
+          # classify a DROP TABLE — is the whole reason the matrix is built per architecture
+          # rather than centrally. An untested binary in a tool that gates merges is worth less
+          # than no binary.
+          #
+          # Intel Mac users build from source or run the image; the README says so.
 
     steps:
       - uses: actions/checkout@v4

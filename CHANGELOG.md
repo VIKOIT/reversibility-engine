@@ -63,6 +63,31 @@ working. Users following the README were told to write a ref that resolves to
 nothing. All references now read `@v1`, and §11e records the one-line ruling so
 the ambiguity cannot regenerate.
 
+### Removed — prebuilt `darwin/amd64` binaries
+
+**Releases no longer publish `revctl` or `revsrv` for Intel Macs.** The matrix is
+four targets, all built and verified on their native architecture:
+`linux/amd64`, `linux/arm64`, `darwin/arm64`, `windows/amd64`.
+
+`macos-13` is the only hosted Intel Mac runner, and on the v1.1.1 release it sat
+in the queue for over two hours before the run had to be cancelled by hand.
+Nothing bounds that — `timeout-minutes` starts when a job begins *executing*, so a
+job waiting for a runner that never arrives waits forever.
+
+Cross-compiling from Apple Silicon was considered and rejected. It would have
+shipped the one artifact nobody could execution-test, and the per-target check —
+does this binary still classify a `DROP TABLE`? — is the whole reason builds are
+native rather than central. In a tool that gates merges, an untested binary is
+worth less than no binary.
+
+**Intel Macs:** build from source (`CGO_ENABLED=1 go install
+github.com/VIKOIT/reversibility-engine/cmd/revctl@latest`) or use the Docker
+image. Prebuilt binaries target Apple Silicon.
+
+The action now says this directly. An Intel Mac runner previously would have
+404'd on a missing asset, which reads as a broken release rather than an
+unsupported runner; it now fails naming the remedy.
+
 ### Added
 
 **Terraform plan analyzer.** `revctl check` now classifies `terraform show -json`
@@ -267,22 +292,22 @@ not complete, never a passing grade.
 
 The certificate schema is unchanged.
 
-**Prebuilt binaries.** Releases now publish `revctl` and `revsrv` for linux and
-darwin on amd64 and arm64, and windows on amd64, with a `checksums.txt` covering
+**Prebuilt binaries.** Releases publish `revctl` and `revsrv` for `linux/amd64`,
+`linux/arm64`, `darwin/arm64`, and `windows/amd64`, with a `checksums.txt` covering
 all of them. Each target is compiled on a runner of its own architecture, because
-`CGO_ENABLED=1` is mandatory and the darwin targets need an SDK that cannot be
+`CGO_ENABLED=1` is mandatory and the darwin target needs an SDK that cannot be
 put on a Linux runner. Every build verifies that it still classifies a
 `DROP TABLE` before it is packaged — a binary that quietly lost the parser would
 grade every migration A for lack of findings.
 
-**Automatic major tag.** Publishing `v2.1.0` repoints `v2` at it, so `@v2` means
-the newest v2.x without a manual step after every release. Prereleases are
-excluded — `v2.1.0-rc.1` never becomes what `@v2` resolves to.
+**Automatic major tag.** Publishing `v1.2.0` repoints `v1` at it, so `@v1` means
+the newest v1.x without a manual step after every release. Prereleases are
+excluded — `v1.2.0-rc.1` never becomes what `@v1` resolves to.
 
 ### Changed
 
-**The GitHub Action is now a composite action, published as `@v2`.** `@v1`
-remains a Docker container action and is unaffected; it is frozen, not removed.
+**The GitHub Action is now a composite action, shipped in `v1.1.0`.** The Docker
+container action at `v1.0.0`–`v1.0.2` is frozen, not removed.
 
 The action downloads the released binary for whichever runner it is on and
 verifies its SHA-256 against the release's `checksums.txt` before executing it. A

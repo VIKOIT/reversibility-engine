@@ -35,6 +35,15 @@ if [ "$os" = 'windows' ] && [ "$arch" != 'amd64' ]; then
     fail 'Windows runners are supported on amd64 only.'
 fi
 
+# darwin builds are arm64 only, for the same reason and with the same remedy stated. Releases
+# stopped publishing darwin/amd64: the only hosted Intel Mac runner queues indefinitely, and
+# cross-compiling it would ship the one artifact nobody could execution-test. An Intel Mac
+# runner reaching this point would otherwise 404 on an asset that no longer exists and read as
+# a broken release rather than an unsupported runner.
+if [ "$os" = 'darwin' ] && [ "$arch" != 'arm64' ]; then
+    fail 'macOS runners are supported on arm64 (Apple Silicon) only. Prebuilt darwin/amd64 binaries are no longer published — on an Intel Mac, build from source with CGO_ENABLED=1 and pass the result to this action with the `binary` input, or run the job on a linux runner.'
+fi
+
 if [ "$os" = 'windows' ]; then
     archive_ext='zip'
     binary_name='revctl.exe'
