@@ -6,13 +6,18 @@ around.** Where an implementation disagrees with a table below, the implementati
 Three classification tables and one scoring procedure decide every grade the Reversibility
 Engine emits:
 
-| | |
-| --- | --- |
-| [§1 PostgreSQL](#1-postgresql--pg001-to-pg027) | 27 rules over a real PostgreSQL AST |
-| [§2 Kubernetes](#2-kubernetes--k8s001-to-k8s015) | 15 rules over a structural manifest diff |
-| [§3 Scoring](#3-scoring) | how findings become a grade of A, B, C, or F |
-| [§4 Owner rulings](#4-owner-rulings) | decisions that resolve ambiguities in the above |
-| [§5 Terraform](#5-terraform--tf001-to-tf010) | 10 rules over plan JSON, backed by a resource-type catalog |
+| | | Rules |
+| --- | --- | --- |
+| [§1 PostgreSQL](#1-postgresql--pg001-to-pg027) | over a real PostgreSQL AST | 27 |
+| [§2 Kubernetes](#2-kubernetes--k8s001-to-k8s015) | over a structural manifest diff | 15 |
+| [§3 Scoring](#3-scoring) | how findings become a grade of A, B, C, or F | — |
+| [§4 Owner rulings](#4-owner-rulings) | decisions that resolve ambiguities in the above | — |
+| [§5 Terraform](#5-terraform--tf001-to-tf010) | over plan JSON, backed by a resource-type catalog | **9 active** (`TF003` retired) |
+
+**A section number in this document is written `§n`. A section number in
+[`CLAUDE.md`](../CLAUDE.md) is always written `CLAUDE.md §n`.** Both files number their sections
+from 1, and an unqualified reference to the wrong one sends a reader to a section that exists and
+says something else.
 
 ## The rule every other rule defers to
 
@@ -20,6 +25,13 @@ Engine emits:
 describes must never become a passing grade. Every such path terminates in **F**. There is no
 "probably fine": a verdict is `REVERSIBLE`, `COSTLY`, `IRREVERSIBLE`, `UNKNOWN`, or `WILL_FAIL`,
 and the last three all fail.
+
+**And a gate must prove that it ran.** The rule above governs what happens once a change has been
+*read*. It says nothing about a run that read nothing at all, and that run once had the most
+permissive outcome in the system, because "no findings" and "no analysis" produced the same green
+check. So the second invariant is about the **shape of the run**, not the verdict: **no
+certificate produced means exit 2, never exit 0.** Absence of output is never success. See
+[CLAUDE.md §2](../CLAUDE.md) for the incident that established it.
 
 ### The verdicts
 
@@ -40,10 +52,42 @@ confuses them fixes the wrong thing.
 from a guess: it exists because a production snapshot proved the statement cannot succeed. With
 no snapshot, no rule in this document produces it.
 
+### From a verdict to an exit code
+
+A grade is not an exit code. The mapping is fixed, and it is the contract every CI integration
+depends on:
+
+| Exit | Meaning | Reached when |
+| --- | --- | --- |
+| `0` | The run completed and the gate was met. | The effective grade is at or above the threshold. |
+| `1` | The run completed and the gate was **not** met. | The effective grade is below the threshold. The certificate is still written — it is the artifact the user asked for. |
+| `2` | **The run did not complete.** | No arguments were given; no certificate was produced; a certificate's verdict cannot be read back; a policy file cannot be resolved; the changeset could not be fetched. |
+
+Three consequences follow, and each is enforced by a test rather than by convention:
+
+- **`revctl` invoked with no arguments exits 2**, printing help to **stderr** — stdout is where a
+  certificate goes. Asking for help explicitly (`--help`, `help`) still exits **0**; without that
+  exception, users learn to ignore the exit code and the rule above stops protecting anything.
+- **A grade of F is exit 1, not exit 2.** A correctly detected irreversible change is the engine
+  working. Conflating it with a broken run is how a broken run gets ignored.
+- **Nothing may turn *no analysis* into a passing grade**, which is the same rule as "nothing may
+  turn an error into a passing grade" applied one level up. A run that analyzed nothing has no
+  verdict to report, and a missing verdict is never a good one.
+
+`Applicable: false` is the one shape that looks like this and is not: a changeset genuinely
+containing no file any analyzer claims grades **A** with `Applicable: false` and gate **PASS**.
+That is a completed run with a real, empty answer, and it is distinguishable from a broken run
+precisely because a certificate exists to say so.
+
 ## Changing a rule
 
 1. **A rule with no fixture does not exist.** Every rule ID has a fixture directory under
    `testdata/fixtures/`, and `internal/fixture` fails the build if one is missing.
+   The single exception is a **retired** ID — one that was specified, considered, and
+   deliberately not implemented. A retired ID is declared as such in
+   `internal/fixture/coverage_test.go`, has no fixture, and **is never reused and never
+   renumbered**. `TF003` is the only one today. A retired ID with its reason written down tells a
+   contributor the case was thought about; a gap in the sequence reads as an oversight.
 2. Write or amend the fixture first, then the code.
 3. Regenerate the verdict snapshot with `go test ./internal/engine -update` and **review the
    diff** — `testdata/fixtures/golden/verdicts.txt` shows what every fixture now grades, so a
@@ -147,7 +191,7 @@ Validate three levels and **record which passed**:
   down migration is treated as an up migration, which is the safe direction.
 - **A multi-command `ALTER TABLE` is flattened into one finding per command.** Collapsing them
   would hide the destructive half of `ALTER TABLE t ADD COLUMN a int, DROP COLUMN b`. This does
-  not contradict §16.2: that rule is about overlapping rules on one *command*.
+  not contradict CLAUDE.md §16.2: that rule is about overlapping rules on one *command*.
 - **A file that fails to parse yields one PG027 finding for that file, not an analyzer error.**
   One malformed migration must not erase the findings of the others; the certificate should show
   everything that is wrong at once. A parse failure still grades F via UNKNOWN.
@@ -206,9 +250,10 @@ K8S015 applies only when the new image carries an explicit `@sha256:` (or `@sha5
   generates no findings. Without this, every run would indict the whole cluster.
 - **A changed object matching no rule yields K8S014/UNKNOWN** — the Kubernetes analogue of PG027.
   Silence about a change the engine does not understand is indistinguishable from a safe change,
-  and the product rests on those two never being confused. See the consequence in §16.5.
+  and the product rests on those two never being confused. See the consequence in
+  CLAUDE.md §16.5, and what it does to the undo plan in §3 below.
 - **Only an explicit `reclaimPolicy: Retain` prevents K8S003.** Absent, empty, or unresolvable is
-  treated exactly like `Delete`, as §10 requires.
+  treated exactly like `Delete`, as the table above requires.
 - **Quantities are compared numerically with correct scales.** `1Gi` (2^30) is not `1G` (10^9); a
   string comparison would call that shrink a growth. A quantity that cannot be parsed is
   K8S014/UNKNOWN, never assumed unchanged.
@@ -276,8 +321,23 @@ Empty changeset with zero relevant files → grade **A**, `Applicable: false`, g
 
 Generated **only** from the `UndoStep` fields of findings, in **reverse order of application**.
 
-If any finding is `IRREVERSIBLE`, the plan is **replaced** by an explicit statement that no
-complete undo exists, listing what cannot be undone.
+If any finding is `IRREVERSIBLE`, `UNKNOWN`, or `WILL_FAIL`, the plan is **replaced** by an
+explicit statement that no complete undo exists, listing what cannot be undone and why. The three
+carry different reasons and are printed with different wording, because the remedy differs:
+
+| Verdict | What the plan says | Because |
+| --- | --- | --- |
+| `IRREVERSIBLE` | cannot be undone | The change will apply and cannot be taken back. |
+| `UNKNOWN` | was not understood, so no undo can be written for it | Listing steps for everything *else* would claim a completeness the plan does not have. A confident-looking script printed beside an unclassified change is the wrong-safe-verdict failure this product exists to prevent. |
+| `WILL_FAIL` | will not apply, so there is nothing to undo; fix the migration instead | The statement aborts and rolls its transaction back, so nothing it did survives to be undone — and neither does anything else in the same migration. A rollback script here would describe a state the database is never going to be in. |
+
+Extending the replacement from `IRREVERSIBLE` to `UNKNOWN` was resolved in S4 and is recorded as
+CLAUDE.md §16.6; `WILL_FAIL` was added with the verdict itself. Both affect presentation only —
+each of the three already grades **F**.
+
+The replacement is written as SQL comments so the plan stays a pasteable script. An operator who
+copies the whole thing under pressure then runs the steps that exist and reads the warning,
+rather than hitting a syntax error and losing both.
 
 ### Determinism
 
@@ -297,7 +357,7 @@ complete undo exists, listing what cannot be undone.
 - **The single `recover()` boundary lives in `Certify`.** A panic discards whatever the run had
   concluded and produces the `ENGINE_PANIC` certificate: grade F, UNKNOWN, no undo step. A
   partial conclusion from a broken run is not evidence.
-- **Grade assembly is: assign, then cap, worst wins** (§15.1). Assignment is `>=3 COSTLY → C`,
+- **Grade assembly is: assign, then cap, worst wins** (§4.1). Assignment is `>=3 COSTLY → C`,
   `1–2 COSTLY → B`, else A. Caps are applied unconditionally so order cannot matter.
 - **The A row is read as a set of necessary conditions.** Failing any of them
   (`all REVERSIBLE`, `lock <= SHORT`, `down.sql ok`) caps the grade at B — B being the highest
@@ -305,8 +365,8 @@ complete undo exists, listing what cannot be undone.
   `FULL_SCAN`, which fails "lock <= SHORT" but does not reach the `TABLE_REWRITE` cap.
 - **Down-migration status travels through the optional `analyzer.DownMigrationValidator`
   interface**, type-asserted by the orchestrator. The engine never imports an analyzer package;
-  the delivery layer wires them (§16.1 resolved).
-- **`Blockers` are populated only for grade F**, per §8. Findings explain B and C.
+  the delivery layer wires them (CLAUDE.md §16.1, resolved).
+- **`Blockers` are populated only for grade F**, per CLAUDE.md §8. Findings explain B and C.
 - **`InputDigest` hashes length-prefixed fields over both sides of every change** — path,
   previous path, status, previous content, current content — sorted by path. Length prefixing
   stops `"ab"+"c"` from colliding with `"a"+"bc"`; hashing the previous side keeps two changesets
@@ -411,4 +471,48 @@ Fires only on these exact paths and only in these directions. Anything else is T
 
 Two paths reach one level into a block; that is the only nesting permitted. A named path list is
 auditable against this table, and general recursion into a provider-defined object is not.
+
+### As built in S12
+
+- **`*.tfplan.json` only, plus `--terraform-plan` for a plan named otherwise.** Claiming a bare
+  `plan.json` would grade **F** on any repository that happens to contain one, because a file the
+  analyzer claims and cannot read is `TF009`/UNKNOWN. The flag matches by path suffix in either
+  direction: it is typed relative to a shell, while `Supports` is asked about the
+  changeset-relative path, and the two spellings differ.
+- **All Terraform findings carry `Line: 0` and `LockHazard: NONE`.** A plan is a JSON document
+  describing resource changes, not a file with a blameable line, and Terraform takes no database
+  lock. The Kubernetes rules reach `NONE` the same way, by the ruling in §4.2; that ruling
+  names Kubernetes only, so the Terraform case is specified by the §5 table above rather
+  than inherited from it.
+- **`TF009` and `TF010` are different findings with different remedies**, which is why they are
+  two rules and not one. `TF009` is "I cannot read this file" — a malformed plan, or a
+  `format_version` outside the supported set. `TF010` is "I read it and do not know this type".
+  Both grade **F**; only `TF010` carries the growth-loop output below.
+- **The unknown-type output is one snippet and one link, covering every unclassified type at
+  once.** Not one each: six unknown types meaning six paste operations is where somebody switches
+  the gate off instead, which costs more safety than any single classification buys back. **The
+  suggested class is always `STATEFUL`** — the fail-closed direction, and the honest one. A
+  snippet that guessed `STATELESS` would be a snippet that talked the user into the answer they
+  wanted.
+- **Nothing is sent anywhere.** The issue link is a URL printed into a certificate the reader is
+  already looking at; a human chooses to open it. `revctl check` has **no network path at all** —
+  not on a cache miss, not when the catalog is old, not ever — and the embedded catalog stays
+  fully functional offline for the lifetime of the binary.
+- **The catalog is an input to the verdict, so it is attributed like one.** The analyzer
+  implements `analyzer.CatalogVersioner`; the engine records `CatalogVersion` on the certificate
+  and mixes the catalog digest into `InputDigest` — but **only when an analyzer implementing that
+  interface actually claimed a file**. Registering the Terraform analyzer therefore changed no
+  existing digest, and `verdicts.txt` did not move.
+- **Every catalog entry requires an evidence link**, checked at load: a classification nobody can
+  check is an opinion. This is also what stops generated output being merged unread — `revctl
+  catalog scan` proposes candidates with an empty evidence field, and an entry without one fails
+  the build.
+- **`catalog scan` is a maintainer tool and nothing in the check path depends on it.** It shells
+  out to `terraform providers schema -json`, fails with a message naming what to install when
+  terraform is absent, and skips its own tests cleanly on a machine without it.
+- **Coverage is published honestly: 92 of roughly 1,400 AWS resource types** — 48 stateful, 44
+  stateless. Both the raw count and the denominator go in the docs. The stateless half is
+  load-bearing rather than filler: an unclassified deleted type grades F, so the network, IAM,
+  load-balancing and compute groups are what stand between a new user and an immediate failing
+  gate.
 

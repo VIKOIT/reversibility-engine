@@ -9,8 +9,9 @@ this file wins. If something is not here, do not invent it — ask.
 ## 1. What this is
 
 A static-analysis engine that measures whether a code change can be safely rolled back,
-**before it is merged**. It emits a `ReversibilityCertificate` (grade A/B/C/F plus an undo plan)
-and acts as a merge gate.
+**before it is merged**. It reads PostgreSQL migrations, rendered Kubernetes manifests, and
+Terraform plans. It emits a `ReversibilityCertificate` (grade A/B/C/F plus an undo plan) and acts
+as a merge gate.
 
 Autonomous AI agents may merge **only on grade A**.
 
@@ -53,12 +54,26 @@ So the invariant is about the **shape of the run**, not the verdict:
 
 Each of those is enforced by a test that fails when the gate stops gating, not by convention.
 
-## 3. MVP scope
+## 3. Scope
 
-**In:** static analysis only. PostgreSQL `.sql` migrations. Rendered Kubernetes manifests (`.yaml`).
+**In:** static analysis only. PostgreSQL `.sql` migrations. Rendered Kubernetes manifests
+(`.yaml`). Terraform plan JSON (`*.tfplan.json`), added in S12 — **plans only, never
+`terraform.tfstate`**, which holds provider credentials and attribute values in plaintext.
 
-**Out — do not build, do not stub, do not leave a TODO for:** live DB rehearsal, Terraform,
-Helm chart templating, cost estimation, web UI, auth/billing, AI/LLM calls of any kind.
+**Out — do not build, do not stub, do not leave a TODO for:** live DB rehearsal, Helm chart
+templating, Kustomize rendering, `.tf` source parsing, cost estimation, web UI, auth/billing,
+AI/LLM calls of any kind, telemetry of any kind.
+
+Two things moved out of this list and the moves are recorded rather than silently applied, so a
+future session does not re-litigate either:
+
+| Was out | Now | Ruling |
+| --- | --- | --- |
+| Terraform | **In**, as of S12 | Bounded to plan JSON and to *destruction only*. A created or updated-in-place resource has a reverse by construction, which is what keeps the resource catalog finite. `.tf` source parsing stays out — it is a different analyzer with a different failure surface. See §11h. |
+| Production database access | **In**, as of S11, and only in `revctl snapshot` | The engine still never connects to anything **during analysis**. A separate command writes a snapshot file; the analysis reads the file. Enforced by an architecture test, not by discipline. See §11g. |
+
+Note the shape both exceptions share: the capability was admitted, and then fenced by a test that
+fails if it escapes its package. That is the bar for admitting anything else from the Out list.
 
 ## 4. Session plan
 
@@ -81,14 +96,20 @@ The v0.2 plan continues the same way. Each session is written up in full in
 
 | Session | Deliverable | Status |
 | --- | --- | --- |
-| S8 | Git ref resolution: a `gitProvider` behind `--base` / `--head`. | **BUILT — awaiting approval** |
-| S9 | GitHub Action (`action.yml`) + release workflow. | **BUILT — awaiting approval** |
-| S10 | Policy file `.reversibility.yml` with expiring waivers. | **BUILT — awaiting approval** |
+| S8 | Git ref resolution: a `gitProvider` behind `--base` / `--head`. | **DONE** — shipped in v1.1.2 |
+| S9 | GitHub Action (`action.yml`) + release workflow. | **DONE** — shipped in v1.1.2 |
+| S10 | Policy file `.reversibility.yml` with expiring waivers. | **DONE** — shipped in v1.1.2 |
 | S11 | Production context snapshots (`revctl snapshot`, `--context`). | **DONE** |
-| S11-patch | `WILL_FAIL` verdict + lock duration bands. | **BUILT — awaiting approval** |
-| S12 | Terraform plan analyzer. | **BUILT — awaiting approval** |
+| S11-patch | `WILL_FAIL` verdict + lock duration bands. | **DONE** — shipped in v1.1.2 |
+| S12 | Terraform plan analyzer. | **DONE** — shipped in v1.1.2 |
 
-Update the Status column when a session is approved as complete.
+Update the Status column when a session is approved as complete. **Publishing a session's work in
+a tagged release is that approval**, and is recorded as such above — the v0.2 sessions all shipped
+in `v1.1.2` on 2026-08-26 and sat marked "awaiting approval" afterwards, which read as though the
+release contained unapproved work.
+
+The v0.2 plan is complete. There is no S13 and no session after it is planned; the next one is
+whatever the owner scopes, written up in `.claude/commands/` first as every previous session was.
 
 ## 5. Layout
 
@@ -116,6 +137,39 @@ pkg/certificate/                     Public, versioned certificate schema
 testdata/fixtures/
 ```
 
+**The shipping surface, which is part of the contract and not packaging detail.** The action is
+what most consumers actually run, so a change here can break a gate as surely as a change to a
+rule can:
+
+```
+action.yml                           COMPOSITE action at the repo root. Not a Docker action
+                                     — see §11e. Names every input, including the deprecated
+                                     aliases that are read but never merged.
+action/install.sh                    Downloads the release binary for the runner's OS/arch and
+                                     REFUSES to run anything failing its checksums.txt line.
+action/resolve.sh                    Decides which build this run needs, the asset name and
+                                     the cache key. Downloads NOTHING — separating the decision
+                                     from the fetch is what lets the cache step sit between them.
+action/certify.sh                    Detects the base ref from the event (a PR uses its base
+                                     SHA, a push the commit it moved from), runs revctl, and
+                                     reads the verdict back out of the JSON. Exit 2 with no
+                                     certificate, and exit 2 if the grade cannot be read out of
+                                     one. Checks for jq up front.
+action/comment.sh                    Posts/updates the single marked pull request comment.
+.github/workflows/release.yml        Four native targets, one runner each. No -ldflags stamping.
+                                     A final job moves the v1 tag and reads it back.
+.github/workflows/publish-image.yml  Immutable version image tags ONLY. Refuses to publish an
+                                     image whose no-argument run exits 0.
+.github/workflows/action-selftest.yml  Runs the action against this repo's fixtures and asserts
+                                     a grade F actually fails the job.
+.github/workflows/restore-image-tag.yml  Repairs an image alias from a runner, digest read back.
+```
+
+**`internal/delivery/` is a thin shell, but `action/` is not part of it and must not import
+anything.** It is POSIX shell over the released binary's documented CLI contract — exit codes and
+the JSON certificate — which is exactly why it can be a composite action at all. If a change
+requires `action/` to know something the CLI does not expose, the CLI is what needs to change.
+
 ## 6. Dependency rules
 
 **Hard rules — a violation is a bug, not a style preference:**
@@ -136,7 +190,7 @@ testdata/fixtures/
 | `github.com/spf13/cobra` | `internal/delivery/cli` | S5 (in go.mod) |
 | `github.com/pganalyze/pg_query_go/v5` | `internal/analyzer/postgres/parser` | S2, **cgo** (in go.mod) |
 | `github.com/google/go-github/v66` | `internal/delivery/github`, `internal/provider` | S6 (in go.mod) |
-| `sigs.k8s.io/yaml` (JSON-typed decode) + `gopkg.in/yaml.v3` (stream decoder) | `internal/analyzer/kubernetes`; `sigs.k8s.io/yaml` alone in `internal/policy` | S3, S10 |
+| `sigs.k8s.io/yaml` (JSON-typed decode) + `gopkg.in/yaml.v3` (stream decoder) | `internal/analyzer/kubernetes`; `sigs.k8s.io/yaml` alone in `internal/policy` and `internal/analyzer/terraform` (the resource catalog) | S3, S10, S12 |
 | `github.com/jackc/pgx/v5` | `internal/snapshot/collect` **only** | S11 |
 | `k8s.io/client-go` (+ `k8s.io/api`, `k8s.io/apimachinery`) | `internal/snapshot/collect` **only** | S11 |
 | `github.com/google/go-cmp` | tests only | S1 |
@@ -194,13 +248,15 @@ type Finding struct {
 }
 
 type ReversibilityCertificate struct {
-    SchemaVersion  string    // "1.2.0" — bump on any breaking field change
+    SchemaVersion  string    // "1.4.0" — bump on any breaking field change
     Grade          Grade     // the measurement; no policy may move it
     EffectiveGrade Grade     // Grade minus waived findings; what CI compares (S10)
     AIGateStatus   string    // PASS | FAIL — follows Grade, never EffectiveGrade
     Applicable     bool
-    InputDigest    string    // SHA256 over sorted (path, content), plus the policy if any
+    InputDigest    string    // SHA256 over sorted (path, content), plus the policy and
+                             // the catalog when either was used
     PolicyDigest   string    // SHA256 over the resolved policy, "" if none (S10)
+    CatalogVersion string    // catalog that produced a verdict, "" unless one was used (S12)
     Findings       []Finding // sorted by File, then Line, then RuleID
     Waived         []WaivedFinding // findings a live waiver accepted (S10)
     UndoPlan       []UndoStep
@@ -208,6 +264,22 @@ type ReversibilityCertificate struct {
     ContextWarnings []string // stale snapshots and the like (S11)
 }
 ```
+
+**The schema version is the number downstream gates pin against, so its history is recorded
+here.** It lives in exactly one place, `domain.SchemaVersion`, re-exported as
+`certificate.SchemaVersion`, and `revctl version` prints it.
+
+| Version | Added | Session |
+| --- | --- | --- |
+| `1.0.0` | the original certificate | S4 |
+| `1.1.0` | `EffectiveGrade`, `Waived`, `PolicyDigest` | S10 |
+| `1.2.0` | `Finding.Context`, `ContextWarnings` | S11 |
+| `1.3.0` | `WILL_FAIL` — a new value in an existing enum | S11-patch |
+| `1.4.0` | `CatalogVersion` | S12 |
+
+`1.3.0` is the one that warrants attention rather than a footnote: a consumer switching
+exhaustively on reversibility gained a case it had not seen. Every other bump only added
+optional fields.
 
 Findings gained two fields in S11: `Subject` (how a snapshot is matched to a finding, internal
 only) and `Context` (`*FindingContext` — row estimate, size, estimated duration, band, note).
@@ -257,6 +329,7 @@ contributors who are not working through this file, so they were given a documen
 | §10 AUTHORITATIVE Classification — Kubernetes | [`docs/RULES.md` §2](docs/RULES.md#2-kubernetes--k8s001-to-k8s015) |
 | §11 AUTHORITATIVE Scoring | [`docs/RULES.md` §3](docs/RULES.md#3-scoring) |
 | §15 Owner rulings | [`docs/RULES.md` §4](docs/RULES.md#4-owner-rulings) |
+| — (new in S12) | [`docs/RULES.md` §5](docs/RULES.md#5-terraform--tf001-to-tf010) — Terraform, TF001–TF010 |
 
 Nothing about them changed in the move except the section numbers, and every code comment that
 cited the old numbering was rewritten in the same commit. **Those tables remain authoritative:
@@ -765,8 +838,11 @@ what stand between a new user and an immediate failing gate.
 ## 13. Testing rules
 
 - **Before implementing an analyzer, write its fixtures and failing tests first.**
-- **One fixture pair per rule ID** — all 27 Postgres rules and all 14 Kubernetes rules.
-  **A rule with no fixture does not exist.**
+- **One fixture pair per rule ID** — all 27 Postgres rules, all 15 Kubernetes rules, and all
+  9 active Terraform rules. **A rule with no fixture does not exist.**
+  The one exception is a **retired** ID, declared in `internal/fixture/coverage_test.go`, which
+  has no fixture and is never reused or renumbered. `TF003` is the only one; see
+  [`docs/RULES.md` §5](docs/RULES.md#5-terraform--tf001-to-tf010).
 - Golden-file tests for the Markdown and JSON renderers.
   As built: golden files exist for **all three** renderers across 8 scenarios spanning every
   grade plus the not-applicable case, in `testdata/fixtures/golden/`. Regenerate deliberately
@@ -856,26 +932,50 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    ASSUMED in S1 fixtures: the analyzer tracks types declared by `CREATE TABLE` / earlier
    `ALTER` statements *within the same changeset*. A type it cannot resolve is PG027/UNKNOWN.
    Confirm before S2, since a schema-baseline input would be a different design.
-4. **`ChangedFiles` must return unchanged context files, not only changed ones.** K8S003 and
-   K8S009 cannot be decided from the changed file alone: K8S003 needs the StorageClass that
-   nobody edited, and K8S009 needs the workload that still references the deleted ConfigMap.
-   A GitHub pull-request diff does not contain either. `fakeProvider` supplies them (unchanged
-   files come back as MODIFIED with identical sides), so the fixtures are satisfiable — but the
-   `fs` and `github` providers cannot do the same without reading the whole tree. Decide before
-   S6 whether `ChangedFiles` returns context files or `FileProvider` grows a second method.
-   Until then, **a rule that needs context it cannot get must return UNKNOWN, not REVERSIBLE.**
+4. ~~**`ChangedFiles` must return unchanged context files, not only changed ones.**~~
+   **RESOLVED in S6, and matched by every provider since.** K8S003 and K8S009 cannot be decided
+   from the changed file alone: K8S003 needs the StorageClass that nobody edited, and K8S009
+   needs the workload that still references the deleted ConfigMap. A GitHub pull-request diff
+   contains neither.
+
+   `ChangedFiles` returns them; `FileProvider` did **not** grow a second method. All four
+   implementations return unchanged siblings as **MODIFIED with identical sides**, and the scope
+   is bounded to the directories a changed file lives in, read at the **base** commit:
+
+   | Provider | How | Session |
+   | --- | --- | --- |
+   | `fakeProvider` | reads them from the fixture directory | S1 |
+   | `githubProvider` | lists each touched directory at the base commit and fetches the supported siblings | S6, §11c |
+   | `fsProvider` | `--before` returns unchanged files with identical sides | S5, §11b |
+   | `gitProvider` | same, scoped by pathspec | S8, §11d |
+
+   All four agreeing is the point, not an implementation detail: without it the same pull request
+   would grade differently from the CLI than from the app, and the more permissive answer is the
+   one a developer would see first.
+
+   **The fallback rule still stands and is not obsolete:** a rule whose context lies *outside* a
+   touched directory still sees nothing, and **must return UNKNOWN, not REVERSIBLE.**
 5. ~~**No Kubernetes rule covers a container image change.**~~ **RESOLVED: K8S015 is now in the
    `docs/RULES.md` §2 table**, constrained by the owner to digests only. A tag, however version-like, cannot be
    proven immutable by static analysis and stays K8S008/COSTLY.
-6. **UNKNOWN findings also replace the undo plan.** `docs/RULES.md` §3 says the plan is replaced by a statement
-   that no complete undo exists "if any finding is IRREVERSIBLE". S4 applies the same to UNKNOWN.
+6. **UNKNOWN findings also replace the undo plan.** S4 extended the replacement from
+   IRREVERSIBLE to UNKNOWN, and the S11 patch extended it again to WILL_FAIL.
 
    The reason is §2: an UNKNOWN finding is a change nobody understood, so a plan that lists steps
    for everything *else* claims a completeness it does not have — a confident-looking script
    printed beside an unclassified change is the wrong-safe-verdict failure this product exists to
    prevent. It affects presentation only; the grade was already F either way.
 
-   Confirm or reject. Rejecting is a one-line change in `unreversibleFindings`.
+   **Still open — confirm or reject.** What changed is only where it is written down.
+   [`docs/RULES.md` §3](docs/RULES.md#undoplan) previously said the plan is replaced "if any
+   finding is IRREVERSIBLE", which made the shipped behaviour formally a spec violation in a
+   document whose own rule is that the code is the bug where the two disagree. §3 now states all
+   three verdicts and the distinct wording each produces, so the spec describes what v1.1.2 does.
+
+   Rejecting it is therefore no longer a one-line change: it is `unreversibleFindings` **and** the
+   table in `docs/RULES.md` §3. WILL_FAIL is not part of this question — a statement that aborts
+   leaves nothing to undo, which is a fact about the transaction rather than a presentation
+   choice.
 
 ## 17. Fixture conventions
 
@@ -883,12 +983,24 @@ The `context/` group is a fourth shape, added by the S11 patch: a changeset plus
 snapshot plus an `expected.json` that names **both** grades — `grade` with the snapshot and
 `gradeWithoutContext` without it. Writing both down is what makes the direction of the rule
 visible as data rather than only as prose, and the test asserts the first is never better than
-the second. `TestEveryRuleHasAFixture` scans only `postgres/` and `kubernetes/`, so these are
-free to reuse rule IDs.
+the second. `TestEveryRuleHasAFixture` does not scan `context/`, so these are free to reuse rule
+IDs.
 
-47 fixture directories under `testdata/fixtures/`: 27 Postgres rules, 15 Kubernetes rules,
-4 `DOWN*` fixtures for the three down-migration validation levels plus the directory form, and
-1 `ENCODING*` fixture pinning the decoding seam.
+**64 fixture directories under `testdata/fixtures/`**, in four groups:
+
+| Group | Count | What it holds |
+| --- | --- | --- |
+| `postgres/` | 32 | 27 rule fixtures, 4 `DOWN*` for the three down-migration validation levels plus the directory form, and 1 `ENCODING*` pinning the decoding seam |
+| `kubernetes/` | 15 | one per rule |
+| `terraform/` | 9 | one per **active** rule; `TF003` is retired and correctly has none |
+| `context/` | 8 | one per lock duration band, both `SET NOT NULL` cases, the size-fallback path, and an incomplete snapshot |
+
+**`TestEveryRuleHasAFixture` scans `postgres/`, `kubernetes/` and `terraform/`**, with `TF003`
+declared retired so its absence is an assertion rather than a hole. It does not scan `context/`.
+
+The 47 that predate S11 are load-bearing as a set: a mandatory regression asserts all of them
+grade identically when no snapshot is supplied, which is what proves context is optional rather
+than merely usually-absent.
 
 **Two fixtures may not claim the same rule** — `TestEveryRuleHasAFixture` rejects it, so a
 fixture proving something *about* an existing rule takes a non-table rule ID, as `DOWN*` and
@@ -902,12 +1014,14 @@ described nothing the migration did. Fail-closed guarantees the grade, not that 
 explicable — and on Windows-authored migrations the inexplicable one was the common case.
 Only a *leading* BOM is stripped; an interior one is corruption and still fails.
 
-Two shapes, both resolved by `provider.Fake`:
+Three shapes, all resolved by `provider.Fake`:
 
 ```
 <fixture>/migrations/...        every file is ADDED — what a migration PR looks like
 <fixture>/old/... + new/...     the two trees are diffed by path; the old//new/ prefix is
                                 stripped, so a finding's File is "deployment.yaml"
+<fixture>/plan/...              every file is ADDED, holding *.tfplan.json — what a plan
+                                committed for review looks like (S12)
 ```
 
 Every fixture carries `expected.json`:
