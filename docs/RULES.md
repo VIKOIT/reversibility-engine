@@ -299,8 +299,13 @@ production snapshot established the size of what the lock covers.
 **A band may only lower a grade, never raise one.** "Lower" means worse: A → B → C → F. A
 `NEGLIGIBLE` band imposes nothing at all — a small table does not turn a C into a B, because the
 absence of evidence of a problem is not evidence of safety. The same is true of an absent band: a
-missing snapshot, a stale one, or a table the snapshot does not describe all leave the grade
-exactly where it was.
+missing snapshot, or a table the snapshot does not describe, leaves the grade exactly where it
+was.
+
+**A stale snapshot is not in that group.** It is used and flagged rather than discarded — see
+[`docs/PRODUCTION-CONTEXT.md`](PRODUCTION-CONTEXT.md) — so it still produces a band, and that band
+still caps. Old numbers are still evidence; they are just evidence about a system that has moved
+on, which is what the warning on the certificate says.
 
 Note that `DISRUPTIVE`'s ceiling is already implied by the `FULL_SCAN` condition that gates the
 band in the first place, so in practice `OUTAGE` is the only band that moves a grade. The cap is

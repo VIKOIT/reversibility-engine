@@ -18,6 +18,30 @@ move:
 
 ### Fixed
 
+**Four documents said a snapshot source mismatch was silently ignored. It stops
+the run.** README.md, CLAUDE.md and the `v1.1.2` notes below all carried the same
+sentence — "a missing snapshot, a stale one, or a fingerprint that does not match
+is treated as absent" — and only the first third of it was true.
+
+| Situation | What the docs said | What happens |
+| --- | --- | --- |
+| Snapshot file missing | treated as absent | ✅ treated as absent |
+| Snapshot **stale** | treated as absent | ❌ **used**, with a warning |
+| Sources **mismatch** | treated as absent | ❌ **exit 2** |
+
+A source mismatch is the loudest outcome in the system, not the quietest — the
+sentence described a silent fallback that has never existed in `snapshot.Set.merge`.
+It also contradicted the "stale context is used and flagged, never discarded" rule
+sitting a few lines below it in both README.md and CLAUDE.md.
+
+`docs/RULES.md` §3 had the same error in its own words, saying a stale snapshot
+"leaves the grade exactly where it was". A stale snapshot is used, so it still
+produces a lock duration band and that band still caps the grade.
+
+Each document now carries the five outcomes as a table rather than as one sentence
+holding three claims, since compressing them is what produced the error. An audit
+script checks all six documents against `internal/snapshot/load.go` on every run.
+
 **A snapshot's `--environment` label never reached the message it exists for.**
 `revctl snapshot --environment prod` records the label in the file, and the flag's
 own help says it "appears in messages when two snapshots disagree about their
@@ -300,8 +324,10 @@ is bucketed by how long it is expected to be held:
 
 **A band may only lower a grade, never raise one** — lower meaning worse. A small
 table does not turn a C into a B; the absence of evidence of a problem is not
-evidence of safety. A missing snapshot, a stale one, or a fingerprint that does
-not match is treated as absent, never as reassurance.
+evidence of safety. A missing snapshot, or a table the snapshot does not describe,
+yields no band and therefore no cap — never reassurance. A **stale** snapshot is
+used and flagged rather than ignored, so it still produces a band; two snapshots of
+one kind from different sources stop the run rather than being quietly dropped.
 
 When `pg_relation_size` is unavailable, size falls back to
 `reltuples × Σ(avg_width across ALL columns of the table)`. `avg_width` is per

@@ -464,10 +464,23 @@ result is **never better** than the one without.
 
 The vocabulary, because it has been ambiguous: *lowering* a grade means making it
 worse (A → B → C → F) and is permitted; *raising* one means making it better and
-never happens. **A missing snapshot, a stale one, or a fingerprint that does not
-match is treated as absent — never as a signal that the change is safe.** The
-absence of evidence of a problem is not evidence of safety, so a small table does
-not turn a C into a B.
+never happens. **The absence of evidence of a problem is not evidence of safety**,
+so a small table does not turn a C into a B, and no snapshot is ever read as a
+signal that a change is safe.
+
+**When context cannot be used, only the first two outcomes are quiet:**
+
+| Situation | Outcome |
+| --- | --- |
+| The snapshot file is not there | Context absent. **Not an error** — a workflow can pass `--context` before the first snapshot exists. |
+| The object is not in the snapshot, or the name is ambiguous | No context for that finding. Context that names the wrong object is worse than none. |
+| The snapshot is stale (over 7 days) | **Used**, with a warning on the certificate. |
+| The file exists and cannot be read or decoded | **Exit 2.** |
+| Two snapshots of one kind describe different sources | **Exit 2**, naming both `--environment` labels and both fingerprints. |
+
+A source mismatch is the loudest thing that can happen here, not the quietest:
+merging two databases into one view would answer questions about a table that
+exists in only one of them, with no way to tell which.
 
 Exactly two things reach a verdict from a snapshot:
 
@@ -776,9 +789,11 @@ revctl check ./migrations --config ops/.reversibility.yml
 revctl check ./migrations --no-config
 
 # Production context, collected beforehand and read from a file. The check
-# itself never connects to anything.
-revctl snapshot --dsn "$REPLICA_DSN" --out .reversibility/pg.json
-revctl snapshot --kube-context prod --out .reversibility/k8s.json
+# itself never connects to anything. --environment is a label recorded in the
+# file; it is what names the offending snapshot if two of them ever disagree
+# about which database they came from.
+revctl snapshot --dsn "$REPLICA_DSN" --environment prod --out .reversibility/pg.json
+revctl snapshot --kube-context prod --environment prod --out .reversibility/k8s.json
 revctl check ./migrations --context .reversibility/pg.json
 
 # The embedded Terraform catalog: version, digest, coverage.

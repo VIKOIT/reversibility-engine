@@ -690,8 +690,25 @@ needs a production credential, determinism survives, and the analyzers stay pure
   than without, over every fixture, using a snapshot sized to trip every band.
 - **The vocabulary, because it has been ambiguous.** *Lowering* a grade means making it worse
   (A → B → C → F) and is permitted. *Raising* one means making it better (C → B) and never
-  happens. A missing snapshot, a stale one, or a fingerprint that does not match is treated as
-  **absent** — never as a signal that the change is safe.
+  happens.
+- **What "absent" actually covers**, because the sentence here used to get this wrong. Exactly
+  two things are treated as absent, and neither is ever read as a signal that the change is safe:
+  a snapshot file that is not there, and an object the snapshot does not describe or describes
+  ambiguously. **Everything else about unusable context is louder, not quieter:**
+
+  | Situation | Outcome |
+  | --- | --- |
+  | The file is not there | context absent; **not an error** |
+  | The object is not in the snapshot, or the subject is ambiguous | no context for that finding |
+  | The snapshot is stale (older than `DefaultStaleAfter`, 7 days) | **used**, with a warning in `ContextWarnings` |
+  | The file exists and cannot be read or decoded | **exit 2** |
+  | Two snapshots of one kind from different sources | **exit 2**, naming both `--environment` labels and both fingerprints |
+
+  **A fingerprint mismatch is the loudest outcome in the system, not the quietest.** The prose
+  previously claimed it was "treated as absent", which was wrong twice over: it described a
+  silent fallback that has never existed in `snapshot.Set.merge`, and it contradicted the "stale
+  context is used and flagged" rule three bullets below. Anyone reasoning from it would expect a
+  mismatched pair of snapshots to be ignored, when in fact the run stops.
 - **Only two things reach a verdict from a snapshot,** both owner-specified in the S11 patch:
   `WILL_FAIL` for a `SET NOT NULL` that production proves will abort, and the lock duration
   bands. Everything else context produces is prose and numbers beside a finding.
