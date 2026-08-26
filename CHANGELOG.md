@@ -24,6 +24,12 @@ schema rather than against the tool, so the one number a downstream gate is
 directed to depend on was four bumps out of date. The status badge and status line
 also still read `v1.0.0` and now read `v1.1.2`.
 
+**The rules badge omitted Terraform**, reading `27 PG · 15 K8S` and undercounting
+a whole analyzer that shipped in the same release. It now reads
+`27 PG · 15 K8S · 9 TF` — nine rather than ten because `TF003` is retired and its
+number is never reused. All three counts match the fixture directories, and a rule
+with no fixture does not exist.
+
 ## [v1.1.2] - 2026-08-26
 
 The first release since `0.1.0` to publish binaries. `v1.0.0`–`v1.1.0` were cut as

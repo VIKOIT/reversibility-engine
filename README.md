@@ -3,7 +3,7 @@
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-663366)
 ![Status](https://img.shields.io/badge/status-v1.1.2-brightgreen)
 ![Policy](https://img.shields.io/badge/policy-fail--closed-critical)
-![Rules](https://img.shields.io/badge/rules-27%20PG%20%C2%B7%2015%20K8S-blue)
+![Rules](https://img.shields.io/badge/rules-27%20PG%20%C2%B7%2015%20K8S%20%C2%B7%209%20TF-blue)
 
 [![CI](https://github.com/VIKOIT/reversibility-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/VIKOIT/reversibility-engine/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/VIKOIT/reversibility-engine)](https://github.com/VIKOIT/reversibility-engine/releases)
