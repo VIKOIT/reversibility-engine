@@ -39,9 +39,34 @@ type Set struct {
 	// Digest is the SHA-256 over the resolved context, for the certificate's input digest.
 	Digest string
 
-	// fingerprints records the source each kind came from, so a second file for the same kind
-	// from a different source can be refused.
-	fingerprints map[Kind]string
+	// sources records where each kind came from, so a second file for the same kind from a
+	// different source can be refused — and refused in terms a human recognises.
+	sources map[Kind]source
+}
+
+// source is where one kind's data came from.
+//
+// The environment is carried alongside the fingerprint solely so the mismatch message can name
+// it. A fingerprint is a hash: correct, unambiguous, and useless for working out which of two
+// files somebody pointed at the wrong database. That is what the label is for.
+type source struct {
+	fingerprint string
+
+	// environment is the caller's --environment label, empty when they did not pass one.
+	environment string
+}
+
+// describe renders a source for the mismatch message.
+//
+// The label is quoted rather than interpolated bare: it is free text read out of a file, so
+// quoting keeps a label containing spaces readable and stops one containing newlines from
+// forging a second line of output. With no label there is nothing to quote and the fingerprint
+// stands alone, rather than printing an empty pair of quotes that reads like a bug.
+func (s source) describe() string {
+	if s.environment == "" {
+		return fmt.Sprintf("fingerprint %s", short(s.fingerprint))
+	}
+	return fmt.Sprintf("%q, fingerprint %s", s.environment, short(s.fingerprint))
 }
 
 // Options configures loading.
@@ -74,7 +99,7 @@ func Load(paths []string, opts Options) (*Set, error) {
 		opts.StaleAfter = DefaultStaleAfter
 	}
 
-	set := &Set{fingerprints: map[Kind]string{}}
+	set := &Set{sources: map[Kind]source{}}
 	loaded := 0
 
 	for _, path := range paths {
@@ -134,12 +159,13 @@ func (s *Set) merge(snap *Snapshot, path string, opts Options) error {
 	// A second file for the same kind from a different source is a configuration error. Two
 	// databases merged into one view would answer questions about a table that exists in one of
 	// them, and there would be no way to tell which.
-	if previous, ok := s.fingerprints[snap.Kind]; ok && previous != snap.SourceFingerprint {
+	current := source{fingerprint: snap.SourceFingerprint, environment: snap.Environment}
+	if previous, ok := s.sources[snap.Kind]; ok && previous.fingerprint != current.fingerprint {
 		return fmt.Errorf("%w: %s is a %s snapshot of a different source than the one already loaded "+
-			"(fingerprint %s, expected %s); snapshots of two environments cannot be merged",
-			domain.ErrInvalidContext, path, snap.Kind, short(snap.SourceFingerprint), short(previous))
+			"(%s; expected %s); snapshots of two environments cannot be merged",
+			domain.ErrInvalidContext, path, snap.Kind, current.describe(), previous.describe())
 	}
-	s.fingerprints[snap.Kind] = snap.SourceFingerprint
+	s.sources[snap.Kind] = current
 
 	if age := snap.Age(opts.Now); age > opts.StaleAfter {
 		s.Warnings = append(s.Warnings, fmt.Sprintf(

@@ -18,6 +18,38 @@ move:
 
 ### Fixed
 
+**A snapshot's `--environment` label never reached the message it exists for.**
+`revctl snapshot --environment prod` records the label in the file, and the flag's
+own help says it "appears in messages when two snapshots disagree about their
+source" — but the mismatch error in `snapshot.Set.merge` printed only the two
+fingerprints. The one part of that message a human could act on was the part it
+left out.
+
+Before:
+
+```
+… is a postgres snapshot of a different source than the one already loaded
+(fingerprint 999999999999, expected aaaa1111bbbb)
+```
+
+After:
+
+```
+… is a postgres snapshot of a different source than the one already loaded
+("staging", fingerprint 999999999999; expected "prod", fingerprint aaaa1111bbbb)
+```
+
+The fingerprints were always correct and unambiguous, and — read at the moment a
+pipeline broke — interchangeable. `"staging"` is the half that says which file to
+remove.
+
+The label is quoted rather than interpolated bare: it is free text read out of a
+file, so quoting keeps a label containing spaces readable and stops one containing
+newlines from forging a second line of output. A snapshot collected without
+`--environment` falls back to the fingerprint alone rather than printing empty
+quotes, which would read as a bug in the tool rather than as a missing flag. Both
+are pinned by tests, the second because it is the case nobody would notice.
+
 **`docs/PRODUCTION-CONTEXT.md` and `docs/ESTIMATES.md` both told readers that
 production context cannot change a grade.** That stopped being true when the
 `WILL_FAIL` verdict and the lock duration bands shipped, and the claim failed in

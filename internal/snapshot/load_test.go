@@ -4,7 +4,9 @@
 package snapshot_test
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,6 +69,80 @@ func TestSnapshotsOfDifferentSourcesAreRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "different source") {
 		t.Errorf("error does not explain the problem: %v", err)
+	}
+}
+
+// The --environment label exists so a fingerprint mismatch can be reported against something a
+// human recognises. It is the only part of this message that tells somebody which of two files
+// they pointed at the wrong database: the fingerprints are correct, unambiguous, and — read at
+// the moment the pipeline broke — interchangeable.
+//
+// This is pinned because the flag's own help text promises it, and for a while it did not
+// happen: the label was recorded in the file and then never printed.
+func TestSourceMismatchNamesTheEnvironments(t *testing.T) {
+	t.Parallel()
+
+	_, err := snapshot.Load(
+		[]string{filepath.Join("testdata", "pg.json"), filepath.Join("testdata", "pg_other_source.json")},
+		snapshot.Options{Now: snapshotDay},
+	)
+	if err == nil {
+		t.Fatal("two postgres snapshots of different sources were merged")
+	}
+
+	// Both labels, and both fingerprints: the label says which environment, the fingerprint is
+	// what actually differs.
+	for _, want := range []string{`"staging"`, `"prod"`, "aaaa1111bbbb", "999999999999"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("mismatch message does not name %s:\n  %v", want, err)
+		}
+	}
+}
+
+// A label nobody set must not print as an empty pair of quotes, which reads like a bug in the
+// tool rather than a snapshot collected without --environment.
+func TestSourceMismatchWithoutLabelsPrintsNoEmptyQuotes(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	paths := make([]string, 0, 2)
+	for i, fingerprint := range []string{
+		"1111111111111111111111111111111111111111111111111111111111111111",
+		"2222222222222222222222222222222222222222222222222222222222222222",
+	} {
+		raw, err := os.ReadFile(filepath.Join("testdata", "pg.json"))
+		if err != nil {
+			t.Fatalf("reading the base snapshot: %v", err)
+		}
+
+		var doc map[string]any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatalf("decoding the base snapshot: %v", err)
+		}
+		delete(doc, "environment")
+		doc["sourceFingerprint"] = fingerprint
+
+		out, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatalf("encoding the snapshot: %v", err)
+		}
+
+		path := filepath.Join(dir, fmt.Sprintf("unlabelled_%d.json", i))
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			t.Fatalf("writing %s: %v", path, err)
+		}
+		paths = append(paths, path)
+	}
+
+	_, err := snapshot.Load(paths, snapshot.Options{Now: snapshotDay})
+	if err == nil {
+		t.Fatal("two postgres snapshots of different sources were merged")
+	}
+	if strings.Contains(err.Error(), `""`) {
+		t.Errorf("an absent environment printed as empty quotes:\n  %v", err)
+	}
+	if !strings.Contains(err.Error(), "fingerprint 111111111111") {
+		t.Errorf("message does not fall back to the fingerprint alone:\n  %v", err)
 	}
 }
 

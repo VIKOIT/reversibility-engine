@@ -312,11 +312,21 @@ loss as reversible on your behalf. The fact is recorded in the note; a human dec
 - A snapshot older than **7 days** produces a warning in `contextWarnings` on the certificate.
   **It is still used.** Silently falling back to no context would make the certificate quietly
   less informative at exactly the moment somebody stopped refreshing it.
-- Two snapshots of the **same kind from different sources** are a configuration error. The
-  message names the offending file, the kind, and both fingerprints in short form. Merging two
-  databases into one view would answer questions about a table that exists in one of them, with
-  no way to tell which. (`--environment` is recorded in the file and is intended to make that
-  report recognisable to a human, but the mismatch message does not currently quote it.)
+- Two snapshots of the **same kind from different sources** are a configuration error. Merging
+  two databases into one view would answer questions about a table that exists in one of them,
+  with no way to tell which. The message names the offending file, the kind, and **both
+  `--environment` labels alongside both fingerprints**:
+
+  ```
+  invalid production context: .reversibility/pg-staging.json is a postgres snapshot of a
+  different source than the one already loaded ("staging", fingerprint 999999999999;
+  expected "prod", fingerprint aaaa1111bbbb); snapshots of two environments cannot be merged
+  ```
+
+  The label is what makes that message actionable. The fingerprints are correct and
+  unambiguous, and — read at the moment a pipeline broke — interchangeable; `"staging"` is the
+  half that says which file to remove. Collect with `--environment` and it appears here. Without
+  one, the fingerprint stands alone rather than printing empty quotes.
 - A snapshot whose `schemaVersion` this build does not know, or that carries a field it does not
   recognise, is **refused** — `DisallowUnknownFields`, not a best-effort read. Context that is
   wrong is worse than context that is absent, because context is believed. The snapshot file
