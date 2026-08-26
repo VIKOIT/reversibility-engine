@@ -1,7 +1,7 @@
 # Reversibility Engine
 ![Go 1.22+](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go&logoColor=white)
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-663366)
-![Status](https://img.shields.io/badge/status-v1.0.0-brightgreen)
+![Status](https://img.shields.io/badge/status-v1.1.2-brightgreen)
 ![Policy](https://img.shields.io/badge/policy-fail--closed-critical)
 ![Rules](https://img.shields.io/badge/rules-27%20PG%20%C2%B7%2015%20K8S-blue)
 
@@ -53,8 +53,8 @@ The engine is **fail-closed by construction**. An unparseable file, an
 unrecognized statement, an analyzer error, or a panic all grade F. Unknown means
 unsafe. A tool that sells trust cannot afford to guess.
 
-> **Status: v1.0.0.** Usable end to end, and packaged as a GitHub Action. Every
-> certificate carries its own `schemaVersion`, currently `1.0.0`, which bumps on
+> **Status: v1.1.2.** Usable end to end, and packaged as a GitHub Action. Every
+> certificate carries its own `schemaVersion`, currently `1.4.0`, which bumps on
 > any breaking field change — so a consumer can pin against the schema rather than
 > against the tool. Every rule ID has a fixture pair in `testdata/`: a rule with no
 > fixture does not exist.

@@ -16,7 +16,13 @@ move:
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+**The README advertised `schemaVersion` `1.0.0`; it has been `1.4.0` since the
+Terraform analyzer landed.** The same paragraph tells consumers to pin against the
+schema rather than against the tool, so the one number a downstream gate is
+directed to depend on was four bumps out of date. The status badge and status line
+also still read `v1.0.0` and now read `v1.1.2`.
 
 ## [v1.1.2] - 2026-08-26
 
