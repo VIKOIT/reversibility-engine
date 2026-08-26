@@ -7,7 +7,12 @@ cannot say whether that is 200 milliseconds or 14 minutes. Production context cl
 before:  PG006  ALTER COLUMN TYPE — TABLE_REWRITE, COSTLY
 after:   PG006  ALTER COLUMN TYPE — full rewrite of 212M rows
                 (~48 GB), est. ~16m ACCESS EXCLUSIVE lock
+                band OUTAGE — grade capped at C
 ```
+
+That last line is the part to read carefully. **Context can make a verdict worse. It can never
+make one better.** See [What context changes, and what it never
+changes](#what-context-changes-and-what-it-never-changes).
 
 ---
 
@@ -134,6 +139,17 @@ revctl snapshot --dsn "$REPLICA_DSN"   --out .reversibility/pg.json
 revctl snapshot --kube-context prod    --out .reversibility/k8s.json
 ```
 
+One command collects one thing. `--dsn` together with `--kube-context` is an error naming the
+fix, rather than a run that quietly collects half of what you asked for.
+
+| Flag | Applies to | Meaning |
+| --- | --- | --- |
+| `--dsn` | PostgreSQL | Connection string. Prefer a read replica, and prefer `$PGPASSWORD` or a `.pgpass` file over putting a password on the command line. |
+| `--kube-context` | Kubernetes | kubeconfig context to collect from. Pass an empty `--kube-context=` to use the current one. |
+| `--kubeconfig` | Kubernetes | Explicit path. Defaults to `$KUBECONFIG`, then `~/.kube/config`, then in-cluster credentials. |
+| `--environment` | both | A label recorded in the file, such as `prod`. It appears in the message when two snapshots disagree about their source. |
+| `--out`, `-o` | both | Required. A snapshot is a file; the analysis reads it later. |
+
 Then, in CI:
 
 ```bash
@@ -142,9 +158,14 @@ revctl check ./migrations \
   --context .reversibility/k8s.json
 ```
 
-`--context` is repeatable and merges by kind. **A path that does not exist is skipped, not an
-error** — context is an enhancement, and a workflow that passes `--context` unconditionally has
-to keep working before the first snapshot is ever collected.
+`--context` is repeatable and merges by kind.
+
+**A path that does not exist is skipped, not an error** — context is an enhancement, and a
+workflow that passes `--context` unconditionally has to keep working before the first snapshot is
+ever collected. **A file that exists and cannot be read is exit 2**, and so is one that cannot be
+decoded. The two are deliberately different: "you have not collected this yet" is an ordinary
+state, while "this file is here and I cannot understand it" means the run does not know what it
+was meant to enforce.
 
 ### On a schedule
 
@@ -154,15 +175,35 @@ The snapshot changes slowly. Daily is plenty:
 name: Refresh production context
 on:
   schedule: [{cron: '0 4 * * *'}]
+
+permissions:
+  contents: write            # the job commits the refreshed snapshot
+
 jobs:
   snapshot:
     runs-on: ubuntu-latest
+    env:
+      VERSION: v1.1.2        # pin it; this job runs unattended
     steps:
       - uses: actions/checkout@v4
-      - uses: VIKOIT/reversibility-engine@v1   # for the binary
-      - run: revctl snapshot --dsn "$REPLICA_DSN" --out .reversibility/pg.json
+
+      # Fetch revctl directly. Do NOT use the action here: it runs a full
+      # certification rather than installing anything, and it never puts revctl
+      # on PATH.
+      - name: Install revctl
+        run: |
+          set -euo pipefail
+          base="https://github.com/VIKOIT/reversibility-engine/releases/download/$VERSION"
+          curl -fsSLO "$base/revctl_linux_amd64.tar.gz"
+          curl -fsSLO "$base/checksums.txt"
+          sha256sum --check --ignore-missing checksums.txt
+          tar -xzf revctl_linux_amd64.tar.gz revctl
+          sudo install revctl /usr/local/bin/
+
+      - run: revctl snapshot --dsn "$REPLICA_DSN" --environment prod --out .reversibility/pg.json
         env:
           REPLICA_DSN: ${{ secrets.REPLICA_DSN }}
+
       - run: |
           git config user.name  'reversibility-bot'
           git config user.email 'bot@example.invalid'
@@ -170,6 +211,14 @@ jobs:
           git diff --cached --quiet || git commit -m 'chore: refresh production context'
           git push
 ```
+
+**The binary is downloaded and checksum-verified rather than obtained from the action, and that
+is not a stylistic choice.** `VIKOIT/reversibility-engine@v1` is a composite action that grades a
+changeset; running it does not install anything you can call afterwards. It never writes to
+`$GITHUB_PATH`, so a later `run: revctl …` would fail with *command not found* — and before
+reaching that step, the action would have run a certification of its own and, at the default
+`gate: A`, could fail the job outright. Collecting a snapshot and gating a pull request are two
+different jobs.
 
 Committing the snapshot is the intended workflow: it is metadata, it contains no secret, and
 having it in the repository is what lets a pull request be graded against production without the
@@ -179,20 +228,75 @@ pull request's CI holding any credential.
 
 ## What context changes, and what it never changes
 
-**It never changes a grade.** Enrichment writes one optional field on a finding and touches
-nothing else — not the reversibility, not the lock hazard, not the score. A property test runs
-every fixture in the repository twice, with and without a snapshot deliberately sized to make any
-size-sensitive rule fire, and asserts the grade, the effective grade, the gate status, and every
-individual classification are identical.
+**Context is a one-way ratchet. It may make a verdict worse; it may never make one better.**
 
-The rules that gain context:
+The vocabulary, because it has been ambiguous in this project's own documents: *lowering* a grade
+means making it **worse** (A → B → C → F) and is permitted. *Raising* one means making it better
+and never happens. A property test runs every fixture in the repository with and without a
+snapshot deliberately sized to trip every band, and asserts the graded-with-context result is
+**never better** than the one without.
+
+Mechanically, the ratchet is two rules in `snapshot.Enrich`:
+
+- A classification whose severity **would drop** is discarded rather than applied. A snapshot
+  cannot talk the engine out of a finding.
+- The lock hazard is **restored unconditionally**. Context describes how long a lock is held,
+  never which lock is taken.
+
+**Exactly two things reach a verdict from a snapshot.** Everything else context produces is prose
+and numbers printed beside a finding, which nothing reads back.
+
+### 1. `WILL_FAIL` — the migration will not apply at all
+
+A verdict distinct from `IRREVERSIBLE`, and the distinction matters: one says you cannot undo the
+change, the other says it will never happen, so the fix belongs in the migration rather than in
+the rollback plan. A reader who confuses them fixes the wrong thing, which is why it is reported
+separately in the blockers, the undo plan, SARIF, and Markdown.
+
+It ranks above every verdict an analyzer can produce from source alone and **always grades F**.
+Today it is reached from one piece of evidence: `SET NOT NULL` against a column the snapshot
+shows contains nulls. Postgres validates every existing row and a single violation aborts the
+statement and rolls the transaction back — a certainty rather than a risk. No lock duration is
+estimated for it, because the statement never gets far enough to hold one.
+
+**A waiver cannot cover `WILL_FAIL`**, the same as `UNKNOWN`: a waiver accepts a trade-off, and
+there is no trade-off in a statement that cannot apply. Waiving it would document a bug rather
+than accept one, and the pipeline it unblocked would fail at deploy instead of at review.
+
+### 2. Lock duration bands
+
+With a snapshot, a lock hazard of `FULL_SCAN` or heavier is bucketed by how long it is expected
+to be held:
+
+| Band | Estimated duration | Effect on the grade |
+| --- | --- | --- |
+| `NEGLIGIBLE` | under 1s | none |
+| `NOTICEABLE` | 1s – 30s | none |
+| `DISRUPTIVE` | 30s – 5m | no better than **B** |
+| `OUTAGE` | over 5m | no better than **C** |
+
+**A `NEGLIGIBLE` band imposes nothing.** A small table does not turn a C into a B — the absence of
+evidence of a problem is not evidence of safety. In practice `OUTAGE` is the band that actually
+moves a grade, since any `FULL_SCAN` finding is already capped at B; both caps are implemented so
+the two rules stay independent. Every formula behind every duration is in
+[`ESTIMATES.md`](ESTIMATES.md).
+
+**A band exists only where duration scales with size.** `PG014` takes an `EXCLUSIVE` lock, which
+passes the "at least `FULL_SCAN`" gate, but dropping an index is not slower for being large and
+no rate is defined for it. Applying a scan rate there would cap a grade at C for an operation
+that finishes in milliseconds.
+
+### What every rule gains
+
+The rules that gain context — and this list is closed, enforced by
+`TestOnlySpecifiedRulesGainContext`, which rejects any other:
 
 | Rule | What context adds |
 | --- | --- |
-| `PG006`, `PG007` | Row count, total size, estimated rewrite duration |
-| `PG017` | **Whether the migration will fail.** If `null_frac > 0`, `SET NOT NULL` rejects the statement — said before it runs, not after |
-| `PG014`, `PG015` | Index size and scan count. Zero scans since the last statistics reset means genuinely cheap to drop, and it says so |
-| `PG021` | Row count and estimated scan duration for the validation |
+| `PG006`, `PG007` | Row count, total size, estimated rewrite duration, **and a band** — the one place a lock estimate routinely moves a grade |
+| `PG017` | **Whether the migration will fail.** If `null_frac > 0`, `SET NOT NULL` rejects the statement — said before it runs, not after. The verdict becomes `WILL_FAIL` and the grade **F**. If `null_frac == 0`, a band instead |
+| `PG014`, `PG015` | Index size and scan count. Zero scans since the last statistics reset means genuinely cheap to drop, and it says so. **No band and no duration** — an index drop is not slower for being large |
+| `PG021` | Row count, estimated scan duration for the validation, and a band |
 | `K8S003` | The cluster's actual `reclaimPolicy`, replacing the analyzer's guess |
 | `K8S004` | The bound volume's actual capacity, which is what a shrink is measured against |
 
@@ -205,12 +309,32 @@ loss as reversible on your behalf. The fact is recorded in the note; a human dec
 
 ## Staleness and fingerprints
 
-- A snapshot older than **7 days** produces a warning on the certificate. It is still used.
-  Silently falling back to no context would make the certificate quietly less informative at
-  exactly the moment somebody stopped refreshing it.
-- Two snapshots of the **same kind from different sources** are a configuration error. Merging
-  two databases into one view would answer questions about a table that exists in one of them,
-  with no way to tell which.
+- A snapshot older than **7 days** produces a warning in `contextWarnings` on the certificate.
+  **It is still used.** Silently falling back to no context would make the certificate quietly
+  less informative at exactly the moment somebody stopped refreshing it.
+- Two snapshots of the **same kind from different sources** are a configuration error. The
+  message names the offending file, the kind, and both fingerprints in short form. Merging two
+  databases into one view would answer questions about a table that exists in one of them, with
+  no way to tell which. (`--environment` is recorded in the file and is intended to make that
+  report recognisable to a human, but the mismatch message does not currently quote it.)
 - A snapshot whose `schemaVersion` this build does not know, or that carries a field it does not
-  recognise, is **refused**. Context that is wrong is worse than context that is absent, because
-  context is believed.
+  recognise, is **refused** — `DisallowUnknownFields`, not a best-effort read. Context that is
+  wrong is worse than context that is absent, because context is believed. The snapshot file
+  format carries its own version, currently `1.0.0`, independent of the certificate schema.
+- **A finding the snapshot does not describe simply gets no context.** An unqualified table name
+  matching two schemas, a claim name matching two namespaces, a table absent from the file — all
+  resolve to nothing rather than to a guess. Context that names the wrong object is worse than
+  none.
+
+### Why a re-collection does not change a certificate
+
+**The context digest deliberately excludes `CollectedAt`.** It is the one field that moves on
+every collection while the facts it accompanies usually do not, so hashing it would give an
+identical database a different digest every night — and a digest that changes on its own stops
+being evidence of anything.
+
+The consequence is the useful one: re-running `revctl snapshot` against an unchanged database
+produces a file that grades to a byte-identical certificate. A digest that moves means the
+production facts moved, which is exactly the signal worth having. This is the same reasoning as
+`policyDigest` covering the *resolved* policy rather than the file's bytes, so reformatting it
+changes nothing.

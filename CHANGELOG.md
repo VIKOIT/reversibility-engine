@@ -18,6 +18,43 @@ move:
 
 ### Fixed
 
+**`docs/PRODUCTION-CONTEXT.md` and `docs/ESTIMATES.md` both told readers that
+production context cannot change a grade.** That stopped being true when the
+`WILL_FAIL` verdict and the lock duration bands shipped, and the claim failed in
+the permissive direction — a reader was told the worst a snapshot could do was
+annotate a finding.
+
+`docs/ESTIMATES.md` contradicted itself on the point: its opening said "nothing
+here affects a grade" while its own band table three sections later listed "cap at
+B" and "cap at C". The opening now draws the distinction the rest of the document
+depends on — a printed duration is presentation and nothing reads it back, while
+the *band* that duration falls into is scored and may only make a grade worse.
+
+`docs/PRODUCTION-CONTEXT.md` was never updated by the S11 patch at all, so it
+described the pre-patch design. It now documents both mechanisms that reach a
+verdict: `WILL_FAIL`, why it is reported apart from `IRREVERSIBLE`, and that no
+waiver can cover it; and the four bands with their caps, why `NEGLIGIBLE` imposes
+nothing, and why `PG014` gets no band despite an `EXCLUSIVE` lock. The one-way
+ratchet is stated with the vocabulary spelled out, because "lower" and "raise" had
+been used in both directions across these documents.
+
+**A documented workflow could not have worked.** The scheduled-snapshot example
+obtained `revctl` by invoking `VIKOIT/reversibility-engine@v1` with the comment
+"for the binary", then called `revctl` in the next step. The action is a composite
+action that grades a changeset: it never writes to `$GITHUB_PATH`, so the call
+would have failed with *command not found* — and before reaching it, the action
+would have run a certification of its own and, at the default `gate: A`, could
+have failed the job first. The example now downloads the release asset and
+verifies it against `checksums.txt`, and says why the action is the wrong tool for
+that step.
+
+Also corrected: `--context` on a file that exists but cannot be read or decoded is
+exit 2, where the docs stated only the missing-file case; the `snapshot` flags
+(`--kubeconfig`, `--environment`, and that `--dsn` with `--kube-context` is an
+error) were undocumented; and the context digest's exclusion of `collectedAt` —
+the reason re-collecting from an unchanged database still produces a
+byte-identical certificate — was recorded nowhere.
+
 **The README still described the project as it stood before `v1.1.2`.** It is the
 first thing anybody reads and it was several radical changes out of date, in the
 permissive direction more than once. Overhauled:

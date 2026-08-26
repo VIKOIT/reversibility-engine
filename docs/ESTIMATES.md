@@ -5,8 +5,21 @@ says exactly how each one is computed, what it assumes, and where it will be wro
 number a user learns to distrust is worse than no number at all, and the only way to earn trust
 is to publish the arithmetic.
 
-Nothing here affects a grade. Estimates are printed beside a finding; they never move it. See
-[`CLAUDE.md` §11g](../CLAUDE.md).
+**A number printed beside a finding never moves that finding. The *band* it falls into can.**
+That distinction is the whole of how estimates interact with a grade, and it is worth stating
+before any arithmetic:
+
+- The estimated duration itself — `~16m` — is presentation. Nothing reads it back.
+- The **band** that duration falls into is scored, and may only make a grade *worse*. See
+  [Bands, and what they change](#bands-and-what-they-change) below, and
+  [`docs/RULES.md` §3](RULES.md#3-scoring) for where it sits in the scoring procedure.
+
+So an estimate that is wrong by 10% almost never changes a verdict, because it has to cross a
+band boundary to change anything at all. An estimate that is wrong by an order of magnitude can
+— which is why the fallback in this document errs small, and why the constants err large.
+
+See also [`CLAUDE.md` §11g](../CLAUDE.md) for the design constraint behind all of it: the engine
+never connects to anything during analysis.
 
 ---
 
