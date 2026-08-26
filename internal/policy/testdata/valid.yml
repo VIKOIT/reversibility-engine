@@ -17,3 +17,7 @@ waivers:
 overrides:
   - rule: K8S008
     severity: IRREVERSIBLE
+
+terraform_types:
+  - type: google_sql_database_instance
+    class: STATEFUL

@@ -18,6 +18,48 @@ move:
 
 ### Fixed
 
+**The README still described the project as it stood before `v1.1.2`.** It is the
+first thing anybody reads and it was several radical changes out of date, in the
+permissive direction more than once. Overhauled:
+
+- **It said `No Terraform.`** under Limitations, in the same release that shipped
+  nine Terraform rules and a 92-type catalog. A new *Terraform plans* section now
+  covers the workflow, the three-clause discriminator, the classification layers,
+  the catalog and its honest denominator, `revctl catalog show`, the offline/no-
+  telemetry guarantee, and why `TF003` is retired. The example output is real
+  `revctl` output rather than an invention.
+- **The exit-code contract was one sentence.** A new *Fail-closed by construction*
+  section states both invariants — unknown means unsafe, and **a gate must prove
+  it ran** — with a table of every situation that reaches exit 2, and the `:v1`
+  image incident written up as the reason bare `revctl` no longer exits 0.
+- **The composite-action shift was a footnote.** It now has its own section
+  contrasting the frozen `v1.0.x` Docker action with the composite one: any runner
+  OS, one checksum-verified binary rather than an image pull, and why a name and
+  its deprecated alias together is an error rather than a precedence decision.
+- **`darwin/amd64` was absent from the platform story.** *Supported release
+  targets* now carries the four-target matrix with the dropped target listed
+  explicitly, the queue-time reason, why cross-compiling was rejected, and the two
+  supported paths for Intel Mac users.
+- **It claimed context "never changes a grade at all".** That stopped being true
+  when `WILL_FAIL` and the lock duration bands landed. It now documents the
+  one-way ratchet correctly — context may make a verdict *worse* and never better
+  — with the band table, why a waiver cannot cover `WILL_FAIL`, and the
+  vocabulary that has been ambiguous.
+- Smaller alignments: the `TF001`–`TF010` row said ten rules where nine are
+  active; the grades table gained `WILL_FAIL` and the verdict severity ordering;
+  the rules-specification index gained §5; the policy example and its rules gained
+  `terraform_types`; the CLI reference gained `snapshot`, `catalog`, `version`,
+  `--terraform-plan`, `--config`/`--no-config` and `--context`; the architecture
+  diagram gained the Terraform, policy and snapshot packages and the driver
+  quarantine; the image example moved off `1.1.1`; and the action's `config` input
+  now says that a root `.reversibility.yml` is still discovered, which the previous
+  wording implied it was not.
+
+`internal/policy/testdata/valid.yml` is the README's policy example verbatim, so
+it and the flow-form mirror in `load_test.go` gained `terraform_types` alongside
+it. If that file stops loading, every policy written from the README stops loading
+with it.
+
 **The README advertised `schemaVersion` `1.0.0`; it has been `1.4.0` since the
 Terraform analyzer landed.** The same paragraph tells consumers to pin against the
 schema rather than against the tool, so the one number a downstream gate is
@@ -111,8 +153,8 @@ unsupported runner; it now fails naming the remedy.
 ### Added
 
 **Terraform plan analyzer.** `revctl check` now classifies `terraform show -json`
-output: 10 rules (`TF001`–`TF010`) over a plan, backed by a catalog of AWS
-resource types.
+output: 9 active rules (`TF001`–`TF010`, of which `TF003` is retired and never
+reused) over a plan, backed by a catalog of AWS resource types.
 
 **It never reads `terraform.tfstate`.** State holds provider credentials and
 attribute values in plaintext; a plan does not, and there is no code path that

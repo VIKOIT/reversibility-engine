@@ -171,7 +171,8 @@ func TestDigestCoversTheResolvedPolicy(t *testing.T) {
 	reformatted := []byte("version: 1\ngate: A\nignore: [\"legacy/**\", \"**/*.generated.sql\"]\n" +
 		"waivers: [{rule: PG012, path: \"migrations/0031_*.sql\", " +
 		"reason: \"expand-contract; old code removed in #482\", expires: \"2026-10-01\", approved_by: vikoit}]\n" +
-		"overrides: [{rule: K8S008, severity: IRREVERSIBLE}]\n")
+		"overrides: [{rule: K8S008, severity: IRREVERSIBLE}]\n" +
+		"terraform_types: [{type: google_sql_database_instance, class: STATEFUL}]\n")
 
 	compact, err := policy.Parse(reformatted, "compact.yml", today)
 	if err != nil {

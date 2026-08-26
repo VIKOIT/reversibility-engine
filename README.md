@@ -14,9 +14,10 @@
 
 **"We can always roll back" is an assumption. This measures it.**
 
-Reversibility Engine reads a pull request — PostgreSQL migrations and rendered
-Kubernetes manifests — and answers one question before the merge button is
-pressed: *if this goes wrong, can we undo it, and what exactly would that cost?*
+Reversibility Engine reads a pull request — PostgreSQL migrations, rendered
+Kubernetes manifests, and Terraform plans — and answers one question before the
+merge button is pressed: *if this goes wrong, can we undo it, and what exactly
+would that cost?*
 
 The answer is a reversibility certificate: a grade of **A, B, C, or F**, a
 concrete undo plan, and an explicit list of what cannot be undone. Grade F means
@@ -52,6 +53,10 @@ determine what it does.
 The engine is **fail-closed by construction**. An unparseable file, an
 unrecognized statement, an analyzer error, or a panic all grade F. Unknown means
 unsafe. A tool that sells trust cannot afford to guess.
+
+A gate must also prove that it *ran*. A run that analyzed nothing exits **2**,
+never `0` — absence of output is never success. See [Fail-closed by
+construction](#fail-closed-by-construction).
 
 > **Status: v1.1.2.** Usable end to end, and packaged as a GitHub Action. Every
 > certificate carries its own `schemaVersion`, currently `1.4.0`, which bumps on
@@ -108,16 +113,51 @@ tar -xzf revctl_linux_amd64.tar.gz revctl
 sudo install revctl /usr/local/bin/
 ```
 
-Releases publish `revctl` and `revsrv` for `linux/amd64`, `linux/arm64`,
-`darwin/arm64`, and `windows/amd64` — each built and verified on a runner of its
-own architecture, because `CGO_ENABLED=1` cannot be cross-compiled to every
-target and a binary nobody could execute is a binary nobody has tested. Any
-container image must be glibc-based; musl cannot load the binary — see
-[ADR/0001](ADR/0001-parser-choice.md).
+### Supported release targets
 
-**Intel Macs:** build from source (`CGO_ENABLED=1 go install
-github.com/VIKOIT/reversibility-engine/cmd/revctl@latest`) or use the Docker
-image. Prebuilt binaries target Apple Silicon.
+**Four targets, and every published artifact is built and verified on its own
+native architecture.** `CGO_ENABLED=1` is mandatory, cgo cannot be cross-compiled
+without a toolchain per target, and each build proves it still classifies a
+`DROP TABLE` before it is packaged — a build that silently lost the parser would
+grade every migration A for lack of findings.
+
+| Target | Built on | Prebuilt binary |
+| --- | --- | --- |
+| `linux/amd64` | `ubuntu-latest` | ✅ |
+| `linux/arm64` | `ubuntu-24.04-arm` | ✅ |
+| `darwin/arm64` (Apple Silicon) | `macos-14` | ✅ |
+| `windows/amd64` | `windows-latest` | ✅ |
+| `darwin/amd64` (Intel Mac) | — | ❌ **dropped in `v1.1.2`** |
+
+**`darwin/amd64` was dropped in `v1.1.2` and is not coming back by
+cross-compilation.** `macos-13` is the only hosted Intel Mac runner and it queues
+without bound — on the `v1.1.1` release it sat over two hours before the run had
+to be cancelled by hand, and `timeout-minutes` does not help, because that clock
+starts when a job begins *executing*. Cross-compiling from Apple Silicon was
+considered and rejected: it would ship the one artifact nobody could
+execution-test, and in a tool that gates merges an untested binary is worth less
+than no binary. Restoring the target means a native Intel runner is available
+again; nothing else qualifies.
+
+**Intel Mac users have two supported paths**, stated plainly because they are
+supported rather than degraded:
+
+```bash
+# 1. Build from source. Needs a C toolchain; Xcode command line tools are enough.
+CGO_ENABLED=1 go install github.com/VIKOIT/reversibility-engine/cmd/revctl@latest
+
+# 2. Or run the published image (see the Docker section below).
+docker run --rm -v "$PWD:/repo" -w /repo \
+  --entrypoint /usr/local/bin/revctl \
+  ghcr.io/vikoit/reversibility-engine:1.1.2 check ./migrations
+```
+
+The action itself now fails on an Intel Mac runner with a message naming the
+remedy, rather than 404ing on a missing asset — a missing asset reads as a broken
+release, which is not what this is.
+
+Any container image built around the binary must be **glibc-based**; musl cannot
+load it — see [ADR/0001](ADR/0001-parser-choice.md).
 
 ---
 
@@ -151,20 +191,236 @@ jobs:
 ```
 
 That is the whole setup. There is no Go toolchain to install and no C compiler to
-configure: the action downloads the released binary for the runner it is on and
-verifies its checksum before running it.
+configure.
 
 `gate` is the worst grade that still passes. Autonomous agents must run at `A` —
 grade A is the only verdict that permits an agent to merge.
 
-> **Upgrading from `v1.0.x`.** Through `v1.0.2` this was a Docker container
-> action, so it ran on Linux only and paid an image pull every run. From `v1.1.0`
-> it is a composite action and runs anywhere — same `@v1`, nothing to change.
-> `min-grade` became `gate` and `include` became `path`; both old names still work
-> and warn. Setting a name and its replacement at once is an error rather than a
-> silent choice between them.
+### This is a composite action, not a Docker action
+
+**From `v1.1.0` onward the action is a composite action that downloads a verified
+release binary.** Through `v1.0.2` it was a Docker container action. The
+difference is visible in what your workflow can do:
+
+| | Docker action (`v1.0.0`–`v1.0.2`, frozen) | Composite action (`v1.1.0`+) |
+| --- | --- | --- |
+| Runners | `ubuntu-*` only | **any** — Linux, macOS, Windows |
+| Startup | pulls a container image every run | downloads one binary, cached when a version is pinned |
+| What runs | the image's `ENTRYPOINT`, whatever it happens to be | `revctl` at a named version, **checksum-verified** |
+| Toolchain on the runner | none | none |
+
+The binary's SHA-256 is checked against the release's `checksums.txt` before it
+executes, and a **missing** checksum line is equally fatal — there would be
+nothing to verify against. This binary decides whether changes merge, so an
+unverified one does not run.
+
+A pinned `version:` is cached; `latest` deliberately is not, because an
+`actions/cache` key is immutable once written and a key containing "latest" would
+pin the first binary it ever saw and keep serving it forever.
+
+> **Upgrading from `v1.0.x` — nothing to change.** Keep writing `@v1`. The
+> container-to-composite transition happened *within* `v1` and needed no new
+> major, because every input kept working. If your workflow pinned `runs-on:
+> ubuntu-latest` only because the old action required it, that constraint is gone.
 >
-> There is no `v2`. `@v1` is the line, and `@v1` is what to write.
+> `min-grade` became `gate` and `include` became `path`. Both old names still
+> work. **Setting a name and its replacement together is an error, not a
+> precedence decision** — resolving it silently would pick one during exactly the
+> upgrade that introduced the mistake.
+>
+> **There is no `v2`, and there never was.** Every tag ever cut is `v1.x`. `@v1`
+> is the line, and `@v1` is what to write. Older documentation that said `@v2` was
+> pointing at a ref that resolves to nothing.
+
+---
+
+## Fail-closed by construction
+
+Two separate invariants, and the second is newer than the first because it was
+learned the expensive way.
+
+**1. Unknown means unsafe.** An unparseable file, an unrecognized construct, an
+analyzer error, or a panic all end in grade **F**. There is no "probably fine":
+there is `REVERSIBLE`, `COSTLY`, `IRREVERSIBLE`, `UNKNOWN`, and `WILL_FAIL` — and
+the last two both fail.
+
+**2. A gate must prove that it ran.** Every rule above governs what happens once a
+change has been *read*. None of them says anything about a run that read nothing
+at all, and that run used to have the most permissive outcome in the system,
+because "no findings" and "no analysis" produced the same green check.
+
+### Exit codes are the contract with CI
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The run completed and the gate was met. |
+| `1` | The run completed and **the gate was not met** — the change grades worse than the threshold. |
+| `2` | **The run did not complete.** Nothing was analyzed, or the verdict cannot be trusted. |
+
+Keeping "unsafe change" distinct from "broken tool" is what stops a broken tool
+from being quietly ignored. Each of the following is held by a test that fails
+when the gate stops gating, not by convention:
+
+| Situation | Result |
+| --- | --- |
+| `revctl` with **no arguments** | **exit 2**, help printed to **stderr** — stdout is where a certificate goes |
+| `revctl --help`, `revctl help` | exit 0 — asking for help is a different act, and without this users learn to ignore the exit code |
+| The action wrote **no certificate file** | exit 2 |
+| A certificate exists but its **verdict cannot be read back** | exit 2 |
+| A policy that will not resolve (a waiver missing `reason` or `expires`) | exit 2 |
+| The provider cannot fetch the changeset (rate limit, 5xx, oversized diff) | grade **F**, and the certificate is still posted |
+| A panic anywhere in an analyzer | grade **F**, rule `ENGINE_PANIC` |
+| SQL that will not parse, or a YAML file that is not a manifest | grade **F** (`PG027` / `K8S014`, `UNKNOWN`) |
+
+**A run that could not complete fails the job even with `fail-on-gate: false`.** A
+broken analysis is not a passing one.
+
+### Why `revctl` with no arguments exits 2
+
+Because it once exited `0`, and that was the most dangerous line in the project.
+
+The frozen `v1.0.x` Docker action pulls an image and names **no** `entrypoint:`
+and **no** `args:` — it runs whatever the image declares. That entrypoint used to
+be a script that performed the analysis; from `v1.1.0` it was `revctl` itself.
+Publishing the `v1.1.0` image under the moving `:v1` tag therefore turned every
+`@v1` consumer's gate into a green check over nothing. No rule misfired. No grade
+was wrong. **There was no grade, and no grade passed.**
+
+The moving tag was the vector. The defect was the exit code: *the one invocation
+that analyzes nothing was also the only one that could never fail.*
+
+What now stands in the way, at every layer:
+
+- Bare `revctl` exits 2 and prints help to stderr.
+- The action exits 2 when no certificate was written, and again when the grade
+  cannot be read back out of one. A step reporting FAIL while passing the job has
+  proved only that something was written.
+- **An image whose no-argument run exits 0 is never published** — the self-test
+  builds the image from the commit and asserts this, so it is caught before a tag
+  moves rather than after.
+- **Immutable image version tags only.** `:v1` and `:latest` are not published.
+- **Every container invocation names `--entrypoint` explicitly.** An inherited
+  entrypoint is a silent dependency on a value somebody else can change.
+
+---
+
+## Terraform plans
+
+`revctl check` classifies `terraform show -json` output alongside migrations and
+manifests. **It never reads `terraform.tfstate`**: state holds provider
+credentials and attribute values in plaintext, a plan does not, and there is no
+code path here that opens one.
+
+```bash
+# Produce a plan as JSON. The engine reads this JSON — never the binary plan
+# file, and never the state file.
+terraform plan -out=tfplan
+terraform show -json tfplan > infra.tfplan.json
+
+# Analyze it. *.tfplan.json is claimed by convention.
+revctl check ./infra
+
+# Or name a plan that is called something else.
+revctl check --terraform-plan ./build/plan-output.json .
+```
+
+```console
+$ revctl check ./infra
+
+## Reversibility Certificate — Grade F
+
+### Blockers
+
+- TF001 at main.tfplan.json: irreversible — aws_db_instance.orders is being
+  destroyed. aws_db_instance is stateful (the plan shows allocated_storage on it):
+  destroying it destroys data, an identity that re-applying cannot recreate, or a
+  recovery capability a rollback would need.
+
+### Findings
+
+| | Rule | Location | Reversibility | Lock | Change |
+| --- | --- | --- | --- | --- | --- |
+| 🔴 | `TF001` | main.tfplan.json | IRREVERSIBLE | NONE | `aws_db_instance.orders (delete)` |
+```
+
+Note the `Lock` column: **lock hazard is always `NONE` for Terraform**, because
+Terraform takes no database lock. The rationale names the *evidence* that decided
+the classification — here `allocated_storage` on the `before` object, which marks
+the type stateful before the catalog is even consulted.
+
+**Only destruction is classified.** A created or updated-in-place resource has a
+reverse by construction. That is what keeps the catalog finite: the problem was
+never "hundreds of AWS resource types", it is *the types whose destruction
+hurts*.
+
+**The discriminator, in three clauses.** A resource change is irreversible if it
+destroys data, destroys an identity that re-applying the same configuration
+cannot recreate, **or destroys a recovery capability that a future rollback would
+depend on.** The third clause is why a one-line `deletion_protection = false`
+grades alongside deleting a snapshot — both destroy the undo rather than the
+system, and the rationale says so in as many words.
+
+**Classification runs in layers, and every layer may only raise severity:**
+
+1. **Evidence in the plan, before the catalog.** An attribute such as
+   `allocated_storage` or `backup_retention_period` on the `before` object marks a
+   type stateful whatever the catalog says. *Presence means present and
+   meaningfully set* — `null`, `""`, `[]` and `{}` are not evidence; `false` and
+   `0` are, because the attribute existing at all is the schema signal. Evidence
+   may only raise: its absence implies nothing, never "stateless".
+2. **The embedded catalog** — [`catalog/terraform/aws.yaml`](catalog/terraform/aws.yaml),
+   compiled into the binary.
+3. **User `terraform_types`** in `.reversibility.yml` — classify an unknown type,
+   or tighten a known one. Never weaken; weakening is a configuration error, and
+   the path for accepting a known risk is a waiver, which carries a reason and an
+   expiry.
+4. Nothing matched, so nothing is assumed → `TF010`/UNKNOWN → **F**.
+
+**The type name is never matched.** `aws_db_subnet_group` contains "db" and holds
+nothing. A regex over type names would be a classification nobody could audit.
+
+### The catalog
+
+**92 AWS resource types out of roughly 1,400** — 48 stateful, 44 stateless. The
+raw count and the honest denominator are both published, because a project that
+knows its own limits reads better than one quoting a flattering ratio. The
+stateless half is load-bearing rather than filler: an unclassified deleted type
+grades F, so the network, IAM, load-balancing and compute entries are what stand
+between a new user and an immediate failing gate.
+
+```bash
+revctl catalog show    # version, digest, and coverage of the embedded catalog
+```
+
+When a plan destroys a type the catalog does not know, the certificate prints
+**one** `.reversibility.yml` snippet and **one** pre-filled issue link covering
+every unknown type at once — one, because six paste operations is where somebody
+switches the gate off instead. The suggested class is always `STATEFUL`: that is
+the fail-closed direction, and a snippet that guessed `STATELESS` would be a
+snippet that talked the user into the answer they wanted.
+
+**Strictly no telemetry, and `check` never fetches.** Nothing in this codebase
+sends anything anywhere. The catalog is compiled in and stays fully functional
+offline for the lifetime of the binary — not on a cache miss, not when the catalog
+is old, not ever. The issue link is a URL printed into a certificate the reader is
+already looking at; a human chooses to open it.
+
+`revctl catalog scan` is a **maintainer** tool. It shells out to `terraform
+providers schema -json` to propose candidates, names what to install when
+terraform is absent, and nothing in the check path depends on it.
+
+The certificate carries `catalogVersion` — present only when a plan was actually
+analyzed — and the catalog digest is mixed into `inputDigest`, so a verdict is
+attributable to the catalog that produced it.
+
+> **`TF003` is retired and its number is never reused.** `prevent_destroy` is a
+> `lifecycle` meta-argument, which the JSON configuration representation does not
+> carry — and the signal is self-erasing, since a plan containing a delete already
+> proves `prevent_destroy` is not set. `TF001`/`TF002` catch the destroy itself,
+> at the moment it matters. A retired ID with its reason tells a contributor the
+> case was considered; a gap in the sequence reads as an oversight.
+
+The authoritative table is [`docs/RULES.md` §5](docs/RULES.md#5-terraform--tf001-to-tf010).
 
 ---
 
@@ -199,10 +455,62 @@ no column values, no Secrets, no connection string. That is tested, not asserted
 CI seeds a throwaway database with passwords and API keys, runs the collector, and
 fails if any of them appears in the output.
 
-**Context never improves a grade — or changes one at all.** It writes one optional
-field on a finding and touches nothing else. A property test runs every fixture
-twice, with and without a snapshot sized to make any size-sensitive rule fire, and
-asserts the grades are identical.
+**Context is a one-way ratchet: it may make a verdict worse, never better.** A
+classification whose severity would *drop* is discarded rather than applied, and
+the lock hazard is restored unconditionally — context describes how long a lock is
+held, never which lock is taken. A property test runs every fixture with and
+without a snapshot sized to trip every band and asserts the graded-with-context
+result is **never better** than the one without.
+
+The vocabulary, because it has been ambiguous: *lowering* a grade means making it
+worse (A → B → C → F) and is permitted; *raising* one means making it better and
+never happens. **A missing snapshot, a stale one, or a fingerprint that does not
+match is treated as absent — never as a signal that the change is safe.** The
+absence of evidence of a problem is not evidence of safety, so a small table does
+not turn a C into a B.
+
+Exactly two things reach a verdict from a snapshot:
+
+**`WILL_FAIL` — the migration will not apply at all.** A new verdict, distinct
+from `IRREVERSIBLE`: one means you cannot undo the change, the other means it will
+not happen, so the fix belongs in the migration rather than in the rollback plan.
+A reader who confuses them fixes the wrong thing, which is why it is reported
+apart from `IRREVERSIBLE` in the blockers, the undo plan, SARIF, and Markdown. It
+ranks above every verdict an analyzer can produce from source alone and always
+grades **F**. Today it is reached from one piece of evidence: `SET NOT NULL`
+against a column a snapshot shows contains nulls. Postgres validates every
+existing row and one violation aborts the statement, so this is a certainty rather
+than a risk — and no lock duration is estimated for it, because the statement
+never gets far enough to hold one.
+
+**Lock duration bands.** With a snapshot, a lock hazard of `FULL_SCAN` or heavier
+is bucketed by how long it is expected to be held:
+
+| Band | Duration | Effect on the grade |
+| --- | --- | --- |
+| `NEGLIGIBLE` | under 1s | none |
+| `NOTICEABLE` | 1s – 30s | none |
+| `DISRUPTIVE` | 30s – 5m | no better than **B** |
+| `OUTAGE` | over 5m | no better than **C** |
+
+A band exists only where duration actually scales with size. `PG014` takes an
+`EXCLUSIVE` lock, but dropping an index is not slower for being large and no rate
+is defined for it — applying a scan rate there would cap a grade at C for an
+operation that finishes in milliseconds.
+
+**A waiver cannot cover `WILL_FAIL`**, the same as `UNKNOWN`: a waiver accepts a
+trade-off, and there is no trade-off in a statement that cannot apply. Waiving it
+would document a bug rather than accept one, and the pipeline it unblocked would
+fail at deploy instead of at review.
+
+**Stale context is used and flagged, never discarded** — it lands in
+`contextWarnings`. Falling back to none would make the certificate quietly less
+informative exactly when somebody stopped refreshing the snapshot. A **missing**
+snapshot file is not an error at all; one that exists and cannot be read is exit 2.
+
+**Estimates always carry a `~`.** The throughput constants are hard-coded and
+deliberately not configurable: a knob would let somebody tune the estimate until
+it was reassuring, and a number tuned to reassure is worse than no number.
 
 Full detail, including required grants and how to run it on a schedule:
 [`docs/PRODUCTION-CONTEXT.md`](docs/PRODUCTION-CONTEXT.md). Every formula behind
@@ -234,6 +542,10 @@ waivers:
 overrides:                 # tighten only — never loosen
   - rule: K8S008
     severity: IRREVERSIBLE
+
+terraform_types:           # classify a resource type the catalog does not know
+  - type: google_sql_database_instance
+    class: STATEFUL        # STATEFUL or STATELESS; never weakens the catalog
 ```
 
 **A waiver never improves the measurement.** The certificate keeps two numbers:
@@ -259,6 +571,10 @@ The rules, all enforced:
   risk nobody has characterised is not a decision anyone is in a position to make.
 - `overrides` may only make a rule stricter. One that weakens a finding is a
   configuration error.
+- `terraform_types` classifies a resource type the embedded catalog does not
+  carry, or tightens one it does. It may **never** weaken a catalog entry — that
+  path is a waiver, which carries a reason and an expiry. See
+  [Terraform plans](#terraform-plans).
 - The resolved policy is hashed into `inputDigest` and reported as
   `policyDigest`, so a verdict is attributable to its configuration. Reformatting
   the file or editing a comment does not change either.
@@ -282,7 +598,7 @@ how you see what the gate says without it.
 | --- | --- |
 | PostgreSQL `.sql` migrations | 27 classified rules (PG001–PG027) over a real PostgreSQL AST — dropped tables and columns, truncation, `CASCADE`, narrowing type changes, unqualified `DELETE`/`UPDATE`, lock hazards, and down-migration presence |
 | Rendered Kubernetes `.yaml` | 15 classified rules (K8S001–K8S015) over a structural diff — volume claim templates, selector mutations, PVC and storage-class changes, digest-pinned vs. floating images, removed probes, and workload strategy changes |
-| Terraform `*.tfplan.json` | 10 classified rules (TF001–TF010) over `terraform show -json`, backed by a catalog of 92 AWS resource types. Only destruction is classified — a create or an in-place update has a reverse by construction. **State files are never read**: they hold credentials in plaintext |
+| Terraform `*.tfplan.json` | **9 active rules** (`TF001`–`TF010`, of which `TF003` is retired and never reused) over `terraform show -json`, backed by an embedded catalog of 92 AWS resource types. Only destruction is classified — a create or an in-place update has a reverse by construction. **State files are never read**: they hold credentials in plaintext. See [Terraform plans](#terraform-plans) |
 
 The full, authoritative rule tables live in [`docs/RULES.md`](docs/RULES.md).
 They are the specification, not documentation of the code — the code is written
@@ -293,9 +609,19 @@ to match them.
 | Grade | Meaning | AI merge gate |
 | --- | --- | --- |
 | **A** | Fully reversible, no significant lock hazard, down migration present and valid | ✅ PASS |
-| **B** | One or two costly-to-reverse changes, or a lock heavier than SHORT | ❌ FAIL |
-| **C** | Three or more costly changes, or a missing/unparseable down migration | ❌ FAIL |
-| **F** | Irreversible data loss, an unknown construct, or an analyzer failure | ❌ FAIL |
+| **B** | One or two costly-to-reverse changes, a lock heavier than SHORT, or a `DISRUPTIVE` lock band | ❌ FAIL |
+| **C** | Three or more costly changes, a missing/unparseable down migration, or an `OUTAGE` lock band | ❌ FAIL |
+| **F** | Irreversible data loss, a change that **will not apply**, an unknown construct, or an analyzer failure | ❌ FAIL |
+
+The five verdicts a finding can carry, in severity order:
+
+```
+REVERSIBLE  <  COSTLY  <  UNKNOWN  <  IRREVERSIBLE  <  WILL_FAIL
+```
+
+`UNKNOWN` and `WILL_FAIL` both grade **F**, and for different reasons: one is a
+change nobody understood, the other is a change that cannot succeed. Neither can
+be covered by a waiver.
 
 ---
 
@@ -311,6 +637,7 @@ to match it, and where the two disagree, the code is the bug.
 | [§2 Kubernetes](docs/RULES.md#2-kubernetes--k8s001-to-k8s015) | K8S001–K8S015: volume claim templates, selector immutability, PVC and storage-class changes, digest pinning, dangling config references |
 | [§3 Scoring](docs/RULES.md#3-scoring) | how findings become A/B/C/F, how the undo plan is assembled, and the determinism requirement |
 | [§4 Owner rulings](docs/RULES.md#4-owner-rulings) | the decisions that resolved genuine ambiguities in the tables above |
+| [§5 Terraform](docs/RULES.md#5-terraform--tf001-to-tf010) | TF001–TF010: the destruction discriminator, the classification layers, the closed list `TF004` fires on, and why `TF003` is retired |
 
 Two rules govern changing any of it: **a rule with no fixture does not exist**,
 and **no code path may turn an error, a panic, or an unknown into a passing
@@ -348,9 +675,12 @@ them.
 
 ### GitHub Action
 
-The packaged form of `revctl`. It downloads the released binary for the runner it
-is on, verifies its checksum, grades the change, posts the certificate, annotates
-the diff, and fails the job when the grade is below `gate`.
+**A composite action**, not a Docker action — see [This is a composite action,
+not a Docker action](#this-is-a-composite-action-not-a-docker-action). It
+downloads the released binary for the runner it is on, **verifies its SHA-256
+against the release's `checksums.txt`**, grades the change, posts the certificate,
+annotates the diff, and fails the job when the grade is below `gate`. It runs on
+Linux, macOS, and Windows runners, and needs no toolchain on any of them.
 
 ```yaml
 - uses: VIKOIT/reversibility-engine@v1
@@ -372,12 +702,19 @@ the diff, and fails the job when the grade is below `gate`.
 | `sarif-upload` | `false` | Upload findings to code scanning. Needs `security-events: write`. |
 | `exclude` | `.github/** action.yml` | Pathspecs to skip, applied on top of `path`. |
 | `fail-on-gate` | `true` | Fail the job when the grade is below `gate`. |
-| `version` | the action's own ref | Release of `revctl` to run. Pin it for a reproducible build. |
+| `version` | the action's own ref | Release of `revctl` to run. Pin a full version for a reproducible build **and** for the download to be cached — `latest` is deliberately never cached. A major-only ref such as `@v1` has no release of its own, so it resolves to the latest release. |
+| `binary` | — | Path to an existing `revctl`, skipping the download. It exists so this repository can test the action against an unreleased build; consumers have no reason to set it. |
 | `github-token` | `${{ github.token }}` | Reads the pull request and posts the comment. |
-| `config` | — | Reserved for the policy file. Setting it is currently an error, not a no-op. |
+| `config` | — | **Setting this is an error, not a no-op.** Naming a policy file explicitly is not wired up yet, and an input read by nothing would leave a user believing their waivers applied. A `.reversibility.yml` at the repository root **is** picked up regardless — the action does not disable discovery. |
 
 **Outputs:** `grade`, `gate-status`, `findings-count`, and `certificate-path`.
 Findings are also emitted as annotations, so they appear inline on the diff.
+
+**The verdict is read back out of the JSON certificate, never re-derived in
+shell.** A second definition of the grade is a second chance to get it wrong in
+the permissive direction. `jq` is checked for up front, because a runner lacking
+it would otherwise yield an empty grade read from nowhere — the one shape of
+failure that can look like a pass.
 
 **Narrow `path` to where your migrations and manifests actually live.** The
 default claims every `.sql` and `.yaml` in the repository, and the Kubernetes
@@ -390,12 +727,13 @@ A run that could not complete fails the job even with `fail-on-gate: false`. A
 broken analysis is not a passing one.
 
 An image is published to `ghcr.io/vikoit/reversibility-engine`, so `revctl` can
-be run outside Actions without installing anything:
+be run outside Actions without installing anything — including on an Intel Mac,
+which no longer receives a prebuilt binary:
 
 ```bash
 docker run --rm -v "$PWD:/repo" -w /repo \
   --entrypoint /usr/local/bin/revctl \
-  ghcr.io/vikoit/reversibility-engine:1.1.1 check ./migrations
+  ghcr.io/vikoit/reversibility-engine:1.1.2 check ./migrations
 ```
 
 **Immutable version tags only, and name the entrypoint.** There is deliberately
@@ -408,6 +746,8 @@ never silently redefine what your command runs.
 
 ### CLI — `revctl`
 
+Four commands: `check`, `snapshot`, `catalog`, and `version`.
+
 ```bash
 # Grade a directory of migrations. Every file is treated as newly added,
 # which is the shape of a migration pull request.
@@ -419,12 +759,33 @@ revctl check --before ./k8s/base ./k8s/head
 
 # Compare two git refs instead of two directories. The comparison runs against
 # the merge base — the same range a pull request shows — and content is read
-# from the refs, so uncommitted edits cannot change the certificate.
+# from the object database, so uncommitted edits cannot change the certificate.
 revctl check --base origin/main
 
-# Any ref works, --head defaults to HEAD, and a path argument scopes the
-# comparison to a subtree.
+# Any ref works, --head defaults to HEAD, and a path argument acts as a git
+# pathspec scoping the comparison to a subtree.
 revctl check --base v1.2.0 --head HEAD ./migrations
+
+# Terraform: *.tfplan.json is claimed by convention, or name a plan explicitly.
+revctl check ./infra
+revctl check --terraform-plan ./build/plan-output.json .
+
+# Policy: one is discovered by walking up from the analysis path. Name one
+# explicitly, or run without any to see what the gate says unconfigured.
+revctl check ./migrations --config ops/.reversibility.yml
+revctl check ./migrations --no-config
+
+# Production context, collected beforehand and read from a file. The check
+# itself never connects to anything.
+revctl snapshot --dsn "$REPLICA_DSN" --out .reversibility/pg.json
+revctl snapshot --kube-context prod --out .reversibility/k8s.json
+revctl check ./migrations --context .reversibility/pg.json
+
+# The embedded Terraform catalog: version, digest, coverage.
+revctl catalog show
+
+# The certificate schema version this build emits.
+revctl version
 
 # Machine-readable output for a pipeline gate.
 revctl check ./migrations --format json --gate
@@ -433,10 +794,12 @@ revctl check ./migrations --format json --gate
 revctl check ./migrations --format sarif --output results.sarif
 ```
 
-Exit codes are the contract with CI: `0` success, `1` the gate was not met, `2`
-the run did not complete. A pipeline can therefore distinguish *"the change is
+**Exit codes are the contract with CI: `0` success, `1` the gate was not met, `2`
+the run did not complete.** A pipeline can therefore distinguish *"the change is
 unsafe"* from *"the tool broke"* — conflating those is how a broken tool ends up
-ignored.
+ignored. **`revctl` with no arguments is exit 2**, not a friendly zero; see
+[Fail-closed by construction](#fail-closed-by-construction) for why that
+distinction is the most important one in the tool.
 
 ### GitHub App — `revsrv`
 
@@ -491,7 +854,8 @@ none.
   connects to a database or a cluster while grading. `revctl snapshot` closes part
   of the gap by collecting metadata beforehand — see
   [Production context](#production-context) — but a snapshot is a description of
-  the past, and the classification itself is still made from the source alone.
+  the past, and every classification other than `WILL_FAIL` and the lock duration
+  bands is still made from the source alone.
 - **Git resolution needs the base commit present.** `--base origin/main` compares
   two refs through the merge base, the same comparison a pull request shows — but
   a shallow CI checkout does not contain the base commit. Set `fetch-depth: 0` on
@@ -499,8 +863,21 @@ none.
 - **Rendered manifests only.** Helm charts and Kustomize overlays must be
   rendered before analysis (`helm template`, `kustomize build`).
 - **PostgreSQL only.** MySQL, SQL Server, and MongoDB are not supported.
-- **No Terraform.** Cloud resource deletion is a real reversibility problem and a
-  planned direction, not a current one.
+- **Terraform is plan-only, and AWS-only.** The analyzer reads
+  `terraform show -json` output; it does not parse `.tf` source, and it
+  deliberately never opens `terraform.tfstate`. The catalog covers **92 AWS
+  resource types of roughly 1,400** — every other provider, and every AWS type not
+  in it, grades `TF010`/UNKNOWN and therefore **F** on destruction. That is the
+  fail-closed answer rather than a silent pass; classify the type in
+  `.reversibility.yml` or contribute it upstream through the link the certificate
+  prints.
+- **Removing `prevent_destroy` cannot be detected**, which is why `TF003` is
+  retired. A plan carries no `lifecycle` block, and a plan containing a delete
+  already proves `prevent_destroy` is not set. `TF001`/`TF002` catch the destroy
+  itself.
+- **Prebuilt binaries do not cover Intel Macs.** `darwin/amd64` was dropped in
+  `v1.1.2`; build from source or use the Docker image. See
+  [Supported release targets](#supported-release-targets).
 - **Down migrations are checked structurally, not semantically.** The engine
   verifies that a down migration exists, parses, and roughly inverts the up. It
   cannot prove the two are true inverses.
@@ -522,23 +899,36 @@ none.
 ## Architecture
 
 ```
-cmd/revctl/          CLI entrypoint            cmd/revsrv/    GitHub App server
-        |                                              |
-        +--------------- internal/delivery/ -----------+     thin transport shell
-                                |
-                          internal/engine/                   orchestrator + scorer
-                                |
-        +-----------------------+-----------------------+
-        |                       |                       |
-internal/analyzer/       internal/provider/       internal/render/
-  postgres/ kubernetes/    fs / github / fake       json/markdown/sarif
-        |
-                          internal/domain/                   types only, stdlib only
+cmd/revctl/   CLI entrypoint                cmd/revsrv/   GitHub App server
+      |                                            |
+      +---------------- internal/delivery/ --------+      thin transport shell
+                              |
+                        internal/engine/                  orchestrator, scorer,
+                              |                           policy, enrichment
+      +------------+----------+----------+------------+
+      |            |                     |            |
+internal/     internal/             internal/     internal/
+ analyzer/     provider/             render/       policy/
+  postgres/     fs / git /            json /        .reversibility.yml
+  kubernetes/   github / fake         markdown /
+  terraform/                          sarif       internal/snapshot/
+   + catalog/terraform/aws.yaml                    collect/ — pgx and client-go
+     (embedded at build time)                      live here and nowhere else
+      |
+                        internal/domain/                  types only, stdlib only
 ```
 
 The core knows nothing about transport. Analyzers are pure functions over a
-changeset — no network, no disk, no git. Deleting `internal/delivery/` must not
-break a single engine test.
+changeset — **no network, no disk, no git** — and all I/O happens behind a
+`FileProvider`, implemented four times (`fs`, `git`, `github`, `fake`). Deleting
+`internal/delivery/` must not break a single engine test.
+
+The two live-collection drivers are quarantined **by a test, not by convention**:
+`internal/snapshot/architecture_test.go` fails the build if `internal/domain`,
+`internal/analyzer/...`, `internal/engine`, or `internal/snapshot` can reach `pgx`
+or `client-go` through any number of hops — and separately asserts that
+`internal/snapshot/collect` still can, so the guard cannot go vacuous. Analysis
+links none of it.
 
 ---
 
