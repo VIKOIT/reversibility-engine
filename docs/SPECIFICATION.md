@@ -1,4 +1,4 @@
-# docs/SPECIFICATION.md — Reversibility Engine
+# Specification — Reversibility Engine
 
 **This file is the contract.** A fresh session with zero memory of prior work must be able to
 read this file alone and continue correctly. If something here conflicts with your instinct,
@@ -82,7 +82,7 @@ N+1 until the owner approves.
 
 | Session | Deliverable | Status |
 | --- | --- | --- |
-| S0 | Repo bootstrap, docs/SPECIFICATION.md, Makefile, CI workflow, module layout with empty packages. No logic. | **DONE** |
+| S0 | Repo bootstrap, the specification, Makefile, CI workflow, module layout with empty packages. No logic. | **DONE** |
 | S1 | `internal/domain` types + full test fixtures in `testdata/` + failing tests. No analyzer logic. | **DONE** |
 | S2 | Postgres analyzer until all its fixtures pass. | **DONE** |
 | S3 | Kubernetes analyzer until all its fixtures pass. | **DONE** |
