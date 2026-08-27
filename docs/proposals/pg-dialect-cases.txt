@@ -1,0 +1,49 @@
+# The constructs probed for docs/proposals/pg-dialect-triage.md.
+# Run: scripts/probe-dialect.sh docs/proposals/pg-dialect-cases.txt
+# One statement per line. Lines starting with # are skipped.
+
+GRANT SELECT ON orders TO readonly;
+REVOKE SELECT ON orders FROM readonly;
+COMMENT ON TABLE orders IS 'customer orders';
+COMMENT ON COLUMN orders.status IS 'lifecycle state';
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE SCHEMA analytics;
+CREATE SEQUENCE order_number_seq;
+CREATE MATERIALIZED VIEW order_totals AS SELECT 1 AS n;
+DROP MATERIALIZED VIEW order_totals;
+REFRESH MATERIALIZED VIEW order_totals;
+CREATE FUNCTION touch() RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+CREATE TRIGGER t BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION touch();
+CREATE OR REPLACE FUNCTION touch() RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql;
+CREATE OR REPLACE VIEW v AS SELECT 1 AS n;
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY p ON orders USING (true);
+DROP POLICY p ON orders;
+CREATE ROLE reporting;
+DROP ROLE reporting;
+ALTER TABLE orders SET (fillfactor = 70);
+ALTER TABLE orders RESET (fillfactor);
+ALTER INDEX idx RENAME TO idx2;
+ALTER TABLE orders ALTER COLUMN status SET STATISTICS 500;
+CREATE UNIQUE INDEX CONCURRENTLY u ON orders (id);
+ALTER TABLE orders ADD CONSTRAINT u UNIQUE USING INDEX u;
+ALTER TABLE orders VALIDATE CONSTRAINT chk;
+ALTER TABLE orders SET UNLOGGED;
+ALTER TABLE orders SET LOGGED;
+ALTER TABLE orders OWNER TO app;
+ALTER SEQUENCE s OWNED BY orders.id;
+ALTER TYPE mood ADD VALUE 'excited';
+ALTER TABLE orders ATTACH PARTITION orders_2024 FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+ALTER TABLE orders DETACH PARTITION orders_2024;
+CREATE TABLE orders_2024 PARTITION OF orders FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+ANALYZE orders;
+VACUUM orders;
+REINDEX INDEX CONCURRENTLY idx;
+CLUSTER orders USING idx;
+INSERT INTO settings (k, v) VALUES ('a', 'b');
+SET statement_timeout = '5s';
+SET LOCAL lock_timeout = '3s';
+LOCK TABLE orders IN ACCESS EXCLUSIVE MODE;
+CREATE INDEX IF NOT EXISTS idx2 ON orders (status);
+ALTER TABLE orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY;
+ALTER TABLE orders ALTER COLUMN id DROP IDENTITY;
