@@ -34,6 +34,23 @@ move:
 
 ### Added
 
+**Four recurring shapes are now named principles rather than repeated reasoning.** Each had
+several rules quietly following it before it was written down, which is the trigger: a named
+principle settles the next twenty questions, where a rule settles one. `docs/SPECIFICATION.md` §2
+now carries an index of all of them, and each names its own deliberate exceptions — an unmarked
+exception is indistinguishable from a bug.
+
+| Principle | Settles |
+| --- | --- |
+| The overwrite principle | PG012, PG013, PG028, PG043, PG050, PG054, PG057. Exception: PG033. |
+| `CONCURRENTLY` changes the lock, never the verdict | Four rule pairs, and which of the two existing encodings to use next |
+| Creation and destruction are not mirrors | Five pairs where reading them as symmetric is wrong in the permissive direction. Exception: PG032. |
+| An undo step must be safe to run, not merely correct | PG028, PG029, and any inverse that destroys something on the way |
+
+The recovery-capability clause of the discriminator was also promoted out of the Terraform
+section: it governs PG052 and TF004 alike, and a clause that reached the same verdict by a
+different route in each analyzer would be two rules that happen to agree.
+
 **26 more PostgreSQL rules, PG034–PG059. The table went from 27 classified constructs to 59**,
 and of 45 constructs probed the number reaching `PG027`/UNKNOWN fell from 39 to 11.
 

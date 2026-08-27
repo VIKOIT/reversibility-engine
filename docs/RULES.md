@@ -200,6 +200,31 @@ says so on every finding. **PG033 is REVERSIBLE for a narrower reason**: overwri
 loses the previous text, but a comment is not an object and not a row. The overwrite principle
 that governs PG028 deliberately stops short of it.
 
+### `CONCURRENTLY` changes the lock and never the verdict
+
+> **`CONCURRENTLY` is a lock-hazard modifier, not a reversibility modifier.** A concurrent
+> statement does exactly what its blocking counterpart does; it takes longer and holds less. It
+> never changes what can be undone.
+
+Four pairs follow this, and none of them was written with the others in view:
+
+| Blocking | Concurrent | Verdict |
+| --- | --- | --- |
+| PG014 `DROP INDEX` — EXCLUSIVE | PG015 — NONE | COSTLY both |
+| PG023 `CREATE INDEX` — EXCLUSIVE | PG024 — NONE | REVERSIBLE both |
+| PG047 `REFRESH MATERIALIZED VIEW` — EXCLUSIVE | FULL_SCAN | REVERSIBLE both |
+| PG057 `DETACH PARTITION` — SHORT | NONE | COSTLY both |
+
+**The table encodes them two different ways and that is an inconsistency, not a distinction.**
+PG014/PG015 and PG023/PG024 are separate rule IDs; PG047 and PG057 are single IDs with a
+conditional lock. Both work. Neither can be changed retroactively, because rule IDs are never
+renumbered and consumers alert on them.
+
+**Going forward: one rule ID, conditional lock.** A reader looking up "can I undo a concurrent
+index drop" should not have to discover that the answer lives under a different number from the
+blocking form, when the answer is identical. The four existing rows stay as they are, and
+[`docs/RULES.md` §1](RULES.md#1-postgresql--pg001-to-pg059) says which encoding each uses.
+
 ### The overwrite principle
 
 > **A statement that overwrites state the migration does not record is COSTLY, not REVERSIBLE.**
@@ -212,6 +237,55 @@ because it is the weakest application of the rule.
 
 `REVERSIBLE` here means **the undo is writable from this changeset**, not merely that the
 database could theoretically be restored.
+
+### Creation and destruction are not mirrors
+
+> **A rule for creating something and a rule for destroying it are separate rules with
+> independent verdicts.** Creation adds where there was nothing, and its inverse is exact.
+> Destruction removes something whose definition or contents the changeset does not hold, and
+> its inverse is a reconstruction from evidence the engine does not have.
+
+The pairs, and the gap in each:
+
+| Create | Destroy | Why they differ |
+| --- | --- | --- |
+| PG025 `CREATE TABLE` — REVERSIBLE | PG001 `DROP TABLE` — IRREVERSIBLE | The rows. |
+| PG039 `CREATE EXTENSION` — REVERSIBLE | PG011 `DROP EXTENSION` — IRREVERSIBLE | The cascade to dependent objects. |
+| PG049 `CREATE POLICY` — REVERSIBLE | PG050 `DROP POLICY` — COSTLY | The policy expression. |
+| PG051 `ENABLE RLS` — REVERSIBLE | PG052 `DISABLE RLS` — IRREVERSIBLE | The protection, while it was off. |
+| PG042 `CREATE FUNCTION` — REVERSIBLE | PG016 `DROP FUNCTION` — COSTLY | The body. |
+
+Reading these as a symmetric pair is the most natural mistake available here, and it is always
+wrong in the permissive direction: it argues *"we can just put it back"* about the one case where
+the changeset does not say what to put back. **The asymmetry is the rule, not the exception.**
+
+The one genuine exception is PG032, where `GRANT` and `REVOKE` are both REVERSIBLE — because the
+opposite statement really does restore the prior state exactly, which is the test. It is marked
+here so a reader meets it as a considered exception rather than as a counter-example.
+
+### An undo step must be safe to run, not merely correct
+
+> **An undo step is a script an operator will paste under pressure.** A step that is a correct
+> inverse of the change and destructive to execute must say so instead of being emitted bare.
+
+Three rules turn on this, and it was learned from the first:
+
+- **PG028** `CREATE OR REPLACE VIEW` — `DROP VIEW` is the correct schema inverse of *creating* a
+  view and destroys one that existed before the migration. This shipped, graded **A**, and
+  printed the drop.
+- **PG029** `DROP MATERIALIZED VIEW` — the inverse names the object type the statement did not
+  operate on, and omits the `REFRESH` without which the object is empty.
+- Proposed for `CREATE TABLE ... AS SELECT` — the inverse destroys a snapshot the migration
+  produced, which is usually the backup a later rollback depends on.
+
+Where this applies, the emitted step is prose naming what has to be confirmed, and any
+destructive statement in it is **commented out**. A plan that is pasted whole then warns instead
+of deleting.
+
+Note what this is not: it is not a reason to omit the undo. [`§3`](#undoplan) already says an
+UNKNOWN finding replaces the whole plan, because listing steps for everything else would claim a
+completeness the plan does not have. This is the narrower case where a step exists, is correct,
+and needs a sentence beside it.
 
 ### PG052 and the third clause
 

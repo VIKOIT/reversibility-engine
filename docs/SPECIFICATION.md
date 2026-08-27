@@ -120,6 +120,33 @@ CONFLICT DO UPDATE` is an `InsertStmt` that overwrites rows, and a `SELECT` call
 function can do anything the function does. A future contributor will try to simplify these
 cases into one. The rationale on each finding says why they are separate.
 
+### The named principles, and why naming them is the work
+
+**A named principle stops the next twenty questions before they are asked; a rule answers one.**
+Every entry below started as several rules quietly following the same shape, and was named only
+after the shape recurred — which is the trigger to look for, and the reason this index exists
+rather than the principles living only where they were first needed.
+
+| Principle | Where | What it settles |
+| --- | --- | --- |
+| Fail-closed: unknown means unsafe | §2 above | Any construct, error, or panic the engine does not understand |
+| A gate must prove it ran | §2 above | Exit codes over absent output |
+| No passing grade for a changeset it did not analyze | §2 above | `Outcome`, `N/A`, `NOT_APPLICABLE` |
+| Classification is by effect, never by statement type | §2 above | Data-modifying CTEs, `setval`, `ON CONFLICT DO UPDATE` |
+| The grade describes the evidence; the gate decides what to do about it | §2 below | Waivers, coverage, policy ignores |
+| Any field that constrains the verdict appears in every rendered output | §2 above | `GradeCauses`, and what a certificate owes a reader |
+| Every classification has a table row | §13 | The D2 shape: code claiming a construct the table omits |
+| The overwrite principle | [`RULES.md` §1](RULES.md#the-overwrite-principle) | PG012, PG013, PG028, PG043, PG050, PG054, PG057 |
+| `CONCURRENTLY` changes the lock, never the verdict | [`RULES.md` §1](RULES.md#concurrently-changes-the-lock-and-never-the-verdict) | Four rule pairs, and which encoding to use next |
+| Creation and destruction are not mirrors | [`RULES.md` §1](RULES.md#creation-and-destruction-are-not-mirrors) | Five pairs where symmetry reads as safety |
+| An undo step must be safe to run, not merely correct | [`RULES.md` §1](RULES.md#an-undo-step-must-be-safe-to-run-not-merely-correct) | PG028, PG029, and any inverse that destroys on the way |
+| The third clause of the discriminator | [`RULES.md` §5](RULES.md#the-discriminator) | TF004 and PG052 — one principle, two analyzers |
+
+**Every named principle also names its exceptions.** PG033 is the deliberate exception to the
+overwrite principle; PG032 is the deliberate exception to create/destroy asymmetry. An unmarked
+exception is indistinguishable from a bug, and a principle with no exceptions listed is usually
+one that has not met a hard case yet.
+
 ### The pattern: the grade describes the evidence, the gate decides what to do about it
 
 **This is the project's answer to a whole class of question, and it has now been applied
