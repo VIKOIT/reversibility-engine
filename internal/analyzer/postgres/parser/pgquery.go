@@ -130,6 +130,15 @@ func convert(node *pg.Node, text string, line int) []Statement {
 		base.HasWhere = n.UpdateStmt.GetWhereClause() != nil
 		return []Statement{base}
 
+	case *pg.Node_SelectStmt:
+		// docs/SPECIFICATION.md §2: classification is by effect, never by statement type.
+		//
+		// A SelectStmt is not a read. It can carry a data-modifying CTE, which deletes or
+		// updates rows, and it can call a function with side effects. Both are classified by
+		// what they do; everything else stays UNRECOGNIZED, and no permissive default is
+		// added, because the generalisation that would justify one is the wrong one.
+		return []Statement{convertSelect(n.SelectStmt, base)}
+
 	case *pg.Node_AlterSeqStmt:
 		// Only RESTART is classified; any other ALTER SEQUENCE option is unlisted and must
 		// stay UNRECOGNIZED rather than borrow RESTART's verdict.
@@ -193,7 +202,13 @@ func convert(node *pg.Node, text string, line int) []Statement {
 		return []Statement{base}
 
 	case *pg.Node_CreateFunctionStmt:
-		base.Kind = KindCreateFunction
+		// Same distinction as CREATE OR REPLACE VIEW, for the same reason: the previous body is
+		// overwritten and this changeset does not record it.
+		if n.CreateFunctionStmt.GetReplace() {
+			base.Kind = KindReplaceFunction
+		} else {
+			base.Kind = KindCreateFunction
+		}
 		base.Object = lastName(n.CreateFunctionStmt.GetFuncname())
 		return []Statement{base}
 
@@ -218,6 +233,92 @@ func convert(node *pg.Node, text string, line int) []Statement {
 		base.Object = commentTargetName(n.CommentStmt)
 		return []Statement{base}
 
+	case *pg.Node_VariableSetStmt:
+		base.Kind = KindSetVariable
+		base.Object = n.VariableSetStmt.GetName()
+		return []Statement{base}
+
+	case *pg.Node_LockStmt:
+		base.Kind = KindLockTable
+		if rels := n.LockStmt.GetRelations(); len(rels) > 0 {
+			base.Relation = rels[0].GetRangeVar().GetRelname()
+		}
+		return []Statement{base}
+
+	case *pg.Node_VacuumStmt:
+		// One node covers ANALYZE, VACUUM and VACUUM FULL, and they are three different lock
+		// hazards. is_vacuumcmd separates ANALYZE from the rest; the FULL option separates a
+		// rewrite under ACCESS EXCLUSIVE from an ordinary vacuum that blocks nothing.
+		switch {
+		case !n.VacuumStmt.GetIsVacuumcmd():
+			base.Kind = KindAnalyze
+		case hasVacuumOption(n.VacuumStmt, "full"):
+			base.Kind = KindVacuumFull
+		default:
+			base.Kind = KindVacuum
+		}
+		if rels := n.VacuumStmt.GetRels(); len(rels) > 0 {
+			base.Relation = rels[0].GetVacuumRelation().GetRelation().GetRelname()
+		}
+		return []Statement{base}
+
+	case *pg.Node_CreateTableAsStmt:
+		// CREATE MATERIALIZED VIEW and CREATE TABLE ... AS share this node; objtype separates
+		// them. skipData is WITH NO DATA, which is the difference between scanning the sources
+		// and writing a catalog entry.
+		base.Relation = n.CreateTableAsStmt.GetInto().GetRel().GetRelname()
+
+		switch {
+		case n.CreateTableAsStmt.GetObjtype() != pg.ObjectType_OBJECT_MATVIEW:
+			// CREATE TABLE ... AS SELECT is not classified: it creates a table and copies rows
+			// in one statement, and no row in the table covers it. UNRECOGNIZED, so it fails
+			// closed rather than borrowing CREATE TABLE's verdict.
+			base.Kind = KindUnrecognized
+		case n.CreateTableAsStmt.GetInto().GetSkipData():
+			base.Kind = KindCreateMatViewNoData
+		default:
+			base.Kind = KindCreateMatView
+		}
+		return []Statement{base}
+
+	case *pg.Node_RefreshMatViewStmt:
+		if n.RefreshMatViewStmt.GetConcurrent() {
+			base.Kind = KindRefreshMatViewConcurr
+		} else {
+			base.Kind = KindRefreshMatView
+		}
+		base.Relation = n.RefreshMatViewStmt.GetRelation().GetRelname()
+		return []Statement{base}
+
+	case *pg.Node_AlterEnumStmt:
+		// Only ADD VALUE is classified. Renaming a value is a different statement with a
+		// different answer, and it stays UNRECOGNIZED rather than borrowing this verdict.
+		if n.AlterEnumStmt.GetOldVal() == "" {
+			base.Kind = KindAddEnumValue
+			base.Object = lastName(n.AlterEnumStmt.GetTypeName())
+			base.NewName = n.AlterEnumStmt.GetNewVal()
+		}
+		return []Statement{base}
+
+	case *pg.Node_CreatePolicyStmt:
+		base.Kind = KindCreatePolicy
+		base.Object = n.CreatePolicyStmt.GetPolicyName()
+		base.Relation = n.CreatePolicyStmt.GetTable().GetRelname()
+		return []Statement{base}
+
+	case *pg.Node_InsertStmt:
+		// ON CONFLICT DO UPDATE overwrites rows that already exist, so it is an UPDATE wearing
+		// an INSERT's syntax and is classified by that effect. DO NOTHING writes nothing on
+		// conflict and stays an ordinary insert.
+		base.Relation = n.InsertStmt.GetRelation().GetRelname()
+		if oc := n.InsertStmt.GetOnConflictClause(); oc != nil &&
+			oc.GetAction() == pg.OnConflictAction_ONCONFLICT_UPDATE {
+			base.Kind = KindUpsert
+		} else {
+			base.Kind = KindInsert
+		}
+		return []Statement{base}
+
 	default:
 		// Parsed cleanly, but the engine has no vocabulary for it. That is UNKNOWN, and
 		// UNKNOWN is not safe.
@@ -227,6 +328,122 @@ func convert(node *pg.Node, text string, line int) []Statement {
 
 // convertDrop maps the many things DROP can remove onto distinct kinds, because the rule table
 // grades DROP TABLE and DROP VIEW very differently.
+// sequenceResetFuncs are functions that move a sequence's position. They are the PG010 hazard
+// wearing a function call: the previous position is recorded nowhere and cannot be restored.
+var sequenceResetFuncs = map[string]bool{"setval": true}
+
+// convertSelect classifies a SELECT by what it does rather than by what it is.
+//
+// Three outcomes, in precedence order. A data-modifying CTE is the DML it contains, because the
+// rows it removes are as gone as any other DELETE's. A call to a sequence-moving function is
+// KindAlterSequenceRestart, because the effect is identical to ALTER SEQUENCE ... RESTART. And
+// anything else is UNRECOGNIZED, which grades UNKNOWN — the fail-closed default, deliberately
+// left in place.
+//
+// Precedence matters: a CTE that deletes rows outranks a setval in the same statement, because
+// the destroyed rows are the larger loss and a finding names one thing.
+func convertSelect(s *pg.SelectStmt, base Statement) Statement {
+	if dml := dataModifyingCTE(s.GetWithClause(), base); dml != nil {
+		return *dml
+	}
+
+	if name, ok := callsSideEffectingFunc(s); ok {
+		base.Kind = KindAlterSequenceRestart
+		base.Object = name
+		return base
+	}
+
+	return base
+}
+
+// dataModifyingCTE reports the DML hidden in a WITH clause, if there is one.
+//
+// PostgreSQL allows DELETE, UPDATE and INSERT inside a CTE, and the parse tree reports the whole
+// thing as a SelectStmt. Reading only the outer node is how a DELETE becomes invisible.
+func dataModifyingCTE(with *pg.WithClause, base Statement) *Statement {
+	if with == nil {
+		return nil
+	}
+
+	for _, cte := range with.GetCtes() {
+		query := cte.GetCommonTableExpr().GetCtequery()
+		if query == nil {
+			continue
+		}
+
+		switch n := query.Node.(type) {
+		case *pg.Node_DeleteStmt:
+			s := base
+			s.Kind = KindDelete
+			s.Relation = n.DeleteStmt.GetRelation().GetRelname()
+			s.HasWhere = n.DeleteStmt.GetWhereClause() != nil
+			s.InCTE = true
+			return &s
+
+		case *pg.Node_UpdateStmt:
+			s := base
+			s.Kind = KindUpdate
+			s.Relation = n.UpdateStmt.GetRelation().GetRelname()
+			s.HasWhere = n.UpdateStmt.GetWhereClause() != nil
+			s.InCTE = true
+			return &s
+
+		case *pg.Node_InsertStmt:
+			// Reported so the effect is named, and left UNRECOGNIZED so it fails closed:
+			// INSERT has no row in the table yet, and borrowing DELETE's verdict for it would
+			// be inventing a classification rather than reading one.
+			s := base
+			s.Relation = n.InsertStmt.GetRelation().GetRelname()
+			s.InCTE = true
+			return &s
+		}
+	}
+
+	return nil
+}
+
+// callsSideEffectingFunc reports a call to a function whose effect the table classifies.
+//
+// It walks the target list only. A setval buried in a WHERE clause or a subquery is not found,
+// and that is the honest limit of this check rather than a gap to paper over: what is not
+// recognised stays UNRECOGNIZED and grades UNKNOWN.
+func callsSideEffectingFunc(s *pg.SelectStmt) (string, bool) {
+	for _, target := range s.GetTargetList() {
+		call := target.GetResTarget().GetVal().GetFuncCall()
+		if call == nil {
+			continue
+		}
+		if name := lastName(call.GetFuncname()); sequenceResetFuncs[strings.ToLower(name)] {
+			return sequenceArgument(call), true
+		}
+	}
+	return "", false
+}
+
+// sequenceArgument names the sequence a setval moves, from its first argument.
+func sequenceArgument(call *pg.FuncCall) string {
+	for _, arg := range call.GetArgs() {
+		if s := arg.GetAConst().GetSval(); s != nil {
+			return s.GetSval()
+		}
+	}
+	return ""
+}
+
+// hasVacuumOption reports whether a VACUUM carries the named option, e.g. "full".
+//
+// Options are a name list rather than flags, so this is a lookup and not a bitmask. An option
+// this does not recognise leaves the statement an ordinary VACUUM, which is the conservative
+// answer for lock hazard: FULL is the only option that escalates it.
+func hasVacuumOption(v *pg.VacuumStmt, name string) bool {
+	for _, opt := range v.GetOptions() {
+		if strings.EqualFold(opt.GetDefElem().GetDefname(), name) {
+			return true
+		}
+	}
+	return false
+}
+
 // grantTargetName names what a GRANT or REVOKE applies to, for the finding text.
 //
 // Best effort by design: the privilege target can be a list, a whole schema, or every table in
@@ -285,6 +502,8 @@ func convertDrop(d *pg.DropStmt, base Statement) Statement {
 		base.Kind = KindDropSequence
 	case pg.ObjectType_OBJECT_EXTENSION:
 		base.Kind = KindDropExtension
+	case pg.ObjectType_OBJECT_POLICY:
+		base.Kind = KindDropPolicy
 	default:
 		base.Kind = KindUnrecognized
 	}
@@ -367,6 +586,25 @@ func convertAlterTable(a *pg.AlterTableStmt, base Statement) []Statement {
 		case pg.AlterTableType_AT_ValidateConstraint:
 			s.Kind = KindValidateConstraint
 
+		case pg.AlterTableType_AT_EnableRowSecurity:
+			s.Kind = KindEnableRLS
+
+		case pg.AlterTableType_AT_DisableRowSecurity:
+			s.Kind = KindDisableRLS
+
+		case pg.AlterTableType_AT_SetRelOptions, pg.AlterTableType_AT_ResetRelOptions:
+			s.Kind = KindSetRelOptions
+
+		case pg.AlterTableType_AT_SetLogged, pg.AlterTableType_AT_SetUnLogged:
+			s.Kind = KindSetLogged
+
+		case pg.AlterTableType_AT_AttachPartition:
+			s.Kind = KindAttachPartition
+
+		case pg.AlterTableType_AT_DetachPartition:
+			s.Kind = KindDetachPartition
+			s.Concurrent = cmd.GetDef().GetPartitionCmd().GetConcurrent()
+
 		default:
 			s.Kind = KindUnrecognized
 		}
@@ -387,6 +625,9 @@ func convertRename(r *pg.RenameStmt, base Statement) Statement {
 	case pg.ObjectType_OBJECT_COLUMN:
 		base.Kind = KindRenameColumn
 		base.Object = r.GetSubname()
+	case pg.ObjectType_OBJECT_INDEX:
+		base.Kind = KindRenameIndex
+		base.Object = base.Relation
 	default:
 		base.Kind = KindUnrecognized
 	}

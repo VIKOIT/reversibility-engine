@@ -1,0 +1,7 @@
+{
+  "rule": "PG042",
+  "note": "Creating a function where none existed. The OR REPLACE form is PG043 and is COSTLY, because it overwrites a body the changeset does not record.",
+  "findings": [
+    {"ruleId":"PG042","file":"migrations/0001_create_function.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

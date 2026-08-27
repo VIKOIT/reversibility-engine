@@ -1,0 +1,7 @@
+{
+  "rule": "PG044",
+  "note": "Adds behaviour and removes none. SHORT rather than NONE because CREATE TRIGGER takes SHARE ROW EXCLUSIVE on the table, which blocks concurrent writes.",
+  "findings": [
+    {"ruleId":"PG044","file":"migrations/0001_create_trigger.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

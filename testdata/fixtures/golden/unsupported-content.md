@@ -35,4 +35,4 @@ An autonomous agent will not merge this change: the AI merge gate requires full 
 
 ---
 
-<sub>Reversibility Engine · schema 1.7.0 · input digest `83afa88844d37b2c8f6b498136948560b925a9b1343756c3c2a9e2ce5cb72695`</sub>
+<sub>Reversibility Engine · schema 1.5.0 · input digest `83afa88844d37b2c8f6b498136948560b925a9b1343756c3c2a9e2ce5cb72695`</sub>

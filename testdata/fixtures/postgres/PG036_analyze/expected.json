@@ -1,0 +1,7 @@
+{
+  "rule": "PG036",
+  "note": "Planner statistics only. No row, column, or constraint changes, and nothing blocks.",
+  "findings": [
+    {"ruleId":"PG036","file":"migrations/0001_analyze.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

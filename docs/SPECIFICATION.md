@@ -87,6 +87,39 @@ The general form, which is the part a future session should apply to a case not 
 > missing a value — and adding a branch to the permissive answer will not fix it, because the
 > next path to that verdict will not have the branch.
 
+### Classification is by effect, never by statement type
+
+> **Classification is by effect, never by statement type. A construct is classified by what it
+> does to data and schema, not by the node the parser returns. Where a statement type can carry
+> a destructive effect — data-modifying CTEs, function calls with side effects, dynamic SQL — it
+> is classified by that effect or it is UNKNOWN.**
+
+This one was found before it shipped, which is the only reason it is written here rather than in
+an incident note. The dialect triage was about to propose a rule that looks obviously harmless —
+*a `SELECT` changes nothing, so classify it REVERSIBLE* — and `SELECT` is a **node type, not an
+effect**:
+
+| Statement | The node | What it does |
+| --- | --- | --- |
+| `SELECT count(*) FROM orders` | `SelectStmt` | nothing |
+| `SELECT setval('orders_id_seq', 1000)` | `SelectStmt` | resets a sequence — the PG010 hazard |
+| `WITH d AS (DELETE FROM orders WHERE id < 5 RETURNING *) SELECT count(*) FROM d` | `SelectStmt` | **deletes rows** |
+
+Both destructive rows graded F before the rule was proposed, and both graded F **by accident**:
+they were unrecognised, and unrecognised is UNKNOWN. A rule keyed on the node type would have
+converted two accidental correct answers into two deliberate wrong ones, and it would have been
+merged, because on its face it says only that reading data is safe.
+
+**Accident is not a safety property.** The two cases are now classified by their effect — see
+[`docs/RULES.md` §1](RULES.md#1-postgresql--pg001-to-pg059) — and every other `SELECT` stays
+UNKNOWN. **No permissive default was added**, because the generalisation that would justify one
+is exactly the generalisation that is wrong.
+
+The same trap exists wherever a node can carry an effect it is not named for: `INSERT ... ON
+CONFLICT DO UPDATE` is an `InsertStmt` that overwrites rows, and a `SELECT` calling a volatile
+function can do anything the function does. A future contributor will try to simplify these
+cases into one. The rationale on each finding says why they are separate.
+
 ### The pattern: the grade describes the evidence, the gate decides what to do about it
 
 **This is the project's answer to a whole class of question, and it has now been applied
@@ -336,7 +369,7 @@ type Finding struct {
 }
 
 type ReversibilityCertificate struct {
-    SchemaVersion  string    // "1.7.0" — bump on any breaking field change
+    SchemaVersion  string    // "1.5.0" — bump on any breaking field change
     Grade          Grade     // the measurement; nothing may move it. N/A when nothing was analyzed
     EffectiveGrade Grade     // Grade minus waived findings; what CI compares (S10)
     AIGateStatus   string    // PASS | FAIL | NOT_APPLICABLE. PASS needs Grade A AND Coverage FULL
@@ -367,9 +400,17 @@ here.** It lives in exactly one place, `domain.SchemaVersion`, re-exported as
 | `1.2.0` | `Finding.Context`, `ContextWarnings` | S11 |
 | `1.3.0` | `WILL_FAIL` — a new value in an existing enum | S11-patch |
 | `1.4.0` | `CatalogVersion` | S12 |
-| `1.5.0` | `Outcome`; `Grade` gained `N/A`; `AIGateStatus` gained `NOT_APPLICABLE` | P0 |
-| `1.6.0` | `Coverage`, `UnanalyzedFiles`; a PASS now requires full coverage | P0 follow-up |
-| `1.7.0` | `IgnoredByPolicy`, `GradeCauses`; a PASS now requires no policy-ignored candidate | P0 follow-up |
+| `1.5.0` | `Outcome`, `Coverage`, `UnanalyzedFiles`, `IgnoredByPolicy`, `GradeCauses`; `Grade` gained `N/A`; `AIGateStatus` gained `NOT_APPLICABLE`, and a `PASS` now also requires full coverage and no policy-ignored candidate | P0 and its follow-ups |
+
+**`1.5.0` covers four separate changes and it is deliberately one version.** They were developed
+as 1.5.0, 1.6.0 and 1.7.0, and collapsed before release because no consumer ever saw the
+intermediates. Three version numbers that never meant anything outside this repository would
+read, from a changelog, as three schemas a consumer might encounter.
+
+The rule this settles, because it will come up again: **the honesty requirement applies to
+versions a consumer can observe. An unreleased intermediate is a working note, not a promise.**
+Once a version ships, it is frozen and the next change bumps.
+
 
 Two of these warrant attention rather than a footnote, and they are the same kind of bump: a
 consumer switching exhaustively on an enum gained a case it had not seen. `1.3.0` added
@@ -430,7 +471,7 @@ contributors who are not working through this file, so they were given a documen
 
 | Was | Now |
 | --- | --- |
-| §9 AUTHORITATIVE Classification — PostgreSQL | [`docs/RULES.md` §1](RULES.md#1-postgresql--pg001-to-pg033) |
+| §9 AUTHORITATIVE Classification — PostgreSQL | [`docs/RULES.md` §1](RULES.md#1-postgresql--pg001-to-pg059) |
 | §10 AUTHORITATIVE Classification — Kubernetes | [`docs/RULES.md` §2](RULES.md#2-kubernetes--k8s001-to-k8s015) |
 | §11 AUTHORITATIVE Scoring | [`docs/RULES.md` §3](RULES.md#3-scoring) |
 | §15 Owner rulings | [`docs/RULES.md` §4](RULES.md#4-owner-rulings) |
@@ -960,7 +1001,7 @@ what stand between a new user and an immediate failing gate.
 ## 13. Testing rules
 
 - **Before implementing an analyzer, write its fixtures and failing tests first.**
-- **One fixture pair per rule ID** — all 33 Postgres rules, all 15 Kubernetes rules, and all
+- **One fixture pair per rule ID** — all 59 Postgres rules, all 15 Kubernetes rules, and all
   9 active Terraform rules. **A rule with no fixture does not exist.**
   The one exception is a **retired** ID, declared in `internal/fixture/table_test.go`, which
   has no fixture and is never reused or renumbered. `TF003` is the only one; see
@@ -1113,7 +1154,7 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    leaves nothing to undo, which is a fact about the transaction rather than a presentation
    choice.
 7. ~~**Partial coverage — a changeset the engine analyzed only part of.**~~ **RESOLVED by the
-   owner: a two-axis certificate.** Schema `1.6.0`.
+   owner: a two-axis certificate.** Schema `1.5.0`.
 
    Coverage is a fact about the changeset, not a penalty, and it is not folded into the grade.
    The certificate carries `Coverage: FULL | PARTIAL` and `UnanalyzedFiles`, each with the
@@ -1145,7 +1186,7 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    already loose and is now wrong, and it was corrected in the same change: an agent reads the
    certificate, never an exit status.
 8. ~~**Does a policy `ignore:` count against coverage?**~~ **RESOLVED by the owner: no, and it
-   closes the gate instead.** Schema `1.7.0`.
+   closes the gate instead.** Schema `1.5.0`.
 
    An ignore is a human decision, exactly like a waiver, so it follows the waiver pattern rather
    than the coverage pattern:

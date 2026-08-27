@@ -221,11 +221,11 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 
 	// Downstream merge gates pin this. A change here is a deliberate, breaking act.
 	//
-	// 1.6.0 added Coverage and UnanalyzedFiles and narrowed the gate: PASS requires grade A and
+	// 1.5.0 added Coverage and UnanalyzedFiles and narrowed the gate: PASS requires grade A and
 	// full coverage. A consumer reading aiGateStatus is correct without changes; one that
 	// re-derived the gate from the grade alone is now wrong, which is the reason for the bump.
-	if certificate.SchemaVersion != "1.7.0" {
-		t.Errorf("SchemaVersion = %q, want 1.7.0", certificate.SchemaVersion)
+	if certificate.SchemaVersion != "1.5.0" {
+		t.Errorf("SchemaVersion = %q, want 1.5.0", certificate.SchemaVersion)
 	}
 }
 

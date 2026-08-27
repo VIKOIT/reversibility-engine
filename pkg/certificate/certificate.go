@@ -54,7 +54,7 @@ const (
 	GateNotApplicable GateStatus = "NOT_APPLICABLE"
 )
 
-// Coverage is how much of the changeset the engine actually read. Added in schema 1.6.0.
+// Coverage is how much of the changeset the engine actually read. Added in schema 1.5.0.
 //
 // It is a second axis, not a modifier of the grade. PARTIAL never changes Grade — a file the
 // engine cannot parse is not evidence that the change is unsafe. It changes only the gate:
@@ -72,7 +72,7 @@ const (
 	CoveragePartial Coverage = "PARTIAL"
 )
 
-// UnanalyzedFile is one file the engine could not read, and the reason. Added in schema 1.6.0.
+// UnanalyzedFile is one file the engine could not read, and the reason. Added in schema 1.5.0.
 type UnanalyzedFile struct {
 	Path string `json:"path"`
 
@@ -255,7 +255,7 @@ type Certificate struct {
 	UnanalyzedFiles []UnanalyzedFile `json:"unanalyzedFiles"`
 
 	// IgnoredByPolicy names every candidate file a .reversibility.yml excluded. Added in schema
-	// 1.7.0.
+	// 1.5.0.
 	//
 	// These do not count against Coverage — the engine could have read them and was told not to
 	// — but they do close the merge gate. An ignore is a human accepting a risk, and an agent
@@ -301,7 +301,7 @@ type Certificate struct {
 	Blockers []string `json:"blockers"`
 
 	// GradeCauses explains the grade: the assignment, then every cap that lowered it. Added in
-	// schema 1.7.0. Never empty for a graded certificate — an A says that nothing capped it.
+	// schema 1.5.0. Never empty for a graded certificate — an A says that nothing capped it.
 	GradeCauses []string `json:"gradeCauses"`
 
 	DownMigrations []DownMigrationStatus `json:"downMigrations"`
@@ -322,7 +322,7 @@ func (c Certificate) Assessed() bool { return c.Outcome == OutcomeAnalyzed }
 
 // FullyCovered reports whether the engine read every file it could have.
 //
-// False for a certificate with no coverage field at all, which is what a pre-1.6.0 producer
+// False for a certificate with no coverage field at all, which is what a pre-1.5.0 producer
 // emits: an unknown coverage is not a full one.
 func (c Certificate) FullyCovered() bool { return c.Coverage == CoverageFull }
 

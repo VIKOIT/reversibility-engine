@@ -1,0 +1,9 @@
+{
+  "rule": "EFFECT001",
+  "note": "CLASSIFICATION IS BY EFFECT, NEVER BY STATEMENT TYPE (docs/SPECIFICATION.md §2). All three statements are SelectStmt nodes. The first deletes rows through a data-modifying CTE and is PG009. The second moves a sequence through setval() and is PG010. Only the third is actually a read, and it stays PG027/UNKNOWN -- no permissive default was added, because the generalisation that would justify one is exactly the generalisation that is wrong. If this fixture ever grades the first two REVERSIBLE, a rule keyed on the node type has been added and the product is broken.",
+  "findings": [
+    {"ruleId":"PG009","file":"migrations/0001_hidden_effects.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"SHORT","wantUndoStep":false},
+    {"ruleId":"PG010","file":"migrations/0001_hidden_effects.up.sql","line":3,"reversibility":"IRREVERSIBLE","lockHazard":"SHORT","wantUndoStep":false},
+    {"ruleId":"PG027","file":"migrations/0001_hidden_effects.up.sql","line":4,"reversibility":"UNKNOWN","lockHazard":"EXCLUSIVE","wantUndoStep":false}
+  ]
+}

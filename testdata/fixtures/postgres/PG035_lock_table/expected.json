@@ -1,0 +1,7 @@
+{
+  "rule": "PG035",
+  "note": "The statement changes nothing, so it is REVERSIBLE; it takes exactly the lock it names for the rest of the transaction, so the lock hazard is the one written in the statement. Both halves matter: a rule that read only the effect would report NONE and hide a full table lock.",
+  "findings": [
+    {"ruleId":"PG035","file":"migrations/0001_lock_table.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":true}
+  ]
+}

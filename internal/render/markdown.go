@@ -138,7 +138,7 @@ func writeHeader(b *strings.Builder, cert domain.ReversibilityCertificate) {
 
 	// Coverage is shown only when it is PARTIAL. A FULL row on every certificate is a row
 	// readers learn to skip, and this is the row that matters on the one change where it is not
-	// full. Empty coverage — a certificate from before 1.6.0, or one assembled wrongly — is not
+	// full. Empty coverage — a certificate from before 1.5.0, or one assembled wrongly — is not
 	// FULL and so is shown.
 	if !cert.Coverage.Full() {
 		fmt.Fprintf(b, "| **Coverage** | ⚠️ PARTIAL — %s not analyzed |\n", plural(len(cert.UnanalyzedFiles), "file"))

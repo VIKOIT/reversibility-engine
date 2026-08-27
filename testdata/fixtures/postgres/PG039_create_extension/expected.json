@@ -1,0 +1,7 @@
+{
+  "rule": "PG039",
+  "note": "Additive. The asymmetry with PG011 is deliberate and worth stating: dropping an extension can cascade to every object that depends on it, so it is IRREVERSIBLE, while creating one takes nothing away.",
+  "findings": [
+    {"ruleId":"PG039","file":"migrations/0001_create_extension.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

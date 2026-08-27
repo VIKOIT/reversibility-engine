@@ -1,0 +1,7 @@
+{
+  "rule": "PG051",
+  "note": "Adding a restriction is reversible by removing it. Note that the reverse direction is NOT symmetric: PG052 grades the removal IRREVERSIBLE, because what it destroys is a protection rather than a structure.",
+  "findings": [
+    {"ruleId":"PG051","file":"migrations/0001_enable_rls.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "rule": "PG052",
+  "note": "THE THIRD-CLAUSE FIXTURE. A change is IRREVERSIBLE if it destroys data, destroys an identity, OR destroys a recovery capability a rollback would depend on. This destroys no data and the setting is one line to put back -- and for as long as it is off, every row is visible to every role, which a rollback cannot un-read. Same clause and same family as TF004 removing deletion protection: one principle, two analyzers.",
+  "findings": [
+    {"ruleId":"PG052","file":"migrations/0001_disable_rls.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"SHORT","wantUndoStep":false}
+  ]
+}

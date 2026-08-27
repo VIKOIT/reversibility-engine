@@ -1,0 +1,7 @@
+{
+  "rule": "PG040",
+  "note": "Mirrors PG025 exactly. The parser produced KindCreateSchema long before this rule existed; the classifier simply had no case for it, so it fell through to PG027 and graded F.",
+  "findings": [
+    {"ruleId":"PG040","file":"migrations/0001_create_schema.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

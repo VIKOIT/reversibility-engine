@@ -1,0 +1,7 @@
+{
+  "rule": "PG045",
+  "note": "Additive, but WITH DATA is the default and it runs the query, holding a read lock on the sources for the duration. The WITH NO DATA form reads nothing and is PG046.",
+  "findings": [
+    {"ruleId":"PG045","file":"migrations/0001_create_matview.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"FULL_SCAN","wantUndoStep":true}
+  ]
+}

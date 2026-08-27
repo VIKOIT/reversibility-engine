@@ -1,0 +1,7 @@
+{
+  "rule": "PG056",
+  "note": "Scans the incoming partition to prove every row satisfies the bound, unless a matching constraint already exists. Nothing is destroyed.",
+  "findings": [
+    {"ruleId":"PG056","file":"migrations/0001_attach_partition.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"FULL_SCAN","wantUndoStep":true}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "rule": "PG041",
+  "note": "Creating a sequence takes nothing away. Moving an existing one is PG010 and is IRREVERSIBLE -- the two are easy to conflate and are deliberately far apart.",
+  "findings": [
+    {"ruleId":"PG041","file":"migrations/0001_create_sequence.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

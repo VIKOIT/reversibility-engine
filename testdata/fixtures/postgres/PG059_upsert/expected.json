@@ -1,0 +1,7 @@
+{
+  "rule": "PG059",
+  "note": "CLASSIFIED BY EFFECT, NOT BY NODE TYPE. This is an InsertStmt, and it is an UPDATE: rows that already existed are overwritten and their prior values are gone. How many is unknowable from the statement alone, since it depends on what is already in the table. It carries PG009's verdict for PG009's reason.",
+  "findings": [
+    {"ruleId":"PG059","file":"migrations/0001_upsert.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"SHORT","wantUndoStep":false}
+  ]
+}

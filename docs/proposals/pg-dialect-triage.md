@@ -1,22 +1,35 @@
 # Proposal — PostgreSQL dialect coverage, first 30
 
-**STATUS: PARTIALLY RULED. The rest is still PROPOSED, NOT AUTHORITATIVE, NOT IMPLEMENTED.**
+**STATUS: RULED AND SHIPPED. This file is now a record of how the rows were arrived at, not a
+request.** [`docs/RULES.md`](../RULES.md) is authoritative; where the two differ, that one wins.
 
-**Shipped, after the owner's ruling:** D1 (now **PG028**), D2 (now **PG029**), #18 `ADD
-CONSTRAINT ... USING INDEX` (**PG030**), #19 `VALIDATE CONSTRAINT` (**PG031**), #12/#13
-`GRANT`/`REVOKE` (**PG032**, both REVERSIBLE), #14 `COMMENT ON` (**PG033**, REVERSIBLE). Their
-rows are in [`docs/RULES.md`](../RULES.md) and each has a fixture. **The provisional IDs below no
-longer match: PG028–PG033 are taken, so the remaining proposals renumber from PG034.**
+All 30 rows below were approved and implemented as **PG028–PG059**, each with a fixture. The
+provisional IDs in the tables no longer match the shipped ones — the mapping is:
 
-**Still awaiting a ruling:** everything else in the table, plus the three open questions the
-owner deferred until the fixes were in front of them (#24 `DISABLE ROW LEVEL SECURITY`, #30
-`INSERT ... ON CONFLICT DO UPDATE`, and whether D1/D2 were handled as defects — they were).
+| Proposal | Shipped |
+| --- | --- |
+| D1 `CREATE OR REPLACE VIEW` | PG028 |
+| D2 `DROP MATERIALIZED VIEW` | PG029 |
+| #18, #19 the two safe-pattern halves | PG030, PG031 |
+| #12/#13 `GRANT`/`REVOKE`, #14 `COMMENT ON` | PG032, PG033 |
+| #1–#5 Tier P | PG034–PG038 |
+| #6–#11, #15–#17, #20 Tier H | PG039–PG048 |
+| #21–#30 Tier M | PG049–PG059 |
 
----
+**Two rulings changed a proposed classification**, and both are worth reading because the
+reasoning generalises:
 
-Nothing in this file grades anything. [`docs/RULES.md`](../RULES.md) is the authoritative
-table; this is a request for rulings that would be added to it. No code, fixture, or rule ID
-has been created. Rule IDs below are **provisional** and are not reserved until approved.
+- **#24 `DISABLE ROW LEVEL SECURITY` → IRREVERSIBLE, not COSTLY.** Not by the data-loss test —
+  it destroys no data — but by the **third clause** of the discriminator, the same clause TF004
+  fires on for deletion protection. One principle, two analyzers.
+- **#30 `INSERT ... ON CONFLICT DO UPDATE` → IRREVERSIBLE (PG059), split from `INSERT`
+  (PG058).** It is an `InsertStmt` whose effect is an update, and the row count it overwrites is
+  unknowable from the statement alone.
+
+**Still open:** nothing from this list. The constructs the probe still reports as PG027 —
+`CREATE ROLE`, `DROP ROLE`, `SET STATISTICS`, `OWNER TO`, `ALTER SEQUENCE OWNED BY`, `REINDEX`,
+`CLUSTER`, identity columns, `CREATE TABLE ... AS` — were never proposed and still fail closed.
+They are the next batch, if there is one.
 
 ---
 

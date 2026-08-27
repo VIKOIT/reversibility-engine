@@ -1,0 +1,7 @@
+{
+  "rule": "PG046",
+  "note": "Separate from PG045 because the scan is the entire difference: WITH NO DATA writes a definition and never touches the source tables.",
+  "findings": [
+    {"ruleId":"PG046","file":"migrations/0001_create_matview_no_data.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

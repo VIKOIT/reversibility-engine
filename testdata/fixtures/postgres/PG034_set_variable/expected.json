@@ -1,0 +1,7 @@
+{
+  "rule": "PG034",
+  "note": "Migration tooling emits this in its own transaction wrapper, so before it was classified a repository using such a tool could not reach grade A at all -- the boilerplate failed the gate and no change to the migration would have fixed it. The setting does not outlive the session.",
+  "findings": [
+    {"ruleId":"PG034","file":"migrations/0001_set_variable.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

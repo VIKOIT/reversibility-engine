@@ -1,0 +1,7 @@
+{
+  "rule": "PG049",
+  "note": "Adds a restriction where there was none.",
+  "findings": [
+    {"ruleId":"PG049","file":"migrations/0001_create_policy.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

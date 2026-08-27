@@ -100,7 +100,51 @@ const (
 	KindRevoke Kind = "REVOKE"
 
 	// KindComment is COMMENT ON, which changes documentation and nothing else.
-	KindComment         Kind = "COMMENT"
+	KindComment Kind = "COMMENT"
+
+	// Session and maintenance statements. These are what migration tooling emits around the
+	// change rather than what a developer writes, and until they were classified a large class
+	// of repository could not reach grade A at all: the tool's own transaction wrapper failed
+	// the gate.
+	KindSetVariable Kind = "SET_VARIABLE"
+	KindLockTable   Kind = "LOCK_TABLE"
+	KindAnalyze     Kind = "ANALYZE"
+	KindVacuum      Kind = "VACUUM"
+	KindVacuumFull  Kind = "VACUUM_FULL"
+
+	// KindReplaceFunction is CREATE OR REPLACE FUNCTION, and it is not KindCreateFunction, for
+	// the same reason KindReplaceView is not KindCreateView: the previous body is overwritten
+	// and recorded nowhere.
+	KindReplaceFunction Kind = "REPLACE_FUNCTION"
+
+	// Materialized views. WITH DATA runs the query and WITH NO DATA does not, which is the
+	// difference between a scan of the sources and a catalog entry.
+	KindCreateMatView         Kind = "CREATE_MATERIALIZED_VIEW"
+	KindCreateMatViewNoData   Kind = "CREATE_MATERIALIZED_VIEW_NO_DATA"
+	KindRefreshMatView        Kind = "REFRESH_MATERIALIZED_VIEW"
+	KindRefreshMatViewConcurr Kind = "REFRESH_MATERIALIZED_VIEW_CONCURRENTLY"
+
+	// KindAddEnumValue is ALTER TYPE ... ADD VALUE. PostgreSQL cannot remove an enum value,
+	// which makes this the one genuinely irreversible statement in the additive family.
+	KindAddEnumValue Kind = "ADD_ENUM_VALUE"
+
+	// Row-level security. Enabling adds a restriction; disabling removes a protection, which is
+	// the third clause of the discriminator rather than an ordinary update.
+	KindCreatePolicy Kind = "CREATE_POLICY"
+	KindDropPolicy   Kind = "DROP_POLICY"
+	KindEnableRLS    Kind = "ENABLE_ROW_LEVEL_SECURITY"
+	KindDisableRLS   Kind = "DISABLE_ROW_LEVEL_SECURITY"
+
+	KindRenameIndex     Kind = "RENAME_INDEX"
+	KindSetRelOptions   Kind = "SET_REL_OPTIONS"
+	KindSetLogged       Kind = "SET_LOGGED"
+	KindAttachPartition Kind = "ATTACH_PARTITION"
+	KindDetachPartition Kind = "DETACH_PARTITION"
+
+	// KindInsert is an additive write. KindUpsert is not: ON CONFLICT DO UPDATE overwrites
+	// existing rows, so it is an UPDATE wearing an INSERT's syntax.
+	KindInsert          Kind = "INSERT"
+	KindUpsert          Kind = "UPSERT"
 	KindCreateType      Kind = "CREATE_TYPE"
 	KindCreateSchema    Kind = "CREATE_SCHEMA"
 	KindCreateSequence  Kind = "CREATE_SEQUENCE"
@@ -217,6 +261,13 @@ type Statement struct {
 
 	// Index is the index a constraint is promoted from, for ADD CONSTRAINT ... USING INDEX.
 	Index string
+
+	// InCTE reports that this statement's effect was carried inside a WITH clause on a SELECT.
+	//
+	// It changes no verdict — a DELETE in a CTE removes exactly the rows a bare DELETE would —
+	// and it changes the rationale, because a reviewer scanning for destructive statements will
+	// not have seen a DELETE on that line.
+	InCTE bool
 
 	// ColumnType is the type being added or converted to.
 	ColumnType *Type

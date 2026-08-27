@@ -1,0 +1,7 @@
+{
+  "rule": "PG047",
+  "note": "The rows in a materialized view are derived, so replacing them destroys nothing original. The non-concurrent form blocks every reader of the view; REFRESH ... CONCURRENTLY is FULL_SCAN instead, for the same reason PG023 and PG024 are separate rows.",
+  "findings": [
+    {"ruleId":"PG047","file":"migrations/0001_refresh_matview.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":true}
+  ]
+}

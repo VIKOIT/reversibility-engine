@@ -87,11 +87,21 @@ func classify(s parser.Statement, sch *schema) classification {
 		return classifyDML(s)
 
 	case parser.KindAlterSequenceRestart:
+		// A setval() call reaches here too, and gets PG010's verdict because it has PG010's
+		// effect. docs/SPECIFICATION.md §2: classification is by effect, never by statement
+		// type — and a SELECT that moves a sequence is not a read.
+		note := ""
+		if s.InCTE || s.Object != "" && s.Relation == "" {
+			note = " This is a setval() call: a SELECT node carrying a non-SELECT effect, " +
+				"classified by that effect rather than by the node."
+		}
+
 		return classification{
 			ruleID:        "PG010",
 			reversibility: domain.ReversibilityIrreversible,
 			lock:          domain.LockShort,
-			rationale:     fmt.Sprintf("The prior position of sequence %s is recorded nowhere, so it cannot be restored, and subsequent inserts will collide with existing keys.", or(s.Relation, "the sequence")),
+			rationale: fmt.Sprintf("The prior position of sequence %s is recorded nowhere, so it cannot be restored, and subsequent inserts will collide with existing keys.%s",
+				or(s.Relation, or(s.Object, "the sequence")), note),
 		}
 
 	case parser.KindDropType, parser.KindDropSequence, parser.KindDropExtension:
@@ -250,6 +260,300 @@ func classify(s parser.Statement, sch *schema) classification {
 	// PG033. Overwriting a comment loses the previous text, which the changeset does not record —
 	// but a comment is not an object and not data, so the overwrite principle that governs
 	// PG028 deliberately stops short of it.
+	// --- Tier P: what migration tooling emits around the change ---------------------------
+	//
+	// These graded F until they were classified, which meant a repository whose migration tool
+	// wraps every change in SET lock_timeout could not reach grade A at all. The tool's own
+	// boilerplate failed the gate, and no change to the migration would have fixed it.
+
+	case parser.KindSetVariable:
+		return classification{
+			ruleID:        "PG034",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockNone,
+			rationale: fmt.Sprintf("Setting %s affects this session only and persists nothing; the connection ends and the setting is gone.",
+				or(s.Object, "a runtime parameter")),
+			undo: domain.UndoStep("-- Nothing to undo: the setting did not outlive the session."),
+		}
+
+	case parser.KindLockTable:
+		return classification{
+			ruleID:        "PG035",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockExclusive,
+			rationale: fmt.Sprintf("LOCK TABLE takes the lock it names on %s for the rest of the transaction and changes nothing. The hazard is the lock itself, held for as long as the transaction runs.",
+				or(s.Relation, "the table")),
+			undo: domain.UndoStep("-- Nothing to undo: the lock was released when the transaction ended."),
+		}
+
+	case parser.KindAnalyze:
+		return classification{
+			ruleID:        "PG036",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockNone,
+			rationale: fmt.Sprintf("ANALYZE refreshes planner statistics for %s. No row, column, or constraint changes.",
+				or(s.Relation, "the database")),
+			undo: domain.UndoStep("-- Nothing to undo: statistics are derived and are refreshed again on the next ANALYZE."),
+		}
+
+	case parser.KindVacuum:
+		return classification{
+			ruleID:        "PG037",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockNone,
+			rationale: fmt.Sprintf("VACUUM reclaims dead tuples in %s without blocking reads or writes. It changes no live row.",
+				or(s.Relation, "the database")),
+			undo: domain.UndoStep("-- Nothing to undo: vacuuming removes only tuples no transaction can still see."),
+		}
+
+	case parser.KindVacuumFull:
+		return classification{
+			ruleID:        "PG038",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockExclusive,
+			rationale: fmt.Sprintf("VACUUM FULL rewrites %s under an ACCESS EXCLUSIVE lock, blocking every reader and writer for the duration. Nothing is lost; the outage is the whole risk.",
+				or(s.Relation, "the table")),
+			undo: domain.UndoStep("-- Nothing to undo: the rewrite preserves every live row."),
+		}
+
+	// --- Tier H: common in hand-written migrations ----------------------------------------
+
+	case parser.KindCreateExtension:
+		return classification{
+			ruleID:        "PG039",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("Creating extension %s adds objects and takes none away. Note the deliberate asymmetry with PG011: dropping an extension can cascade to everything that depends on it, creating one cannot.",
+				or(s.Object, "the extension")),
+			undo: domain.UndoStep(fmt.Sprintf("DROP EXTENSION %s;", or(s.Object, "the_extension"))),
+		}
+
+	case parser.KindCreateSchema:
+		return classification{
+			ruleID:        "PG040",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockNone,
+			rationale: fmt.Sprintf("Creating schema %s takes nothing away; dropping it returns the database to its prior state exactly.",
+				or(s.Object, "the schema")),
+			undo: domain.UndoStep(fmt.Sprintf("DROP SCHEMA %s;", or(s.Object, "the_schema"))),
+		}
+
+	case parser.KindCreateSequence:
+		return classification{
+			ruleID:        "PG041",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockNone,
+			rationale: fmt.Sprintf("Creating sequence %s takes nothing away. Note that moving an existing sequence is PG010 and is not reversible; creating one is a different act.",
+				or(s.Relation, "the sequence")),
+			undo: domain.UndoStep(fmt.Sprintf("DROP SEQUENCE %s;", or(s.Relation, "the_sequence"))),
+		}
+
+	case parser.KindCreateFunction:
+		return classification{
+			ruleID:        "PG042",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockNone,
+			rationale: fmt.Sprintf("Creating function %s adds a definition where there was none; dropping it restores the prior state.",
+				or(s.Object, "the function")),
+			undo: domain.UndoStep(fmt.Sprintf("DROP FUNCTION %s;", or(s.Object, "the_function"))),
+		}
+
+	// PG043 is PG028's sibling and shares its reasoning exactly: OR REPLACE is written because
+	// the object already exists, the previous body is overwritten, and this changeset does not
+	// record it. The undo must never be a bare DROP.
+	case parser.KindReplaceFunction:
+		fn := or(s.Object, "the function")
+		return classification{
+			ruleID:        "PG043",
+			reversibility: domain.ReversibilityCostly,
+			lock:          domain.LockShort,
+			rationale:     fmt.Sprintf("CREATE OR REPLACE FUNCTION overwrites the previous body of %s, which this changeset does not record. Rolling back means restoring that body from schema history, not dropping the function.", fn),
+			undo: domain.UndoStep(fmt.Sprintf(
+				"-- Restore the previous body of function %s from schema history.\n"+
+					"-- It is not in this changeset, so it cannot be written here. Do NOT run DROP FUNCTION %s:\n"+
+					"-- the function existed before this migration and dropping it would destroy it.", fn, fn)),
+		}
+
+	case parser.KindCreateTrigger:
+		return classification{
+			ruleID:        "PG044",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("Creating trigger %s on %s adds behaviour and removes none. It takes a SHARE ROW EXCLUSIVE lock on the table, which blocks writes but not reads.",
+				or(s.Object, "the trigger"), or(s.Relation, "the table")),
+			undo: domain.UndoStep(fmt.Sprintf("DROP TRIGGER %s ON %s;", or(s.Object, "the_trigger"), or(s.Relation, "the_table"))),
+		}
+
+	case parser.KindCreateMatView:
+		return classification{
+			ruleID:        "PG045",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockFullScan,
+			rationale: fmt.Sprintf("Creating materialized view %s WITH DATA runs its query and holds a read lock on the source tables for the duration. It takes nothing away.",
+				or(s.Relation, "the materialized view")),
+			undo: domain.UndoStep(fmt.Sprintf("DROP MATERIALIZED VIEW %s;", or(s.Relation, "the_view"))),
+		}
+
+	case parser.KindCreateMatViewNoData:
+		return classification{
+			ruleID:        "PG046",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockNone,
+			rationale: fmt.Sprintf("Creating materialized view %s WITH NO DATA writes a definition and reads nothing, so the sources are never scanned.",
+				or(s.Relation, "the materialized view")),
+			undo: domain.UndoStep(fmt.Sprintf("DROP MATERIALIZED VIEW %s;", or(s.Relation, "the_view"))),
+		}
+
+	case parser.KindRefreshMatView, parser.KindRefreshMatViewConcurr:
+		lock := domain.LockExclusive
+		note := "blocking every reader of the view for the duration"
+		if s.Kind == parser.KindRefreshMatViewConcurr {
+			lock = domain.LockFullScan
+			note = "without blocking readers, at the cost of a slower rebuild"
+		}
+		return classification{
+			ruleID:        "PG047",
+			reversibility: domain.ReversibilityReversible,
+			lock:          lock,
+			rationale: fmt.Sprintf("Refreshing materialized view %s replaces derived rows with the sources' current contents, %s. No original data is lost, because none of it was original.",
+				or(s.Relation, "the materialized view"), note),
+			undo: domain.UndoStep(fmt.Sprintf("-- Nothing to restore: the contents of %s are derived. Refresh again if needed.", or(s.Relation, "the view"))),
+		}
+
+	// PG048. PostgreSQL cannot remove a value from an enum. This reached F by falling through
+	// the fail-closed default before it was classified, which was the right answer with no
+	// reasoning behind it, and it is the clearest case in the table for coverage over a soft
+	// default.
+	case parser.KindAddEnumValue:
+		return classification{
+			ruleID:        "PG048",
+			reversibility: domain.ReversibilityIrreversible,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("PostgreSQL provides no way to remove a value from an enum, so adding %q to %s cannot be undone. Rolling back requires recreating the type and rewriting every column that uses it.",
+				s.NewName, or(s.Object, "the type")),
+		}
+
+	// --- Tier M ---------------------------------------------------------------------------
+
+	case parser.KindCreatePolicy:
+		return classification{
+			ruleID:        "PG049",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("Creating policy %s on %s adds a restriction where there was none; dropping it restores the prior state.",
+				or(s.Object, "the policy"), or(s.Relation, "the table")),
+			undo: domain.UndoStep(fmt.Sprintf("DROP POLICY %s ON %s;", or(s.Object, "the_policy"), or(s.Relation, "the_table"))),
+		}
+
+	case parser.KindDropPolicy:
+		return classification{
+			ruleID:        "PG050",
+			reversibility: domain.ReversibilityCostly,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("Dropping policy %s removes a row-level restriction whose definition this changeset does not record. Recreating it requires recovering that definition from schema history.",
+				or(s.Object, "the policy")),
+		}
+
+	case parser.KindEnableRLS:
+		return classification{
+			ruleID:        "PG051",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("Enabling row-level security on %s adds a restriction. Disabling it again restores the prior state exactly.",
+				or(s.Relation, "the table")),
+			undo: domain.UndoStep(fmt.Sprintf("ALTER TABLE %s DISABLE ROW LEVEL SECURITY;", or(s.Relation, "the_table"))),
+		}
+
+	// PG052 is graded on the THIRD CLAUSE of the discriminator, the same clause TF004 fires on:
+	// a change is IRREVERSIBLE if it destroys data, destroys an identity, or destroys a recovery
+	// capability a future rollback would depend on.
+	//
+	// Disabling RLS destroys no data and the setting is one line to restore, so neither of the
+	// first two clauses applies and REVERSIBLE looks defensible. What it destroys is the
+	// protection every subsequent query relied on: for as long as it is off every row is visible
+	// to every role, and a rollback cannot un-read what was read. One principle, two analyzers.
+	case parser.KindDisableRLS:
+		return classification{
+			ruleID:        "PG052",
+			reversibility: domain.ReversibilityIrreversible,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("Disabling row-level security on %s removes the protection every query against it relied on. The setting is one line to restore; the exposure while it was off is not. This is graded with removing a recovery capability, as TF004 is, rather than with an ordinary reversible change.",
+				or(s.Relation, "the table")),
+		}
+
+	case parser.KindRenameIndex:
+		return classification{
+			ruleID:        "PG053",
+			reversibility: domain.ReversibilityCostly,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("Renaming index %s to %s breaks anything that names it: a planner hint, a maintenance script, a constraint promotion. The break lasts for as long as the new name is in effect.",
+				or(s.Object, "the index"), or(s.NewName, "a new name")),
+			undo: domain.UndoStep(fmt.Sprintf("ALTER INDEX %s RENAME TO %s;", or(s.NewName, "the_new_name"), or(s.Object, "the_old_name"))),
+		}
+
+	case parser.KindSetRelOptions:
+		return classification{
+			ruleID:        "PG054",
+			reversibility: domain.ReversibilityCostly,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("Changing storage parameters on %s overwrites their previous values, which this changeset does not record.",
+				or(s.Relation, "the table")),
+		}
+
+	case parser.KindSetLogged:
+		return classification{
+			ruleID:        "PG055",
+			reversibility: domain.ReversibilityCostly,
+			lock:          domain.LockTableRewrite,
+			rationale: fmt.Sprintf("Switching %s between LOGGED and UNLOGGED rewrites the whole table, and the reverse rewrites it again. While a table is UNLOGGED its contents do not survive a crash.",
+				or(s.Relation, "the table")),
+		}
+
+	case parser.KindAttachPartition:
+		return classification{
+			ruleID:        "PG056",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockFullScan,
+			rationale: fmt.Sprintf("Attaching a partition to %s scans it to prove every row satisfies the partition bound, unless a matching constraint already exists. Detaching returns it to a standalone table with its rows intact.",
+				or(s.Relation, "the table")),
+			undo: domain.UndoStep(fmt.Sprintf("ALTER TABLE %s DETACH PARTITION %s;", or(s.Relation, "the_table"), or(s.Object, "the_partition"))),
+		}
+
+	case parser.KindDetachPartition:
+		lock := domain.LockShort
+		if s.Concurrent {
+			lock = domain.LockNone
+		}
+		return classification{
+			ruleID:        "PG057",
+			reversibility: domain.ReversibilityCostly,
+			lock:          lock,
+			rationale: fmt.Sprintf("Detaching a partition from %s leaves its rows intact as a standalone table, so nothing is destroyed. Re-attaching requires the partition bound, which this changeset does not record.",
+				or(s.Relation, "the table")),
+		}
+
+	case parser.KindInsert:
+		return classification{
+			ruleID:        "PG058",
+			reversibility: domain.ReversibilityCostly,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("Inserting into %s adds rows and overwrites none, so nothing is destroyed. Undoing it means deleting exactly the rows this statement added, and their keys are not derivable from the statement alone.",
+				or(s.Relation, "the table")),
+		}
+
+	// PG059 carries PG009's verdict because ON CONFLICT DO UPDATE is an UPDATE: rows that
+	// already existed are overwritten and their prior values are gone. Classification is by
+	// effect, never by statement type (docs/SPECIFICATION.md §2), and this is an InsertStmt
+	// whose effect is an update.
+	case parser.KindUpsert:
+		return classification{
+			ruleID:        "PG059",
+			reversibility: domain.ReversibilityIrreversible,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf("ON CONFLICT DO UPDATE overwrites rows of %s that already existed, and their prior values are gone. How many rows that is cannot be known from the statement alone: it depends on what is already in the table. This is an INSERT node carrying an UPDATE's effect and is classified by the effect.",
+				or(s.Relation, "the table")),
+		}
+
 	case parser.KindComment:
 		return classification{
 			ruleID:        "PG033",
@@ -349,7 +653,8 @@ func classifyDML(s parser.Statement) classification {
 			ruleID:        "PG008",
 			reversibility: domain.ReversibilityIrreversible,
 			lock:          domain.LockExclusive,
-			rationale:     fmt.Sprintf("An unqualified %s rewrites every row in %s, and the prior values are not recorded anywhere.", verb, or(s.Relation, "the table")),
+			rationale: fmt.Sprintf("An unqualified %s rewrites every row in %s, and the prior values are not recorded anywhere.%s",
+				verb, or(s.Relation, "the table"), cteNote(s)),
 		}
 	}
 
@@ -357,8 +662,25 @@ func classifyDML(s parser.Statement) classification {
 		ruleID:        "PG009",
 		reversibility: domain.ReversibilityIrreversible,
 		lock:          domain.LockShort,
-		rationale:     fmt.Sprintf("The WHERE clause bounds how many rows of %s are touched, but the prior values of those rows are still gone.", or(s.Relation, "the table")),
+		rationale: fmt.Sprintf("The WHERE clause bounds how many rows of %s are touched, but the prior values of those rows are still gone.%s",
+			or(s.Relation, "the table"), cteNote(s)),
 	}
+}
+
+// cteNote flags a DML whose effect was carried inside a SELECT.
+//
+// docs/SPECIFICATION.md §2: classification is by effect, never by statement type. The verdict is
+// the same as for a bare DELETE, because the rows are equally gone — what differs is that a
+// reviewer scanning the diff for destructive statements sees a line beginning with WITH, and
+// nothing on it says DELETE. The note is the only place they will be told.
+//
+// It also exists to be read by whoever next proposes classifying SELECT as harmless.
+func cteNote(s parser.Statement) string {
+	if !s.InCTE {
+		return ""
+	}
+	return " This is a data-modifying CTE: the statement is a SELECT node carrying a non-SELECT effect, " +
+		"and it is classified by that effect rather than by the node."
 }
 
 // The mandated rationale from docs/RULES.md §1: a rename breaks the previous application version.

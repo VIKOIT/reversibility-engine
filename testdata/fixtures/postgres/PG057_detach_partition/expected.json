@@ -1,0 +1,7 @@
+{
+  "rule": "PG057",
+  "note": "The rows survive as a standalone table, so nothing is destroyed -- but re-attaching needs the partition bound, which the changeset does not record. DETACH ... CONCURRENTLY carries lock NONE.",
+  "findings": [
+    {"ruleId":"PG057","file":"migrations/0001_detach_partition.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":false}
+  ]
+}

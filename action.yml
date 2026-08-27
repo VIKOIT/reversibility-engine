@@ -152,7 +152,7 @@ outputs:
     description: >-
       FULL or PARTIAL — whether the engine read every file it could have. PARTIAL never changes
       the grade; it only closes `gate-status`. Empty for a certificate produced before schema
-      1.6.0.
+      1.5.0.
     value: ${{ steps.certify.outputs.coverage }}
   unanalyzed-count:
     description: 'How many files the engine could not read. The certificate names each one.'

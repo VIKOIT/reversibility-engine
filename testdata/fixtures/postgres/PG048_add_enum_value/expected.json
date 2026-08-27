@@ -1,0 +1,7 @@
+{
+  "rule": "PG048",
+  "note": "PostgreSQL provides no way to remove a value from an enum. This is the clearest case in the table for coverage over a soft default: before this rule it graded F by falling through PG027, which was the right answer with no reasoning behind it -- and an accident is not a safety property.",
+  "findings": [
+    {"ruleId":"PG048","file":"migrations/0001_add_enum_value.up.sql","line":1,"reversibility":"IRREVERSIBLE","lockHazard":"SHORT","wantUndoStep":false}
+  ]
+}

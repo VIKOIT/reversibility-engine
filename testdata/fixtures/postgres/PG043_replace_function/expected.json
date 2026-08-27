@@ -1,0 +1,7 @@
+{
+  "rule": "PG043",
+  "note": "PG028's sibling, same reasoning: OR REPLACE is written because the object already exists, so the engine assumes it did. The previous body is overwritten and recorded nowhere. The undo must never be a bare DROP FUNCTION -- that destroys a function which existed before the migration.",
+  "findings": [
+    {"ruleId":"PG043","file":"migrations/0001_replace_function.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

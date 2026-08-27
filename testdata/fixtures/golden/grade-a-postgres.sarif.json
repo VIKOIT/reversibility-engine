@@ -6,7 +6,7 @@
       "tool": {
         "driver": {
           "name": "reversibility-engine",
-          "version": "1.7.0",
+          "version": "1.5.0",
           "informationUri": "https://github.com/VIKOIT/reversibility-engine",
           "rules": [
             {
@@ -68,7 +68,7 @@
             "policyIgnoredFileCount": 0,
             "applicable": true,
             "inputDigest": "e497c2c4438058df95ab087614e62b35563e249aca35e841fe285dae85a8e561",
-            "certificateSchemaVersion": "1.7.0"
+            "certificateSchemaVersion": "1.5.0"
           }
         }
       ]

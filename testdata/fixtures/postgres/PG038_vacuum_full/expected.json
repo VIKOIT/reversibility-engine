@@ -1,0 +1,7 @@
+{
+  "rule": "PG038",
+  "note": "Separate from PG037 because the lock is the entire difference: VACUUM FULL rewrites the table under ACCESS EXCLUSIVE and blocks every reader and writer for the duration. Nothing is lost, so the verdict stays REVERSIBLE and the hazard carries the risk.",
+  "findings": [
+    {"ruleId":"PG038","file":"migrations/0001_vacuum_full.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"EXCLUSIVE","wantUndoStep":true}
+  ]
+}

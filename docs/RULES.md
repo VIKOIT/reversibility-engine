@@ -8,7 +8,7 @@ Engine emits:
 
 | | | Rules |
 | --- | --- | --- |
-| [§1 PostgreSQL](#1-postgresql--pg001-to-pg033) | over a real PostgreSQL AST | 33 |
+| [§1 PostgreSQL](#1-postgresql--pg001-to-pg059) | over a real PostgreSQL AST | 59 |
 | [§2 Kubernetes](#2-kubernetes--k8s001-to-k8s015) | over a structural manifest diff | 15 |
 | [§3 Scoring](#3-scoring) | how findings become a grade of A, B, C, or F | — |
 | [§4 Owner rulings](#4-owner-rulings) | decisions that resolve ambiguities in the above | — |
@@ -108,7 +108,7 @@ are in [`docs/SPECIFICATION.md`](SPECIFICATION.md) §16 — do not resolve one b
 
 ---
 
-## 1. PostgreSQL — PG001 to PG033
+## 1. PostgreSQL — PG001 to PG059
 
 **Do not infer, extend, or soften this table. Anything not listed is `UNKNOWN`.**
 
@@ -147,6 +147,32 @@ are in [`docs/SPECIFICATION.md`](SPECIFICATION.md) §16 — do not resolve one b
 | PG031 | `VALIDATE CONSTRAINT` | REVERSIBLE | FULL_SCAN |
 | PG032 | `GRANT` / `REVOKE` | REVERSIBLE | SHORT |
 | PG033 | `COMMENT ON` | REVERSIBLE | SHORT |
+| PG034 | `SET` / `SET LOCAL` | REVERSIBLE | NONE |
+| PG035 | `LOCK TABLE` | REVERSIBLE | EXCLUSIVE |
+| PG036 | `ANALYZE` | REVERSIBLE | NONE |
+| PG037 | `VACUUM` | REVERSIBLE | NONE |
+| PG038 | `VACUUM FULL` | REVERSIBLE | EXCLUSIVE |
+| PG039 | `CREATE EXTENSION` | REVERSIBLE | SHORT |
+| PG040 | `CREATE SCHEMA` | REVERSIBLE | NONE |
+| PG041 | `CREATE SEQUENCE` | REVERSIBLE | NONE |
+| PG042 | `CREATE FUNCTION` (no `OR REPLACE`) | REVERSIBLE | NONE |
+| PG043 | `CREATE OR REPLACE FUNCTION` | COSTLY | SHORT |
+| PG044 | `CREATE TRIGGER` | REVERSIBLE | SHORT |
+| PG045 | `CREATE MATERIALIZED VIEW ... WITH DATA` | REVERSIBLE | FULL_SCAN |
+| PG046 | `CREATE MATERIALIZED VIEW ... WITH NO DATA` | REVERSIBLE | NONE |
+| PG047 | `REFRESH MATERIALIZED VIEW` (`CONCURRENTLY` is FULL_SCAN) | REVERSIBLE | EXCLUSIVE |
+| PG048 | `ALTER TYPE ... ADD VALUE` | IRREVERSIBLE | SHORT |
+| PG049 | `CREATE POLICY` | REVERSIBLE | SHORT |
+| PG050 | `DROP POLICY` | COSTLY | SHORT |
+| PG051 | `ENABLE ROW LEVEL SECURITY` | REVERSIBLE | SHORT |
+| PG052 | `DISABLE ROW LEVEL SECURITY` | IRREVERSIBLE | SHORT |
+| PG053 | `ALTER INDEX ... RENAME TO` | COSTLY | SHORT |
+| PG054 | `ALTER TABLE ... SET (...)` / `RESET (...)` | COSTLY | SHORT |
+| PG055 | `ALTER TABLE ... SET LOGGED` / `SET UNLOGGED` | COSTLY | TABLE_REWRITE |
+| PG056 | `ATTACH PARTITION` | REVERSIBLE | FULL_SCAN |
+| PG057 | `DETACH PARTITION` (`CONCURRENTLY` is NONE) | COSTLY | SHORT |
+| PG058 | `INSERT` | COSTLY | SHORT |
+| PG059 | `INSERT ... ON CONFLICT DO UPDATE` | IRREVERSIBLE | SHORT |
 
 **PG028 assumes the view already existed**, because that is the only reason the statement is
 written with `OR REPLACE`. The previous definition is overwritten and is recorded nowhere in the
@@ -173,6 +199,37 @@ exactly. The engine does not verify that the opposite statement is present, and 
 says so on every finding. **PG033 is REVERSIBLE for a narrower reason**: overwriting a comment
 loses the previous text, but a comment is not an object and not a row. The overwrite principle
 that governs PG028 deliberately stops short of it.
+
+### The overwrite principle
+
+> **A statement that overwrites state the migration does not record is COSTLY, not REVERSIBLE.**
+> The undo exists in principle and cannot be written from the changeset alone.
+
+PG012 (`RENAME`) and PG013 (`DROP CONSTRAINT`) already followed it before it was named. PG028,
+PG043, PG050, PG054 and PG057 are the same shape. PG033 is the one deliberate exception, on the
+ground that a comment is documentation rather than schema — flagged rather than smoothed over,
+because it is the weakest application of the rule.
+
+`REVERSIBLE` here means **the undo is writable from this changeset**, not merely that the
+database could theoretically be restored.
+
+### PG052 and the third clause
+
+**`DISABLE ROW LEVEL SECURITY` is IRREVERSIBLE, and not by the data-loss test.** It destroys no
+data, and the setting is one line to restore, so the first two clauses of the discriminator in
+§5 do not apply. The third does:
+
+> A change is IRREVERSIBLE if it destroys data, destroys an identity that re-applying the same
+> configuration cannot recreate, **or destroys a recovery capability that a future rollback
+> would depend on.**
+
+For as long as row-level security is off, every row is visible to every role, and no rollback
+un-reads what was read. That is the same clause TF004 fires on for deletion protection, and the
+same family: **one principle, two analyzers.** The rationale on the finding says so, because a
+user reading an F on a one-line change is owed the reason.
+
+PG050 (`DROP POLICY`) is deliberately *not* in this family. Dropping one policy narrows what is
+protected; it does not switch the protection off.
 
 **PG017 with a production snapshot.** When `pg_stats.null_frac > 0` for the column being
 constrained, `SET NOT NULL` validates every existing row, finds a violation, and aborts —
@@ -583,6 +640,12 @@ Lock hazard is always NONE: Terraform takes no database lock. Plan format versio
 
 The third clause is what TF004 fires on, and it is what makes TF001 on `aws_db_snapshot`
 coherent: deleting a snapshot destroys no running system, it destroys the undo. Same family.
+
+**The discriminator is not Terraform-specific.** It is stated here because this is where it was
+written down first, and it governs [`§1`](#1-postgresql--pg001-to-pg059) too: **PG052**
+(`DISABLE ROW LEVEL SECURITY`) is IRREVERSIBLE on the third clause and on nothing else. One
+principle, two analyzers — a rule that reached the same verdict by a different route in each
+would be two rules that happen to agree.
 
 ### Why TF003 is retired
 

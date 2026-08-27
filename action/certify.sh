@@ -206,7 +206,7 @@ FINDINGS="$(jq -r '.findings | length' "$CERT_JSON")"
 # claim this field exists to stop being made silently.
 OUTCOME="$(jq -r '.outcome // ""' "$CERT_JSON")"
 
-# Coverage defaults to empty rather than FULL for the same reason: claiming a pre-1.6.0
+# Coverage defaults to empty rather than FULL for the same reason: claiming a pre-1.5.0
 # certificate covered everything is a claim its producer never made.
 COVERAGE="$(jq -r '.coverage // ""' "$CERT_JSON")"
 UNANALYZED="$(jq -r '.unanalyzedFiles | length' "$CERT_JSON" 2> /dev/null || echo 0)"

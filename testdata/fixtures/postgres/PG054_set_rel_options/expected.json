@@ -1,0 +1,7 @@
+{
+  "rule": "PG054",
+  "note": "The overwrite principle: the previous value of the parameter is not recorded in the changeset, so the undo cannot be written from it. RESET reaches the same rule for the same reason.",
+  "findings": [
+    {"ruleId":"PG054","file":"migrations/0001_set_rel_options.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":false}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "rule": "PG050",
+  "note": "Removes a restriction whose definition the changeset does not record, which is the overwrite principle applied to a deletion. COSTLY rather than IRREVERSIBLE: the policy governs future queries and dropping one does not, by itself, expose anything -- disabling RLS entirely does, and that is PG052.",
+  "findings": [
+    {"ruleId":"PG050","file":"migrations/0001_drop_policy.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":false}
+  ]
+}

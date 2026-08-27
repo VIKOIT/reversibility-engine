@@ -1,0 +1,1 @@
+ALTER TABLE orders DETACH PARTITION orders_2024;

@@ -1,0 +1,7 @@
+{
+  "rule": "PG053",
+  "note": "Mirrors PG012. Anything naming the index -- a maintenance script, a constraint promotion -- breaks for as long as the new name is in effect.",
+  "findings": [
+    {"ruleId":"PG053","file":"migrations/0001_rename_index.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

@@ -16,10 +16,83 @@ move:
 
 ## [Unreleased]
 
+> **Certificate schema `1.5.0`.** One version, covering everything below: `Outcome`,
+> `Coverage`/`UnanalyzedFiles`, `IgnoredByPolicy`, `GradeCauses`, `N/A` on `Grade`,
+> `NOT_APPLICABLE` on `AIGateStatus`, and a `PASS` that now requires full coverage and no
+> policy-ignored candidate.
+>
+> These were developed as three bumps and collapsed before release. No consumer saw the
+> intermediates, and three version numbers that never meant anything outside this repository
+> would read as three schemas somebody might encounter. The honesty requirement applies to
+> versions a consumer can observe; an unreleased intermediate is a working note.
+>
+> **Migrating from `1.4.0`:** a gate on `grade == "A"`, on `aiGateStatus`, or on the exit code
+> is unaffected. A gate on `grade != "F"` now passes changesets nobody analyzed — switch it to
+> `grade == "A"` or read `outcome`. A changeset that was only partly analyzed, or that a policy
+> partly excluded, now reports `aiGateStatus: FAIL` while still exiting 0; that divergence is
+> deliberate and the CLI announces it.
+
+### Added
+
+**26 more PostgreSQL rules, PG034–PG059. The table went from 27 classified constructs to 59**,
+and of 45 constructs probed the number reaching `PG027`/UNKNOWN fell from 39 to 11.
+
+**The single highest-frequency fix is `SET` / `SET LOCAL` (PG034).** Rails, Sqitch and Flyway
+emit it in their own transaction wrapper, so before this a repository using such a tool **could
+not reach grade A at all** — the tool's own boilerplate failed the gate, and no change to the
+migration would have fixed it.
+
+Two rules deserve their reasoning read rather than their row:
+
+**PG048 `ALTER TYPE ... ADD VALUE` is IRREVERSIBLE** because PostgreSQL provides no way to remove
+an enum value. It graded F before, by falling through the fail-closed default — the right answer
+with no reasoning behind it. That is the argument for table coverage over a soft default in one
+line: **an accident is not a safety property.**
+
+**PG052 `DISABLE ROW LEVEL SECURITY` is IRREVERSIBLE, and not by the data-loss test.** It
+destroys no data and the setting is one line to restore. It is graded on the **third clause** of
+the discriminator — *destroys a recovery capability a future rollback would depend on* — which is
+the same clause TF004 fires on for deletion protection. For as long as RLS is off every row is
+visible to every role, and no rollback un-reads what was read. The discriminator is now stated
+as governing both analyzers rather than only Terraform: **one principle, two analyzers.**
+
+The **overwrite principle** is named in `docs/RULES.md` for the first time, though PG012 and
+PG013 already followed it: *a statement that overwrites state the migration does not record is
+COSTLY, not REVERSIBLE.* PG028, PG043, PG050, PG054 and PG057 are the same shape. PG033
+(`COMMENT ON`) is the one deliberate exception, flagged rather than smoothed over.
+
 ### Fixed
 
+**`SELECT` is now classified by effect, and the near-miss is why there is a new invariant.**
+
+The dialect triage was about to propose a rule that looks obviously harmless — *a `SELECT`
+changes nothing, so classify it REVERSIBLE* — and `SELECT` is a node type, not an effect:
+
+| Statement | The node | What it does |
+| --- | --- | --- |
+| `SELECT count(*) FROM orders` | `SelectStmt` | nothing |
+| `SELECT setval('orders_id_seq', 1000)` | `SelectStmt` | resets a sequence — the PG010 hazard |
+| `WITH d AS (DELETE FROM orders WHERE id < 5 RETURNING *) SELECT count(*) FROM d` | `SelectStmt` | **deletes rows** |
+
+Both destructive rows graded F beforehand **by accident**: they were unrecognised, and
+unrecognised is UNKNOWN. A rule keyed on the node type would have converted two accidental
+correct answers into two deliberate wrong ones — and would have been merged, because on its face
+it says only that reading data is safe.
+
+A data-modifying CTE now carries the verdict of the DML it contains, `setval()` carries PG010's,
+and **every other `SELECT` stays UNKNOWN**. No permissive default was added. New spec invariant:
+
+> Classification is by effect, never by statement type. A construct is classified by what it does
+> to data and schema, not by the node the parser returns. Where a statement type can carry a
+> destructive effect — data-modifying CTEs, function calls with side effects, dynamic SQL — it is
+> classified by that effect or it is UNKNOWN.
+
+`EFFECT001` is a new shape of fixture that asserts the relationship between three statements
+rather than one rule, since no single rule ID describes it. The fixture loader now recognises
+that shape explicitly, because "does not look like a rule ID" is also what a typo looks like.
+
 **Two constructs the engine classified wrongly, both in the permissive direction, both printing
-an undo an operator would run mid-incident.** Certificate schema bumped to `1.7.0`.
+an undo an operator would run mid-incident.**
 
 **`CREATE OR REPLACE VIEW` graded A and its undo plan destroyed the view.** `ViewStmt.Replace`
 was never read, so the statement was indistinguishable from `CREATE VIEW`, matched PG025, and
@@ -106,7 +179,7 @@ syntax error at a brace and sending someone hunting for a typo in valid Go templ
 ### Added
 
 **Coverage: a second axis for the part of a changeset the engine could not
-read.** Certificate schema bumped to `1.6.0`.
+read.**
 
 The P0 below fixed the case where *nothing* was analyzed. This is the case where
 *some* of it was: one `.sql` migration beside three Django `.py` ones. That
@@ -161,7 +234,6 @@ over-reports looks conscientious.
 ### Fixed
 
 **A changeset the engine could not read graded A and passed the merge gate.**
-Certificate schema bumped to `1.5.0`.
 
 A pull request of thirteen Django `.py` migrations produced grade **A**,
 `aiGateStatus: PASS`, exit 0. No rule misfired. The scoring specification said

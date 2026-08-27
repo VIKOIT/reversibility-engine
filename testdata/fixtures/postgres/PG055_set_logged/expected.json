@@ -1,0 +1,7 @@
+{
+  "rule": "PG055",
+  "note": "Both directions rewrite the whole table, which is the cost. Not IRREVERSIBLE -- SET LOGGED restores durability -- but while the table is UNLOGGED its contents do not survive a crash, and that window is real.",
+  "findings": [
+    {"ruleId":"PG055","file":"migrations/0001_set_logged.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"TABLE_REWRITE","wantUndoStep":false}
+  ]
+}

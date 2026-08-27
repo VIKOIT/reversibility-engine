@@ -372,12 +372,12 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 	// Downstream merge gates parse this. Changing it is a deliberate, breaking act — if this
 	// test fails, the version was bumped, and that must be intentional.
 	//
-	// 1.6.0 added Coverage and UnanalyzedFiles, and narrowed the gate: PASS now requires grade
+	// 1.5.0 added Coverage and UnanalyzedFiles, and narrowed the gate: PASS now requires grade
 	// A *and* full coverage. That is a semantic change and not only an additive one — a
 	// partially covered changeset that used to gate PASS now gates FAIL — which is why it took
 	// a version of its own rather than folding into the unreleased 1.5.0.
-	if domain.SchemaVersion != "1.7.0" {
-		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.7.0")
+	if domain.SchemaVersion != "1.5.0" {
+		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.5.0")
 	}
 }
 

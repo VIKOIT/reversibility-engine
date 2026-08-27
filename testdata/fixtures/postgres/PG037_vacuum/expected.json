@@ -1,0 +1,7 @@
+{
+  "rule": "PG037",
+  "note": "A plain VACUUM reclaims only tuples no transaction can still see, and blocks neither reads nor writes. VACUUM FULL is a different statement with a different lock and is PG038.",
+  "findings": [
+    {"ruleId":"PG037","file":"migrations/0001_vacuum.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"NONE","wantUndoStep":true}
+  ]
+}

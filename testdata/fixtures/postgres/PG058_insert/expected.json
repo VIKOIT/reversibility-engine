@@ -1,0 +1,7 @@
+{
+  "rule": "PG058",
+  "note": "Seed and backfill data. Additive -- nothing is overwritten -- but undoing it means deleting exactly the rows this statement added, and their keys are not derivable from the statement alone. The ON CONFLICT DO UPDATE form is not additive and is PG059.",
+  "findings": [
+    {"ruleId":"PG058","file":"migrations/0001_insert.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":false}
+  ]
+}

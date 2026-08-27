@@ -22,6 +22,16 @@ import (
 // exercise down-migration validation rather than a row in either table.
 var ruleIDPattern = regexp.MustCompile(`^(PG|K8S|TF)\d{3}$`)
 
+// invariantFixtures assert a rule that spans several table rows at once, so no single rule ID
+// names them. Each is declared here with its reason, the same way a retired ID is, because an
+// undeclared non-rule identifier is indistinguishable from a typo.
+var invariantFixtures = map[string]bool{
+	// docs/SPECIFICATION.md §2: classification is by effect, never by statement type. Three
+	// SelectStmt nodes grading PG009, PG010 and PG027 respectively — the relationship between
+	// them is the assertion, and it would be lost if they were split across three fixtures.
+	"EFFECT001": true,
+}
+
 func expectedRules(prefix string, n int) []string {
 	out := make([]string, 0, n)
 	for i := 1; i <= n; i++ {
@@ -49,7 +59,7 @@ func TestEveryRuleHasAFixture(t *testing.T) {
 		// an oversight.
 		retired map[string]bool
 	}{
-		{group: "postgres", prefix: "PG", count: 33},
+		{group: "postgres", prefix: "PG", count: 59},
 		{group: "kubernetes", prefix: "K8S", count: 15},
 		{group: "terraform", prefix: "TF", count: 10, retired: map[string]bool{"TF003": true}},
 	}
@@ -111,12 +121,28 @@ func TestFixtureClaimsMatchTheirFindings(t *testing.T) {
 					t.Fatalf("fixture asserts no findings")
 				}
 
-				// The DOWN* fixtures exercise down-migration validation, so their claimed
-				// "rule" is not a row in either classification table. They must instead
-				// assert a down-migration outcome.
+				// Not every fixture claims a row in a classification table. Two other shapes
+				// exist and each has to justify itself rather than simply not matching the
+				// pattern, because "does not look like a rule ID" is also what a typo looks
+				// like.
 				if !ruleIDPattern.MatchString(c.Expect.Rule) {
-					if len(c.Expect.DownMigrations) == 0 {
-						t.Errorf("fixture claims non-table rule %q but asserts no downMigrations", c.Expect.Rule)
+					switch {
+					case len(c.Expect.DownMigrations) > 0:
+						// The DOWN* shape: exercises down-migration validation, which is not a
+						// row in either table.
+					case invariantFixtures[c.Expect.Rule]:
+						// The invariant shape: asserts a rule that spans several table rows at
+						// once, so no single rule ID describes it. EFFECT001 holds three
+						// statements that are all SelectStmt nodes and grade PG009, PG010 and
+						// PG027 — the point being the relationship between them, which no
+						// per-rule fixture can express.
+						if len(c.Expect.Findings) < 2 {
+							t.Errorf("invariant fixture %q asserts %d finding(s); an invariant across one finding is a rule fixture",
+								c.Expect.Rule, len(c.Expect.Findings))
+						}
+					default:
+						t.Errorf("fixture claims non-table rule %q but neither asserts downMigrations "+
+							"nor is declared in invariantFixtures", c.Expect.Rule)
 					}
 					return
 				}

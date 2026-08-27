@@ -85,12 +85,44 @@ func TestParseKinds(t *testing.T) {
 		// Parses cleanly, but the engine has no vocabulary for it. That is UNRECOGNIZED, and
 		// the caller must grade it UNKNOWN rather than assume it is harmless.
 		//
+		// Classification is by effect, never by statement type. All four of these are
+		// SelectStmt nodes and only the last one is a read.
+		{"WITH d AS (DELETE FROM orders WHERE id < 5 RETURNING *) SELECT 1;", parser.KindDelete},
+		{"WITH d AS (UPDATE orders SET status = 1 RETURNING *) SELECT 1;", parser.KindUpdate},
+		{"SELECT setval('orders_id_seq', 1000);", parser.KindAlterSequenceRestart},
+		{"SELECT count(*) FROM orders;", parser.KindUnrecognized},
+
 		// This group shrinks as the table grows, which is the point: when one of these gains a
 		// rule it fails here first, and the fix is to move it up rather than to delete it.
 		{"CLUSTER orders USING orders_pkey;", parser.KindUnrecognized},
-		{"VACUUM FULL orders;", parser.KindUnrecognized},
 		{"ALTER SEQUENCE s OWNED BY orders.id;", parser.KindUnrecognized},
+		{"ALTER TABLE orders OWNER TO app;", parser.KindUnrecognized},
+		{"CREATE ROLE reporting;", parser.KindUnrecognized},
 		{"SELECT 1;", parser.KindUnrecognized},
+
+		// One node, three lock hazards. ANALYZE, VACUUM and VACUUM FULL all arrive as
+		// VacuumStmt, and reading only the node would collapse a statement that blocks nothing
+		// with one that holds ACCESS EXCLUSIVE for a full rewrite.
+		{"ANALYZE orders;", parser.KindAnalyze},
+		{"VACUUM orders;", parser.KindVacuum},
+		{"VACUUM FULL orders;", parser.KindVacuumFull},
+
+		// The OR REPLACE pair, and the WITH NO DATA pair: in both, one flag on the node is the
+		// whole difference between the two verdicts.
+		{"CREATE FUNCTION f() RETURNS int AS 'SELECT 1' LANGUAGE sql;", parser.KindCreateFunction},
+		{"CREATE OR REPLACE FUNCTION f() RETURNS int AS 'SELECT 1' LANGUAGE sql;", parser.KindReplaceFunction},
+		{"CREATE MATERIALIZED VIEW m AS SELECT 1;", parser.KindCreateMatView},
+		{"CREATE MATERIALIZED VIEW m AS SELECT 1 WITH NO DATA;", parser.KindCreateMatViewNoData},
+
+		// An INSERT that overwrites is not an insert.
+		{"INSERT INTO t (a) VALUES (1);", parser.KindInsert},
+		{"INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO NOTHING;", parser.KindInsert},
+		{"INSERT INTO t (a) VALUES (1) ON CONFLICT (a) DO UPDATE SET a = 2;", parser.KindUpsert},
+
+		// CREATE TABLE ... AS shares its node with CREATE MATERIALIZED VIEW and is deliberately
+		// left unclassified: it creates a table and copies rows in one statement, and no row in
+		// the table covers that. Failing closed is the answer until one does.
+		{"CREATE TABLE archive AS SELECT * FROM orders;", parser.KindUnrecognized},
 	}
 
 	for _, tt := range tests {
