@@ -208,11 +208,9 @@ func TestCertifyUnsupportedContent(t *testing.T) {
 	}
 }
 
-// One readable file is enough to make the run ANALYZED, and the unsupported siblings are
-// currently discarded. This pins today's behaviour so that resolving the partial-coverage open
-// question (docs/SPECIFICATION.md §16.7) shows up here as a deliberate diff rather than a
-// surprise.
-func TestCertifyMixedContentIsAnalyzed(t *testing.T) {
+// One readable file makes the run ANALYZED, and the unreadable siblings make it PARTIAL. The
+// two are separate axes and this is the test that says so.
+func TestCertifyMixedContentIsAnalyzedAndPartial(t *testing.T) {
 	t.Parallel()
 
 	cert := certify(t,
@@ -233,6 +231,82 @@ func TestCertifyMixedContentIsAnalyzed(t *testing.T) {
 	}
 	if !cert.Applicable {
 		t.Error("Applicable = false despite a .sql migration being claimed")
+	}
+	if cert.Coverage != domain.CoveragePartial {
+		t.Errorf("Coverage = %q, want PARTIAL", cert.Coverage)
+	}
+
+	// The list, not a count. A reviewer's next question is always "which ones".
+	if len(cert.UnanalyzedFiles) != 1 {
+		t.Fatalf("UnanalyzedFiles = %+v, want the one .py file", cert.UnanalyzedFiles)
+	}
+	if got := cert.UnanalyzedFiles[0]; got.Path != "app/migrations/0001_initial.py" || got.Reason == "" {
+		t.Errorf("UnanalyzedFiles[0] = %+v, want the .py path with a reason", got)
+	}
+
+	// The gate closes even though the grade did not move.
+	if cert.AIGateStatus == domain.GatePass {
+		t.Error("AIGateStatus = PASS on a partially covered changeset; an agent must not merge what was only partly understood")
+	}
+}
+
+// The ruling, stated as a test: PARTIAL never changes the grade.
+//
+// The same SQL is certified twice, once alone and once beside a migration the engine cannot
+// read. Every measured field must be identical. Inventing severity from ignorance is the exact
+// mirror of inventing safety from it, and it would be the easier of the two mistakes to defend.
+func TestPartialCoverageNeverChangesTheGrade(t *testing.T) {
+	t.Parallel()
+
+	sql := []domain.ChangedFile{
+		{
+			Path:    "db/migrate/0001_add_index.up.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("CREATE INDEX CONCURRENTLY idx ON orders (status);\n"),
+		},
+		{
+			Path:    "db/migrate/0001_add_index.down.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("DROP INDEX CONCURRENTLY idx;\n"),
+		},
+	}
+
+	unreadable := domain.ChangedFile{
+		Path:    "db/migrate/0002_backfill.rb",
+		Status:  domain.StatusAdded,
+		Current: []byte("class Backfill < ActiveRecord::Migration\nend\n"),
+	}
+
+	full := certify(t, sql...)
+	partial := certify(t, append(append([]domain.ChangedFile{}, sql...), unreadable)...)
+
+	if full.Coverage != domain.CoverageFull || partial.Coverage != domain.CoveragePartial {
+		t.Fatalf("coverage = %q and %q, want FULL and PARTIAL — the test is not exercising what it claims",
+			full.Coverage, partial.Coverage)
+	}
+
+	if partial.Grade != full.Grade {
+		t.Errorf("Grade = %q with an unreadable sibling, %q without; coverage must not move the grade",
+			partial.Grade, full.Grade)
+	}
+	if partial.EffectiveGrade != full.EffectiveGrade {
+		t.Errorf("EffectiveGrade = %q with an unreadable sibling, %q without",
+			partial.EffectiveGrade, full.EffectiveGrade)
+	}
+	if len(partial.Findings) != len(full.Findings) {
+		t.Errorf("findings = %d with an unreadable sibling, %d without", len(partial.Findings), len(full.Findings))
+	}
+	if len(partial.Blockers) != len(full.Blockers) {
+		t.Errorf("blockers = %v with an unreadable sibling, %v without", partial.Blockers, full.Blockers)
+	}
+
+	// And the gate is the one thing that does move.
+	if full.AIGateStatus != domain.GatePass {
+		t.Fatalf("the fully covered certificate gates %q, want PASS — the test is not exercising what it claims",
+			full.AIGateStatus)
+	}
+	if partial.AIGateStatus != domain.GateFail {
+		t.Errorf("AIGateStatus = %q on partial coverage, want FAIL", partial.AIGateStatus)
 	}
 }
 

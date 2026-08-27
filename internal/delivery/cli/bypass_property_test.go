@@ -282,6 +282,10 @@ type modifier struct {
 
 	// ignoreAll writes a policy that ignores every path.
 	ignoreAll bool
+
+	// requireFullCoverage passes --require-full-coverage, which turns partial coverage into a
+	// run that did not complete.
+	requireFullCoverage bool
 }
 
 func (m modifier) beforePaths(c combination) []string {
@@ -304,6 +308,7 @@ func modifiers() []modifier {
 		{name: "--terraform-plan naming nothing", args: []string{"--no-config", "--terraform-plan", "no-such-plan.json"}},
 		{name: "--context naming nothing", args: []string{"--no-config", "--context", "no-such-snapshot.json"}},
 		{name: "discovering a policy", args: nil},
+		{name: "--require-full-coverage", args: []string{"--no-config", "--require-full-coverage"}, requireFullCoverage: true},
 	}
 }
 
@@ -367,6 +372,10 @@ func TestNoArgumentCombinationPassesAGateWithoutAnalysis(t *testing.T) {
 					_, stderr, code := run(c.args(certPath)...)
 
 					assertProperty(t, c, certPath, stderr, code)
+
+					if cert, ok := readCertificate(t, certPath); ok {
+						assertCoverageProperty(t, c, cert, code, stderr)
+					}
 				})
 			}
 		}
@@ -463,6 +472,57 @@ func assertProperty(t *testing.T, c combination, certPath, stderr string, code i
 		t.Errorf("exited %d under %s with outcome %q, over a tree holding migration-shaped files "+
 			"no analyzer claimed; want %d\n%s",
 			code, c.gate.name, cert.Outcome, cli.ExitError, stderr)
+	}
+}
+
+// assertCoverageProperty is the second axis, checked over the same input space.
+//
+// It is separate from assertProperty because it is a separate question and answering them in one
+// block was how the first version of this file ended up with a property that could not fail.
+func assertCoverageProperty(t *testing.T, c combination, cert certificate.Certificate, code int, stderr string) {
+	t.Helper()
+
+	// Property 7 — coverage is always recorded. An unset value is not FULL, and a certificate
+	// that does not say how much it read cannot be reasoned about at all.
+	if !cert.FullyCovered() && cert.Coverage != certificate.CoveragePartial {
+		t.Errorf("Coverage = %q, which is neither FULL nor PARTIAL", cert.Coverage)
+	}
+
+	// Property 8 — PASS requires full coverage. This is the ruling, checked at the boundary
+	// rather than only in the domain unit test, because the engine assembles the certificate
+	// and could set the two fields inconsistently.
+	if cert.Passed() && !cert.FullyCovered() {
+		t.Errorf("aiGateStatus PASS at coverage %q; an agent must not merge a partly understood changeset",
+			cert.Coverage)
+	}
+
+	// Property 9 — coverage and its evidence agree in both directions. A PARTIAL with no files
+	// listed is unactionable, and a FULL with files listed is incoherent.
+	switch {
+	case cert.FullyCovered() && len(cert.UnanalyzedFiles) > 0:
+		t.Errorf("Coverage FULL with %d unanalyzed file(s) listed", len(cert.UnanalyzedFiles))
+	case !cert.FullyCovered() && len(cert.UnanalyzedFiles) == 0:
+		t.Error("Coverage PARTIAL with no unanalyzed files listed; a coverage gap nobody can act on")
+	}
+
+	// Every listed file carries a reason. "Not analyzed" without one sends the reviewer to read
+	// the engine's source, which they will not do.
+	for _, u := range cert.UnanalyzedFiles {
+		if u.Path == "" || u.Reason == "" {
+			t.Errorf("unanalyzed file %+v is missing a path or a reason", u)
+		}
+	}
+
+	// Property 10 — the oracle's view of coverage, independent of the engine's. Migration-shaped
+	// files that no analyzer claims mean PARTIAL, whatever else the run concluded.
+	if oracleSeesMigrationShapedFiles(t, c) && cert.FullyCovered() {
+		t.Errorf("Coverage FULL over a tree holding migration-shaped files no analyzer claimed")
+	}
+
+	// Property 11 — --require-full-coverage does what it says, and only what it says.
+	if c.mod.requireFullCoverage && !cert.FullyCovered() && code != cli.ExitError {
+		t.Errorf("--require-full-coverage exited %d at coverage %q, want %d\n%s",
+			code, cert.Coverage, cli.ExitError, stderr)
 	}
 }
 

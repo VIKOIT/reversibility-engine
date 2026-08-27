@@ -16,6 +16,61 @@ move:
 
 ## [Unreleased]
 
+### Added
+
+**Coverage: a second axis for the part of a changeset the engine could not
+read.** Certificate schema bumped to `1.6.0`.
+
+The P0 below fixed the case where *nothing* was analyzed. This is the case where
+*some* of it was: one `.sql` migration beside three Django `.py` ones. That
+graded on the file it read and could reach A / PASS with the rest unexamined —
+the same disease in the form more likely to occur, since a real pull request
+usually touches something the engine understands.
+
+**Coverage is a fact about the changeset, not a penalty, and it is not folded
+into the grade.**
+
+| Field | Meaning |
+| --- | --- |
+| `coverage` | `FULL` or `PARTIAL`. A changeset with nothing claimable is vacuously `FULL` — nothing was skipped. |
+| `unanalyzedFiles` | Every file the engine did not read, each with the reason. A list, never a count: a reviewer's next question is always "which ones". |
+
+- **`PARTIAL` never changes the grade.** A file the engine cannot read is not
+  evidence that the change is unsafe. `TestPartialCoverageNeverChangesTheGrade`
+  certifies the same SQL with and without an unreadable sibling and compares every
+  measured field.
+- **`aiGateStatus: PASS` now requires grade A *and* `FULL` coverage.** An
+  autonomous agent gets no merge on a changeset that was only partly understood.
+  The enforcement lives in `Grade.Gate(Coverage)` — coverage is a parameter, not a
+  field read elsewhere, so a caller who has not thought about coverage does not
+  compile. Seven call sites had to be updated, which is the mechanism working.
+- **The markdown certificate names every unanalyzed file, above the findings.** A
+  list of what the engine *did* find, printed first, is exactly what makes an
+  incomplete analysis look complete.
+- **`--require-full-coverage`** (action input `require-full-coverage`) makes
+  `PARTIAL` exit 2. Off by default.
+
+**The exit code and `aiGateStatus` diverge here, deliberately.** Grade A with
+partial coverage exits **0** under `--gate` and reports `aiGateStatus: FAIL`. The
+exit code is the human pipeline's gate — it compares `effectiveGrade` and honours
+waivers, per S10 — and a human can read the list of skipped files and judge. An
+agent cannot, so the field it reads is stricter.
+`TestGateExitCodeAndAgentGateDivergeOnPartialCoverage` pins it so the gap is not
+closed by accident in either direction.
+
+The help for `--gate` used to call it "the setting autonomous agents must use",
+and the README said much the same. That was already loose and is now wrong: an
+agent reads `gate-status`, never an exit code. Both are corrected.
+
+**This is now the project's pattern for a whole class of question**, recorded in
+`docs/SPECIFICATION.md` §2: *the grade describes the evidence, the gate decides
+what to do about it.* S10 applied it to waivers, which argue for leniency; this
+applies it to coverage, which argues for severity; the answer is the same either
+way. A grade that configuration can improve stops meaning "reversibility", and a
+grade that ignorance can worsen stops meaning it just as thoroughly — while
+failing in the direction that is harder to notice, because a tool that
+over-reports looks conscientious.
+
 ### Fixed
 
 **A changeset the engine could not read graded A and passed the merge gate.**
@@ -77,11 +132,11 @@ the certificate before any renderer saw it.
 ### Added
 
 **A property test over the CLI surface, replacing the case list that missed both
-bypasses.** `TestNoArgumentCombinationPassesAGateWithoutAnalysis` enumerates 588
-combinations — 14 tree shapes × 6 gating modes × 7 modifiers, covering an empty
+bypasses.** `TestNoArgumentCombinationPassesAGateWithoutAnalysis` enumerates 672
+combinations — 14 tree shapes × 6 gating modes × 8 modifiers, covering an empty
 directory, an unreadable directory, unsupported extensions, a path matching
 nothing, a glob that expanded to nothing, a config ignoring everything, and
-`--before` pointing at an identical tree — and checks six properties against an
+`--before` pointing at an identical tree — and checks eleven properties against an
 oracle that never asks the engine anything.
 
 The oracle restates the extension conventions independently on purpose. Deriving
@@ -89,11 +144,24 @@ them from `Engine.Supports` would make the test agree with the engine by
 construction, and whether the engine and the world agree about what was read is
 the entire question.
 
-Verified by mutation rather than by passing: reintroducing the P0 fails 324 of the
-588 cases, making `UNSUPPORTED_CONTENT` exit 0 fails 90, disabling candidate
-detection fails 90, and stopping the CLI from showing candidates to the engine
-fails 90. The first version of the file caught only the first of those four — the
-sixth property exists because the mutation found the hole.
+Verified by mutation rather than by passing. Eight mutations, and the number of the
+672 cases each one fails:
+
+| Mutation | Cases failed |
+| --- | --- |
+| Non-analyzed outcomes grade A again (the P0 itself) | 324 |
+| `UNSUPPORTED_CONTENT` exits 0 under a gate | 90 |
+| Candidate detection disabled | 90 |
+| The CLI stops showing candidates to the engine | 90 |
+| The gate ignores coverage (PASS on grade A alone) | 42 |
+| Coverage is always `FULL` | 168 |
+| `--require-full-coverage` is a no-op | 6 |
+| `unanalyzedFiles` emptied | 168 |
+
+The first version of the file caught only the first of these. Disabling candidate
+detection passed all 588 cases, because every Django tree simply became
+`NO_CANDIDATES`, which the exit-0 branch permits — the invariant survived and the
+product did not. Property 6 exists because that mutation found the hole.
 
 ### Fixed
 

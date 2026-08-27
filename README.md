@@ -59,7 +59,7 @@ never `0` — absence of output is never success. See [Fail-closed by
 construction](#fail-closed-by-construction).
 
 > **Status: v1.1.2.** Usable end to end, and packaged as a GitHub Action. Every
-> certificate carries its own `schemaVersion`, currently `1.5.0`, which bumps on
+> certificate carries its own `schemaVersion`, currently `1.6.0`, which bumps on
 > any breaking field change — so a consumer can pin against the schema rather than
 > against the tool. Every rule ID has a fixture pair in `testdata/`: a rule with no
 > fixture does not exist.
@@ -193,8 +193,14 @@ jobs:
 That is the whole setup. There is no Go toolchain to install and no C compiler to
 configure.
 
-`gate` is the worst grade that still passes. Autonomous agents must run at `A` —
-grade A is the only verdict that permits an agent to merge.
+`gate` is the worst grade that still passes, and it gates **your** pipeline: it
+follows the grade and honours policy waivers.
+
+**An autonomous agent must read `gate-status`, not the job's exit code.** The two
+are not the same and are not meant to be — `gate-status` is `PASS` only at grade
+A *and* full coverage, so a change the engine only partly read fails it while the
+job still succeeds. Set `require-full-coverage: true` if you want the job to fail
+there too.
 
 ### This is a composite action, not a Docker action
 
@@ -269,6 +275,7 @@ when the gate stops gating, not by convention:
 | A certificate exists but its **verdict cannot be read back** | exit 2 |
 | A policy that will not resolve (a waiver missing `reason` or `expires`) | exit 2 |
 | Files that may be migrations that **no analyzer supports**, under a gate | **exit 2**, grade `N/A`, and the certificate names the files |
+| `--require-full-coverage` and some file was not analyzed | **exit 2**, and stderr names each file and why |
 | The provider cannot fetch the changeset (rate limit, 5xx, oversized diff) | grade **F**, and the certificate is still posted |
 | A panic anywhere in an analyzer | grade **F**, rule `ENGINE_PANIC` |
 | SQL that will not parse, or a YAML file that is not a manifest | grade **F** (`PG027` / `K8S014`, `UNKNOWN`) |
@@ -643,6 +650,41 @@ thirteen Django migrations graded **A** with gate **PASS**, because "no findings
 and "no analysis" were the same value. If you gate on `grade != 'F'`, switch to
 `grade == 'A'` or read `outcome`; if you gate on `aiGateStatus == 'PASS'` or on
 the exit code, you are already correct.
+
+### Coverage — how much of the change was read
+
+A changeset can be part readable and part not: one `.sql` migration beside three
+Django `.py` ones. **Coverage is a second axis, and it is deliberately not folded
+into the grade.**
+
+| `coverage` | Meaning |
+| --- | --- |
+| `FULL` | Everything any analyzer could claim was claimed. A change with nothing claimable is vacuously full — nothing was skipped. |
+| `PARTIAL` | Files that may be migrations went unread. `unanalyzedFiles` names every one, with the reason. |
+
+- **`PARTIAL` never changes the grade.** A file this engine cannot read is not
+  evidence that your change is unsafe. Inventing severity from ignorance is the
+  mirror of inventing safety from it.
+- **`aiGateStatus` is `PASS` only at grade A *and* `FULL` coverage.** An
+  autonomous agent gets no merge on a change that was only partly understood. You
+  can read the list of skipped files and decide; it cannot.
+- **The certificate names every unanalyzed file, above the findings**, so you
+  never have to infer what was skipped.
+
+```console
+$ revctl check --gate ./db/migrate          # one .sql, one .rb
+grade A · coverage PARTIAL · aiGateStatus FAIL · exit 0
+
+$ revctl check --gate --require-full-coverage ./db/migrate
+revctl: --require-full-coverage: 1 file(s) that may be migrations were not analyzed
+  - db/migrate/0002_backfill.rb (no analyzer reads .rb migrations)
+exit 2
+```
+
+**The exit code and `aiGateStatus` diverge here on purpose.** The exit code is
+your pipeline's gate — it follows the grade and honours waivers — and
+`--require-full-coverage` is how you opt into the agent's stricter bar. Teams
+standardised on a migration format this engine cannot read will want it on.
 
 The five verdicts a finding can carry, in severity order:
 

@@ -59,8 +59,21 @@ func TestZeroValuesAreNeverSafe(t *testing.T) {
 	if g.Rank() >= domain.GradeF.Rank() {
 		t.Errorf("zero Grade ranks %d, at or above F (%d)", g.Rank(), domain.GradeF.Rank())
 	}
-	if g.Gate() != domain.GateFail {
-		t.Errorf("zero Grade gate = %q, want FAIL", g.Gate())
+	if g.Gate(domain.CoverageFull) != domain.GateFail {
+		t.Errorf("zero Grade gate = %q, want FAIL", g.Gate(domain.CoverageFull))
+	}
+
+	// Coverage has a zero value too, and it must not be the permissive one. A certificate
+	// assembled by code that forgot the field cannot open the merge gate.
+	var c domain.Coverage
+	if c.Valid() {
+		t.Error("zero Coverage is valid; an unrecorded coverage must not pass validation")
+	}
+	if c.Full() {
+		t.Error("zero Coverage reads as full; an unknown coverage is not a complete one")
+	}
+	if domain.GradeA.Gate(c) == domain.GatePass {
+		t.Error("grade A with an unset coverage gates PASS; an agent must not merge on a run whose coverage nobody recorded")
 	}
 	if g.Threshold() {
 		t.Error("zero Grade is accepted as a gating threshold; an unset minimum gates nothing")
@@ -85,11 +98,13 @@ func TestNotApplicableIsNeverAPass(t *testing.T) {
 
 	na := domain.GradeNotApplicable
 
-	if na.Gate() == domain.GatePass {
-		t.Error("N/A gates PASS; a changeset nobody analyzed must never authorise a merge")
-	}
-	if na.Gate() != domain.GateNotApplicable {
-		t.Errorf("N/A gate = %q, want NOT_APPLICABLE", na.Gate())
+	for _, coverage := range []domain.Coverage{domain.CoverageFull, domain.CoveragePartial, ""} {
+		if na.Gate(coverage) == domain.GatePass {
+			t.Errorf("N/A gates PASS at coverage %q; a changeset nobody analyzed must never authorise a merge", coverage)
+		}
+		if na.Gate(coverage) != domain.GateNotApplicable {
+			t.Errorf("N/A gate = %q at coverage %q, want NOT_APPLICABLE", na.Gate(coverage), coverage)
+		}
 	}
 	if na.Rank() >= domain.GradeF.Rank() {
 		t.Errorf("N/A ranks %d, at or above F (%d); an unmeasured change must not clear a threshold",
@@ -227,10 +242,64 @@ func TestGradeGate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.grade), func(t *testing.T) {
 			t.Parallel()
-			if got := tt.grade.Gate(); got != tt.want {
-				t.Errorf("Grade(%q).Gate() = %q, want %q", tt.grade, got, tt.want)
+			if got := tt.grade.Gate(domain.CoverageFull); got != tt.want {
+				t.Errorf("Grade(%q).Gate(FULL) = %q, want %q", tt.grade, got, tt.want)
 			}
 		})
+	}
+}
+
+// PASS requires grade A and full coverage, and this is the whole truth table.
+//
+// An autonomous agent gets no merge on a changeset that was only partly understood. A human
+// reading a PARTIAL certificate can see the list of files nobody analyzed and judge; an agent
+// cannot, so it does not get the benefit of the doubt.
+func TestGateRequiresFullCoverageToPass(t *testing.T) {
+	t.Parallel()
+
+	grades := []domain.Grade{domain.GradeA, domain.GradeB, domain.GradeC, domain.GradeF,
+		domain.GradeNotApplicable, domain.Grade(""), domain.Grade("A+")}
+	coverages := []domain.Coverage{domain.CoverageFull, domain.CoveragePartial, domain.Coverage(""),
+		domain.Coverage("COMPLETE")}
+
+	for _, g := range grades {
+		for _, c := range coverages {
+			got := g.Gate(c)
+
+			wantPass := g == domain.GradeA && c == domain.CoverageFull
+			if (got == domain.GatePass) != wantPass {
+				t.Errorf("Grade(%q).Gate(%q) = %q; PASS should be %v", g, c, got, wantPass)
+			}
+
+			// N/A is NOT_APPLICABLE whatever the coverage: nothing was assessed, so there is no
+			// verdict to qualify.
+			if g == domain.GradeNotApplicable && got != domain.GateNotApplicable {
+				t.Errorf("Grade(N/A).Gate(%q) = %q, want NOT_APPLICABLE", c, got)
+			}
+		}
+	}
+}
+
+// Coverage is a fact about the changeset, not a penalty. It must never appear anywhere a grade
+// is computed — that is the whole point of the two-axis certificate, and the mirror of the bug
+// that made A mean two things.
+func TestCoverageIsNotAGradeModifier(t *testing.T) {
+	t.Parallel()
+
+	for _, g := range []domain.Grade{domain.GradeA, domain.GradeB, domain.GradeC, domain.GradeF} {
+		// Cap is the only operation that could smuggle a coverage-derived ceiling in, and it
+		// takes a Grade, so this is a compile-time guarantee restated as a runtime one: the
+		// grade is whatever it was, at either coverage.
+		if g.Cap(g) != g {
+			t.Errorf("Grade(%q).Cap(itself) = %q", g, g.Cap(g))
+		}
+	}
+
+	if domain.CoveragePartial.Full() {
+		t.Error("PARTIAL reads as full coverage")
+	}
+	if !domain.CoverageFull.Full() {
+		t.Error("FULL does not read as full coverage")
 	}
 }
 
@@ -303,12 +372,12 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 	// Downstream merge gates parse this. Changing it is a deliberate, breaking act — if this
 	// test fails, the version was bumped, and that must be intentional.
 	//
-	// 1.5.0 added Outcome, and added N/A to Grade and NOT_APPLICABLE to AIGateStatus. That is
-	// the second bump to widen an existing enum, after 1.3.0's WILL_FAIL, and it is the more
-	// disruptive of the two: a gate written as `grade == "A"` is unaffected, but one written as
-	// `grade != "F"` starts passing changesets nobody analyzed.
-	if domain.SchemaVersion != "1.5.0" {
-		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.5.0")
+	// 1.6.0 added Coverage and UnanalyzedFiles, and narrowed the gate: PASS now requires grade
+	// A *and* full coverage. That is a semantic change and not only an additive one — a
+	// partially covered changeset that used to gate PASS now gates FAIL — which is why it took
+	// a version of its own rather than folding into the unreleased 1.5.0.
+	if domain.SchemaVersion != "1.6.0" {
+		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.6.0")
 	}
 }
 
@@ -320,7 +389,8 @@ func TestGateFollowsGradeNotEffectiveGrade(t *testing.T) {
 	cert := domain.ReversibilityCertificate{
 		Grade:          domain.GradeF,
 		EffectiveGrade: domain.GradeA,
-		AIGateStatus:   domain.GradeF.Gate(),
+		Coverage:       domain.CoverageFull,
+		AIGateStatus:   domain.GradeF.Gate(domain.CoverageFull),
 	}
 
 	if cert.AIGateStatus != domain.GateFail {

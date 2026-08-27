@@ -54,6 +54,33 @@ const (
 	GateNotApplicable GateStatus = "NOT_APPLICABLE"
 )
 
+// Coverage is how much of the changeset the engine actually read. Added in schema 1.6.0.
+//
+// It is a second axis, not a modifier of the grade. PARTIAL never changes Grade — a file the
+// engine cannot parse is not evidence that the change is unsafe. It changes only the gate:
+// AIGateStatus is PASS only when Grade is A and Coverage is FULL.
+type Coverage string
+
+// The complete set of coverage states.
+const (
+	// CoverageFull means every file any analyzer could claim was claimed. A changeset with
+	// nothing claimable is vacuously full: nothing was skipped.
+	CoverageFull Coverage = "FULL"
+
+	// CoveragePartial means files that plausibly are migrations went unread. UnanalyzedFiles
+	// names each one and why.
+	CoveragePartial Coverage = "PARTIAL"
+)
+
+// UnanalyzedFile is one file the engine could not read, and the reason. Added in schema 1.6.0.
+type UnanalyzedFile struct {
+	Path string `json:"path"`
+
+	// Reason states why no analyzer claimed this file. It describes the engine's limitation,
+	// never the file's quality.
+	Reason string `json:"reason"`
+}
+
 // AnalysisOutcome records what the run was able to do at all, before any question of grading.
 // Added in schema 1.5.0.
 //
@@ -213,9 +240,19 @@ type Certificate struct {
 	// gate on and a consumer never has to know whether a policy existed.
 	EffectiveGrade Grade `json:"effectiveGrade"`
 
-	// AIGateStatus is PASS if and only if Grade is A. It follows Grade rather than
-	// EffectiveGrade: a waiver may unblock a human's pipeline, never an agent's merge.
+	// AIGateStatus is PASS if and only if Grade is A and Coverage is FULL. It follows Grade
+	// rather than EffectiveGrade: a waiver may unblock a human's pipeline, never an agent's
+	// merge. Coverage enters for the same reason from the other side — a human can read the
+	// list of files nobody analyzed and judge for themselves, and an agent cannot.
 	AIGateStatus GateStatus `json:"aiGateStatus"`
+
+	// Coverage is how much of the changeset the engine read: FULL or PARTIAL. It never changes
+	// Grade, only this gate.
+	Coverage Coverage `json:"coverage"`
+
+	// UnanalyzedFiles names every file the engine did not read, and why. Empty when Coverage is
+	// FULL. Sorted by path.
+	UnanalyzedFiles []UnanalyzedFile `json:"unanalyzedFiles"`
 
 	// Applicable is true exactly when Outcome is ANALYZED. Retained for consumers pinned to
 	// schema 1.4.0; new code should read Outcome, which distinguishes the two ways a changeset
@@ -271,6 +308,12 @@ func (c Certificate) Passed() bool { return c.AIGateStatus == GatePass }
 // unreadable certificate is not an assessed one.
 func (c Certificate) Assessed() bool { return c.Outcome == OutcomeAnalyzed }
 
+// FullyCovered reports whether the engine read every file it could have.
+//
+// False for a certificate with no coverage field at all, which is what a pre-1.6.0 producer
+// emits: an unknown coverage is not a full one.
+func (c Certificate) FullyCovered() bool { return c.Coverage == CoverageFull }
+
 // FromDomain converts the internal certificate to the public schema.
 //
 // Slices are normalized to empty rather than nil so the JSON form is stable: encoding/json
@@ -282,6 +325,8 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 		EffectiveGrade:  Grade(in.EffectiveGrade),
 		AIGateStatus:    GateStatus(in.AIGateStatus),
 		Outcome:         AnalysisOutcome(in.Outcome),
+		Coverage:        Coverage(in.Coverage),
+		UnanalyzedFiles: make([]UnanalyzedFile, 0, len(in.UnanalyzedFiles)),
 		Applicable:      in.Applicable,
 		InputDigest:     in.InputDigest,
 		PolicyDigest:    in.PolicyDigest,
@@ -296,6 +341,10 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 
 	for _, f := range in.Findings {
 		out.Findings = append(out.Findings, fromDomainFinding(f))
+	}
+
+	for _, u := range in.UnanalyzedFiles {
+		out.UnanalyzedFiles = append(out.UnanalyzedFiles, UnanalyzedFile{Path: u.Path, Reason: u.Reason})
 	}
 
 	for _, w := range in.Waived {

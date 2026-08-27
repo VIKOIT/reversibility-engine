@@ -69,6 +69,12 @@ func (Markdown) Render(w io.Writer, cert domain.ReversibilityCertificate) error 
 
 	writeHeader(&b, cert)
 	writeBlockers(&b, cert)
+
+	// Above the findings, deliberately. A reader must never have to infer what was skipped, and
+	// a list of what the engine *did* find, printed first, is exactly what makes an incomplete
+	// analysis look complete.
+	writeUnanalyzed(&b, cert)
+
 	writeFindings(&b, cert)
 	writeWaived(&b, cert)
 	writeUndoPlan(&b, cert)
@@ -124,6 +130,15 @@ func writeHeader(b *strings.Builder, cert domain.ReversibilityCertificate) {
 	}
 
 	fmt.Fprintf(b, "| **AI merge gate** | %s |\n", gate)
+
+	// Coverage is shown only when it is PARTIAL. A FULL row on every certificate is a row
+	// readers learn to skip, and this is the row that matters on the one change where it is not
+	// full. Empty coverage — a certificate from before 1.6.0, or one assembled wrongly — is not
+	// FULL and so is shown.
+	if !cert.Coverage.Full() {
+		fmt.Fprintf(b, "| **Coverage** | ⚠️ PARTIAL — %s not analyzed |\n", plural(len(cert.UnanalyzedFiles), "file"))
+	}
+
 	fmt.Fprintf(b, "| **Findings** | %d |\n", len(cert.Findings))
 
 	if len(cert.Waived) > 0 {
@@ -188,6 +203,33 @@ func writeBlockers(b *strings.Builder, cert domain.ReversibilityCertificate) {
 		fmt.Fprintf(b, "- %s\n", blocker)
 	}
 	b.WriteString("\n")
+}
+
+// writeUnanalyzed names every file the engine did not read.
+//
+// Every one of them, never a count and never a sample. The whole purpose of the coverage axis is
+// that a reviewer can see the specific files and decide, and a truncated list would put them
+// back where they started — knowing something was skipped and not what.
+//
+// The wording is careful not to accuse the files of anything. They are unread because of a limit
+// in this engine, and a certificate that implied otherwise would be inventing severity from
+// ignorance, which is the mirror of the bug that made this field necessary.
+func writeUnanalyzed(b *strings.Builder, cert domain.ReversibilityCertificate) {
+	if len(cert.UnanalyzedFiles) == 0 {
+		return
+	}
+
+	b.WriteString("### Not analyzed\n\n")
+	b.WriteString("This engine could not read the following files. **They are not part of the grade above** — " +
+		"neither for it nor against it. The grade describes what was read; this list is what was not.\n\n")
+	b.WriteString("| File | Why |\n| --- | --- |\n")
+
+	for _, u := range cert.UnanalyzedFiles {
+		fmt.Fprintf(b, "| `%s` | %s |\n", mdCode(u.Path), mdEscape(u.Reason))
+	}
+
+	b.WriteString("\nAn autonomous agent will not merge this change: the AI merge gate requires full coverage. " +
+		"A human reviewer can see exactly what was skipped and decide.\n\n")
 }
 
 func writeFindings(b *strings.Builder, cert domain.ReversibilityCertificate) {
@@ -310,6 +352,13 @@ func writeDownMigrations(b *strings.Builder, cert domain.ReversibilityCertificat
 func writeFooter(b *strings.Builder, cert domain.ReversibilityCertificate) {
 	fmt.Fprintf(b, "---\n\n<sub>Reversibility Engine · schema %s · input digest `%s`</sub>\n",
 		cert.SchemaVersion, cert.InputDigest)
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func checkbox(ok bool) string {

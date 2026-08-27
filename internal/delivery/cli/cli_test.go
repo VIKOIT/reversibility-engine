@@ -1307,3 +1307,150 @@ func TestCatalogScanFailsClearlyWithoutTerraform(t *testing.T) {
 		t.Errorf("stderr does not say what is missing:\n%s", stderr)
 	}
 }
+
+// A partially covered changeset is still a real measurement of the part that was read, so it
+// exits 0 by default. What it never does is pass the AI merge gate.
+func TestPartialCoverageDoesNotFailTheRunByDefault(t *testing.T) {
+	t.Parallel()
+
+	root := writeTree(t, map[string]string{
+		"db/migrate/0001_idx.up.sql":   "CREATE INDEX CONCURRENTLY idx ON orders (status);\n",
+		"db/migrate/0001_idx.down.sql": "DROP INDEX CONCURRENTLY idx;\n",
+		"db/migrate/0002_backfill.rb":  "class Backfill < ActiveRecord::Migration\nend\n",
+	})
+
+	stdout, stderr, code := run("check", "--no-config", "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitOK, stderr)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+
+	// The grade is what the SQL says, untouched by the file nobody read.
+	if cert.Grade != certificate.GradeA {
+		t.Errorf("Grade = %q, want A; coverage must not move the grade. Findings: %+v", cert.Grade, cert.Findings)
+	}
+	if cert.Coverage != certificate.CoveragePartial {
+		t.Errorf("Coverage = %q, want PARTIAL", cert.Coverage)
+	}
+	if cert.FullyCovered() {
+		t.Error("FullyCovered() = true with an unread .rb migration")
+	}
+
+	// The gate is the thing that closed.
+	if cert.Passed() {
+		t.Error("a partially covered changeset passes the AI merge gate")
+	}
+
+	if len(cert.UnanalyzedFiles) != 1 || cert.UnanalyzedFiles[0].Reason == "" {
+		t.Errorf("UnanalyzedFiles = %+v, want the .rb file with a reason", cert.UnanalyzedFiles)
+	}
+}
+
+// Grade A with PARTIAL coverage is the combination the ruling turns on, and the two gates
+// deliberately answer it differently.
+//
+// The exit code is the *human* pipeline gate. It compares EffectiveGrade against a threshold and
+// it honours waivers, per S10, and the ruling is explicit that humans keep their exit code — so
+// grade A over partial coverage still exits 0. `aiGateStatus` is the *agent* gate, and it is
+// FAIL, because an agent cannot read the list of skipped files and judge for itself.
+//
+// A pipeline that wants the agent's bar asks for it with --require-full-coverage. This test
+// pins the divergence so that nobody closes it by accident in either direction.
+func TestGateExitCodeAndAgentGateDivergeOnPartialCoverage(t *testing.T) {
+	t.Parallel()
+
+	root := writeTree(t, map[string]string{
+		"db/migrate/0001_idx.up.sql":   "CREATE INDEX CONCURRENTLY idx ON orders (status);\n",
+		"db/migrate/0001_idx.down.sql": "DROP INDEX CONCURRENTLY idx;\n",
+		"db/migrate/0002_backfill.rb":  "class Backfill < ActiveRecord::Migration\nend\n",
+	})
+
+	stdout, stderr, code := run("check", "--gate", "--no-config", "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d — humans keep their exit code\n%s", code, cli.ExitOK, stderr)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+
+	if cert.Grade != certificate.GradeA {
+		t.Fatalf("Grade = %q, want A — the test is not exercising what it claims", cert.Grade)
+	}
+	if cert.Passed() {
+		t.Error("aiGateStatus is PASS on partial coverage; an agent must not merge what was only partly understood")
+	}
+
+	// And the flag that closes the gap.
+	_, _, code = run("check", "--gate", "--require-full-coverage", "--no-config", "--format", "json", root)
+	if code != cli.ExitError {
+		t.Errorf("--require-full-coverage exit code = %d, want %d", code, cli.ExitError)
+	}
+}
+
+// --require-full-coverage applies the agent's bar to a human pipeline. Exit 2, not 1: the grade
+// was not too low, part of the changeset simply was not measured.
+func TestRequireFullCoverageExitsTwo(t *testing.T) {
+	t.Parallel()
+
+	root := writeTree(t, map[string]string{
+		"db/migrate/0001_idx.up.sql":   "CREATE INDEX CONCURRENTLY idx ON orders (status);\n",
+		"db/migrate/0001_idx.down.sql": "DROP INDEX CONCURRENTLY idx;\n",
+		"db/migrate/0002_backfill.rb":  "class Backfill < ActiveRecord::Migration\nend\n",
+	})
+
+	_, stderr, code := run("check", "--require-full-coverage", "--no-config", "--format", "json", root)
+	if code != cli.ExitError {
+		t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitError, stderr)
+	}
+
+	// It has to name the file. A coverage failure a reviewer cannot act on is a coverage
+	// failure they will disable.
+	if !strings.Contains(stderr, "0002_backfill.rb") {
+		t.Errorf("stderr does not name the unanalyzed file:\n%s", stderr)
+	}
+}
+
+// The flag is off by default and must stay a no-op on a fully covered changeset, whether or not
+// a grade threshold was also given.
+func TestRequireFullCoverageIsSilentWhenCoverageIsFull(t *testing.T) {
+	t.Parallel()
+
+	root := safeMigrations(t)
+
+	for _, args := range [][]string{
+		{"check", "--require-full-coverage", "--no-config", "--format", "json", root},
+		{"check", "--require-full-coverage", "--gate", "--no-config", "--format", "json", root},
+	} {
+		_, stderr, code := run(args...)
+		if code != cli.ExitOK {
+			t.Errorf("%v: exit code = %d, want %d\n%s", args, code, cli.ExitOK, stderr)
+		}
+	}
+}
+
+// A docs-only changeset has full coverage: nothing was skipped, because there was nothing to
+// skip. --require-full-coverage must not turn "nothing to do" into a broken run.
+func TestRequireFullCoverageAcceptsAChangesetWithNothingToAnalyze(t *testing.T) {
+	t.Parallel()
+
+	root := writeTree(t, map[string]string{"README.md": "# hello\n", "main.go": "package main\n"})
+
+	stdout, stderr, code := run("check", "--require-full-coverage", "--no-config", "--format", "json", root)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d\n%s", code, cli.ExitOK, stderr)
+	}
+
+	var cert certificate.Certificate
+	if err := json.Unmarshal([]byte(stdout), &cert); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if cert.Coverage != certificate.CoverageFull {
+		t.Errorf("Coverage = %q for a docs-only change, want FULL — nothing was skipped", cert.Coverage)
+	}
+}

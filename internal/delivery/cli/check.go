@@ -39,6 +39,12 @@ type checkFlags struct {
 	noConfig bool
 	context  []string
 	plans    []string
+
+	// requireFullCoverage turns partial coverage into a failed run for humans too. It is off by
+	// default because a partially covered changeset is still a real, useful measurement of the
+	// part that was read — but a team standardised on a migration format this engine does not
+	// support wants to hear about it every time, not once.
+	requireFullCoverage bool
 }
 
 func newCheckCommand(opts Options) *cobra.Command {
@@ -76,8 +82,12 @@ func newCheckCommand(opts Options) *cobra.Command {
 		fmt.Sprintf("output format: %s", strings.Join(render.Formats(), ", ")))
 	cmd.Flags().StringVarP(&flags.output, "output", "o", "",
 		"write the certificate to a file instead of stdout")
+	// The old help for this flag called it "the setting autonomous agents must use", and since
+	// coverage became a second axis that is actively wrong: this exit code follows the grade
+	// alone and honours waivers, so it can be 0 on a changeset whose aiGateStatus is FAIL. An
+	// agent must read the certificate, not the exit status.
 	cmd.Flags().BoolVar(&flags.gate, "gate", false,
-		"exit non-zero unless the grade is A; shorthand for --min-grade A, which is the setting autonomous agents must use")
+		"exit non-zero unless the grade is A; shorthand for --min-grade A. This is a grade threshold for your pipeline — an autonomous agent must read aiGateStatus, which also requires full coverage, or pass --require-full-coverage alongside this")
 	cmd.Flags().StringVar(&flags.minGrade, "min-grade", "",
 		"exit non-zero if the grade is worse than this (A, B, C, or F)")
 	cmd.Flags().StringVar(&flags.config, "config", "",
@@ -86,6 +96,8 @@ func newCheckCommand(opts Options) *cobra.Command {
 		"ignore any .reversibility.yml, including one that would be discovered")
 	cmd.Flags().StringArrayVar(&flags.context, "context", nil,
 		"production snapshot from `revctl snapshot`, repeatable; a path that does not exist is skipped, because context is an enhancement rather than a requirement")
+	cmd.Flags().BoolVar(&flags.requireFullCoverage, "require-full-coverage", false,
+		"exit 2 when any file that may be a migration went unanalyzed; the AI merge gate already requires full coverage, and this applies the same bar to your pipeline")
 	cmd.Flags().StringArrayVar(&flags.plans, "terraform-plan", nil,
 		"analyze this file as a Terraform plan whatever it is called; repeatable. The default convention is *.tfplan.json, and this is the escape hatch for a plan named otherwise")
 
@@ -182,7 +194,7 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 		_, _ = fmt.Fprintf(opts.Stderr, "revctl: analysis reported errors, grade forced to F: %v\n", analysisErr)
 	}
 
-	return applyGate(opts.Stderr, cert, minGrade)
+	return applyGate(opts.Stderr, cert, minGrade, flags.requireFullCoverage)
 }
 
 // resolveProvider picks the source of the changeset from the flags.
@@ -301,32 +313,57 @@ func resolveMinGrade(flags *checkFlags, pol *policy.Policy) (domain.Grade, error
 // whenever no policy applied. Grade itself is left alone deliberately: it says what the evidence
 // says, and a waiver unblocks a pipeline without ever rewriting the measurement — or the AI
 // merge gate, which follows Grade and so can never be opened by a waiver.
-func applyGate(stderr io.Writer, cert domain.ReversibilityCertificate, minGrade domain.Grade) error {
-	if minGrade == "" {
+func applyGate(
+	stderr io.Writer,
+	cert domain.ReversibilityCertificate,
+	minGrade domain.Grade,
+	requireFullCoverage bool,
+) error {
+	// Two independent questions, asked in order of how badly the run failed to inform anyone.
+	//
+	// This is the same separation the S10 waiver ruling established and it is now the project's
+	// pattern: the grade describes the evidence, and the gate decides what to do about it. A
+	// waiver moves the gate and never the grade. Coverage moves the gate and never the grade.
+	// Neither is allowed to rewrite the measurement, because a measurement that configuration
+	// can move stops being a measurement.
+	gateInForce := minGrade != ""
+
+	// Nothing was read at all. The gate has no evidence to act on, and a gate with no evidence
+	// must not open. Exit 2 rather than 1: the change is not being failed, the run is.
+	if cert.Outcome == domain.OutcomeUnsupportedContent && (gateInForce || requireFullCoverage) {
+		_, _ = fmt.Fprintf(stderr, "revctl: reversibility was not assessed, so the gate cannot pass\n")
+		for _, blocker := range cert.Blockers {
+			_, _ = fmt.Fprintf(stderr, "  - %s\n", blocker)
+		}
+		return errNotAssessed
+	}
+
+	// Something was read and something was not. This is checked whether or not a grade threshold
+	// was given, because --require-full-coverage is itself the request to gate: a user who typed
+	// it asked about coverage, not about the grade.
+	if requireFullCoverage && !cert.Coverage.Full() {
+		_, _ = fmt.Fprintf(stderr,
+			"revctl: --require-full-coverage: %d file(s) that may be migrations were not analyzed\n",
+			len(cert.UnanalyzedFiles))
+		for _, u := range cert.UnanalyzedFiles {
+			_, _ = fmt.Fprintf(stderr, "  - %s (%s)\n", u.Path, u.Reason)
+		}
+		return errIncompleteCoverage
+	}
+
+	if !gateInForce {
 		// Nothing was asked to be gated, so nothing is gated — the same reason grade F exits 0
-		// here. This branch precedes the outcome switch below deliberately: an UNSUPPORTED_CONTENT
-		// exit 2 is a *gate* verdict, and a user who asked only for a report gets a report.
+		// here. A user who asked only for a report gets a report.
 		return nil
 	}
 
 	// The outcome decides before the grade does. N/A has no rank, so comparing it against a
 	// threshold would be meaningless — and it is the comparison a caller reaches for by reflex,
 	// which is why domain.Grade.Rank puts N/A below F rather than leaving it to chance.
-	switch cert.Outcome {
-	case domain.OutcomeNoCandidates:
+	if cert.Outcome == domain.OutcomeNoCandidates {
 		// There was genuinely nothing to assess. The certificate says so, in a grade and a gate
 		// status that cannot be mistaken for approval, and the run itself succeeded.
 		return nil
-
-	case domain.OutcomeUnsupportedContent:
-		// The Django case. Files that plausibly are migrations, and nothing here that could read
-		// them — so the gate has no evidence to act on, and a gate with no evidence must not
-		// open. Exit 2 rather than 1: the change is not being failed, the run is.
-		_, _ = fmt.Fprintf(stderr, "revctl: reversibility was not assessed, so the gate cannot pass\n")
-		for _, blocker := range cert.Blockers {
-			_, _ = fmt.Fprintf(stderr, "  - %s\n", blocker)
-		}
-		return errNotAssessed
 	}
 
 	effective := cert.EffectiveGrade

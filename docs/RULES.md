@@ -61,7 +61,7 @@ depends on:
 | --- | --- | --- |
 | `0` | The run completed and the gate was met. | The effective grade is at or above the threshold. |
 | `1` | The run completed and the gate was **not** met. | The effective grade is below the threshold. The certificate is still written — it is the artifact the user asked for. |
-| `2` | **The run did not complete.** | No arguments were given; no certificate was produced; a certificate's verdict cannot be read back; a policy file cannot be resolved; the changeset could not be fetched; the changeset held files that plausibly are migrations and no analyzer could assess them (`UNSUPPORTED_CONTENT`, and only when a gate was asked for — with no `--gate` or `--min-grade` nothing is being gated, exactly as grade F exits 0 there). |
+| `2` | **The run did not complete.** | No arguments were given; no certificate was produced; a certificate's verdict cannot be read back; a policy file cannot be resolved; the changeset could not be fetched; the changeset held files that plausibly are migrations and no analyzer could assess them (`UNSUPPORTED_CONTENT`, and only when a gate was asked for — with no `--gate` or `--min-grade` nothing is being gated, exactly as grade F exits 0 there); or `--require-full-coverage` was given and coverage was `PARTIAL`. |
 
 Three consequences follow, and each is enforced by a test rather than by convention:
 
@@ -324,10 +324,45 @@ documented in [`ESTIMATES.md`](ESTIMATES.md). **They are estimates and are label
 wherever they appear.**
 
 ```
-AIGateStatus = PASS            <=>  Grade == A
 AIGateStatus = NOT_APPLICABLE  <=>  Grade == N/A
+AIGateStatus = PASS            <=>  Grade == A AND Coverage == FULL
 AIGateStatus = FAIL             otherwise
 ```
+
+### Coverage: how much of the changeset was read
+
+**Coverage is a fact about the changeset, not a penalty.** It is a second axis, and it is
+deliberately not folded into the grade.
+
+| Coverage | Reached when |
+| --- | --- |
+| `FULL` | Every file any analyzer could claim was claimed. A changeset with nothing claimable is vacuously full — nothing was skipped. |
+| `PARTIAL` | Files that plausibly are migrations went unread. `UnanalyzedFiles` names every one of them, each with the reason. |
+
+- **`PARTIAL` never changes the grade.** A file the engine cannot read is not evidence that the
+  change is unsafe. Inventing severity from ignorance is the mirror image of inventing safety
+  from it, which is the bug §3 already had once — and it is the easier of the two to defend,
+  because a tool that over-reports looks conscientious.
+- **A PASS requires grade A *and* full coverage.** An autonomous agent gets no merge on a
+  changeset that was only partly understood. A human reading a `PARTIAL` certificate can see the
+  list of files nobody analyzed and judge for themselves; an agent cannot, so it does not get the
+  benefit of the doubt.
+- **The markdown certificate names every unanalyzed file, above the findings.** All of them,
+  never a count and never a sample. A list of what the engine *did* find, printed first, is
+  exactly what makes an incomplete analysis look complete.
+- **`--require-full-coverage` makes `PARTIAL` exit 2.** Off by default, because a partially
+  covered changeset is still a real measurement of the part that was read. A team standardised on
+  a migration format this engine cannot read will want it on.
+
+**The exit code and `AIGateStatus` diverge here, deliberately.** Grade A with partial coverage
+exits **0** under `--gate` and reports `aiGateStatus: FAIL`. The exit code is the human
+pipeline's gate — it compares `EffectiveGrade` and honours waivers — and `--require-full-coverage`
+is how a pipeline opts into the agent's stricter bar.
+
+This is the same separation as the S10 waiver ruling and it is now the project's pattern for the
+whole class: **the grade describes the evidence, and the gate decides what to do about it.** A
+waiver moves the gate and never the grade; coverage moves the gate and never the grade. See
+[`docs/SPECIFICATION.md` §2](SPECIFICATION.md#2-the-philosophy-fail-closed).
 
 ### What the run was able to do at all
 
@@ -369,10 +404,10 @@ found 13 files in django/contrib/auth/migrations that no analyzer supports
 (.py migrations). Reversibility was not assessed.
 ```
 
-**Partial coverage is not covered by this rule and is an open question** — see
-[`docs/SPECIFICATION.md` §16](SPECIFICATION.md). A changeset holding one `.sql` file and
-thirteen Django `.py` migrations is `ANALYZED` today, and grades on the one file the engine
-read. That is the same disease in a milder form.
+**Partial coverage is the other half of this and is a separate axis.** A changeset holding one
+`.sql` file and thirteen Django `.py` migrations is `ANALYZED` — one analyzer did claim a file —
+and it is also `PARTIAL`. It grades on what was read and it does not pass the merge gate. See
+"Coverage" below.
 
 ### UndoPlan
 

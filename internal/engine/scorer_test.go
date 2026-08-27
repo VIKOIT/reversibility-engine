@@ -242,8 +242,13 @@ func TestScoreGateAgreesWithGrade(t *testing.T) {
 		grade, _ := score(in)
 
 		wantPass := grade == domain.GradeA
-		if got := grade.Gate() == domain.GatePass; got != wantPass {
-			t.Errorf("grade %q gates %q", grade, grade.Gate())
+		if got := grade.Gate(domain.CoverageFull) == domain.GatePass; got != wantPass {
+			t.Errorf("grade %q at full coverage gates %q", grade, grade.Gate(domain.CoverageFull))
+		}
+
+		// Partial coverage can only ever remove a PASS, never create one.
+		if grade.Gate(domain.CoveragePartial) == domain.GatePass {
+			t.Errorf("grade %q gates PASS at partial coverage", grade)
 		}
 	}
 }

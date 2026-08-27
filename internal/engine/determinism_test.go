@@ -394,7 +394,7 @@ func TestCertificateInvariantsHoldForEveryFixture(t *testing.T) {
 				if !cert.Grade.Valid() {
 					t.Errorf("Grade %q is not a valid grade", cert.Grade)
 				}
-				if cert.AIGateStatus != cert.Grade.Gate() {
+				if cert.AIGateStatus != cert.Grade.Gate(cert.Coverage) {
 					t.Errorf("AIGateStatus %q disagrees with grade %q", cert.AIGateStatus, cert.Grade)
 				}
 				if cert.SchemaVersion != domain.SchemaVersion {

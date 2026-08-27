@@ -10,13 +10,13 @@
           "informationUri": "https://github.com/VIKOIT/reversibility-engine",
           "rules": [
             {
-              "id": "PG020",
-              "name": "PG020",
+              "id": "PG024",
+              "name": "PG024",
               "shortDescription": {
                 "text": "REVERSIBLE change with NONE lock hazard"
               },
               "fullDescription": {
-                "text": "Adding orders.notes is the safest schema change available: a constant default is stored in the catalog rather than written to every row."
+                "text": "Index idx is built without blocking writes and is removed again by a single concurrent drop."
               },
               "defaultConfiguration": {
                 "level": "note"
@@ -35,16 +35,16 @@
       },
       "results": [
         {
-          "ruleId": "PG020",
+          "ruleId": "PG024",
           "level": "note",
           "message": {
-            "text": "REVERSIBLE: Adding orders.notes is the safest schema change available: a constant default is stored in the catalog rather than written to every row. Undo: ALTER TABLE orders DROP COLUMN notes;"
+            "text": "REVERSIBLE: Index idx is built without blocking writes and is removed again by a single concurrent drop. Undo: DROP INDEX CONCURRENTLY idx;"
           },
           "locations": [
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "migrations/0001_add_notes.up.sql"
+                  "uri": "db/migrate/0001_add_index.up.sql"
                 },
                 "region": {
                   "startLine": 1
@@ -57,16 +57,16 @@
       "invocations": [
         {
           "executionSuccessful": true,
-          "exitCodeDescription": "grade C, AI merge gate FAIL",
+          "exitCodeDescription": "grade A, AI merge gate FAIL, partial coverage: 1 file(s) not analyzed",
           "properties": {
-            "grade": "C",
-            "effectiveGrade": "C",
+            "grade": "A",
+            "effectiveGrade": "A",
             "aiGateStatus": "FAIL",
             "outcome": "ANALYZED",
-            "coverage": "FULL",
-            "unanalyzedFileCount": 0,
+            "coverage": "PARTIAL",
+            "unanalyzedFileCount": 1,
             "applicable": true,
-            "inputDigest": "900c272e7e264d22031f0b8b00deb44425ebe2f9290670f11c9067a69677ba12",
+            "inputDigest": "d43eb2b67d6b3e10502f57e99a7c761c3011baad52059b135e1cf0f80e71f760",
             "certificateSchemaVersion": "1.6.0"
           }
         }

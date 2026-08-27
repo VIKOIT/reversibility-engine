@@ -5,7 +5,7 @@ package domain
 
 // SchemaVersion is the version of the certificate wire format. It follows semantic versioning
 // and is bumped on any breaking field change, because downstream merge gates parse this.
-const SchemaVersion = "1.5.0"
+const SchemaVersion = "1.6.0"
 
 // DownMigrationStatus records the outcome of down-migration validation for one migration pair,
 // at the three levels defined in docs/RULES.md §1.
@@ -37,6 +37,19 @@ type DownMigrationStatus struct {
 	// SymmetryNotes explains what level 3 objected to, so a reviewer can dismiss a false
 	// positive without reading the analyzer's source.
 	SymmetryNotes []string `json:"symmetryNotes,omitempty"`
+}
+
+// UnanalyzedFile is one file the engine could not read, and the reason.
+//
+// The reason is recorded per file rather than once per certificate because the answer differs:
+// a .py under a migrations directory and a stray .sql that no analyzer claimed are unread for
+// different reasons, and a reviewer deciding whether to care needs the specific one.
+type UnanalyzedFile struct {
+	Path string `json:"path"`
+
+	// Reason states, in one clause, why no analyzer claimed this file. It describes the
+	// engine's limitation, never the file's quality: nothing here is an accusation.
+	Reason string `json:"reason"`
 }
 
 // ReversibilityCertificate is the engine's complete verdict on a changeset.
@@ -72,11 +85,29 @@ type ReversibilityCertificate struct {
 	// It is never used for AIGateStatus. That is the whole point of the split.
 	EffectiveGrade Grade `json:"effectiveGrade"`
 
-	// AIGateStatus is PASS if and only if Grade is A. Autonomous agents merge on PASS only.
+	// AIGateStatus is PASS if and only if Grade is A and Coverage is FULL. Autonomous agents
+	// merge on PASS only.
 	//
 	// It follows Grade, not EffectiveGrade, so a waiver can unblock a human's pipeline without
-	// ever authorising an agent to merge something nobody could undo.
+	// ever authorising an agent to merge something nobody could undo. Coverage enters for the
+	// same reason from the other direction: a human reading a PARTIAL certificate can see which
+	// files nobody read and judge for themselves, and an agent cannot.
 	AIGateStatus GateStatus `json:"aiGateStatus"`
+
+	// Coverage is how much of the changeset the engine actually read: FULL when it claimed
+	// every file it could have, PARTIAL when files that plausibly are migrations went unread.
+	//
+	// It is a second axis, not a modifier of the first. PARTIAL never changes Grade — a file
+	// the engine cannot parse is not evidence that the change is unsafe, and inventing severity
+	// from ignorance is the mirror of inventing safety from it. It changes only the gate.
+	Coverage Coverage `json:"coverage"`
+
+	// UnanalyzedFiles names every file the engine did not read, and why. Empty when Coverage is
+	// FULL.
+	//
+	// It is the evidence behind Coverage, and it is a list rather than a count because a
+	// reviewer's next question is always "which ones". Sorted by path.
+	UnanalyzedFiles []UnanalyzedFile `json:"unanalyzedFiles"`
 
 	// Applicable is true exactly when Outcome is ANALYZED. It is retained for consumers pinned
 	// to schema 1.4.0 and it is derived, never set independently — two fields that can disagree

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1.6.0",
+  "grade": "A",
+  "outcome": "ANALYZED",
+  "effectiveGrade": "A",
+  "aiGateStatus": "FAIL",
+  "coverage": "PARTIAL",
+  "unanalyzedFiles": [
+    {
+      "path": "db/migrate/0002_backfill_status.rb",
+      "reason": "no analyzer reads .rb migrations"
+    }
+  ],
+  "applicable": true,
+  "inputDigest": "d43eb2b67d6b3e10502f57e99a7c761c3011baad52059b135e1cf0f80e71f760",
+  "findings": [
+    {
+      "ruleId": "PG024",
+      "file": "db/migrate/0001_add_index.up.sql",
+      "line": 1,
+      "statement": "CREATE INDEX CONCURRENTLY idx ON orders (status)",
+      "reversibility": "REVERSIBLE",
+      "lockHazard": "NONE",
+      "rationale": "Index idx is built without blocking writes and is removed again by a single concurrent drop.",
+      "undoStep": "DROP INDEX CONCURRENTLY idx;"
+    }
+  ],
+  "waived": [],
+  "undoPlan": [
+    "DROP INDEX CONCURRENTLY idx;"
+  ],
+  "blockers": [],
+  "downMigrations": [
+    {
+      "migration": "0001_add_index",
+      "upFile": "db/migrate/0001_add_index.up.sql",
+      "downFile": "db/migrate/0001_add_index.down.sql",
+      "exists": true,
+      "parses": true,
+      "symmetric": true
+    }
+  ]
+}

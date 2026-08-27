@@ -22,8 +22,13 @@ func TestFromDomainCarriesEveryField(t *testing.T) {
 		Grade:          domain.GradeC,
 		EffectiveGrade: domain.GradeC,
 		AIGateStatus:   domain.GateFail,
-		Applicable:     true,
-		InputDigest:    "deadbeef",
+		Coverage:       domain.CoveragePartial,
+		UnanalyzedFiles: []domain.UnanalyzedFile{{
+			Path:   "app/migrations/0001_initial.py",
+			Reason: "no analyzer reads .py migrations",
+		}},
+		Applicable:  true,
+		InputDigest: "deadbeef",
 		Findings: []domain.Finding{{
 			RuleID:        "PG012",
 			File:          "migrations/0001.up.sql",
@@ -50,9 +55,14 @@ func TestFromDomainCarriesEveryField(t *testing.T) {
 	got := certificate.FromDomain(in)
 
 	want := certificate.Certificate{
-		SchemaVersion:  domain.SchemaVersion,
-		Grade:          certificate.GradeC,
-		AIGateStatus:   certificate.GateFail,
+		SchemaVersion: domain.SchemaVersion,
+		Grade:         certificate.GradeC,
+		AIGateStatus:  certificate.GateFail,
+		Coverage:      certificate.CoveragePartial,
+		UnanalyzedFiles: []certificate.UnanalyzedFile{{
+			Path:   "app/migrations/0001_initial.py",
+			Reason: "no analyzer reads .py migrations",
+		}},
 		Applicable:     true,
 		EffectiveGrade: certificate.GradeC,
 		InputDigest:    "deadbeef",
@@ -207,11 +217,11 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 
 	// Downstream merge gates pin this. A change here is a deliberate, breaking act.
 	//
-	// 1.5.0 added Outcome, plus N/A to Grade and NOT_APPLICABLE to GateStatus. A consumer
-	// testing `grade == "A"` is unaffected; one testing `grade != "F"` now passes changesets
-	// nobody analyzed, which is why the bump is a minor rather than a patch.
-	if certificate.SchemaVersion != "1.5.0" {
-		t.Errorf("SchemaVersion = %q, want 1.5.0", certificate.SchemaVersion)
+	// 1.6.0 added Coverage and UnanalyzedFiles and narrowed the gate: PASS requires grade A and
+	// full coverage. A consumer reading aiGateStatus is correct without changes; one that
+	// re-derived the gate from the grade alone is now wrong, which is the reason for the bump.
+	if certificate.SchemaVersion != "1.6.0" {
+		t.Errorf("SchemaVersion = %q, want 1.6.0", certificate.SchemaVersion)
 	}
 }
 

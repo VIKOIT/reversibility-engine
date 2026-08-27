@@ -114,6 +114,34 @@ func unsupportedContentCertificate(t *testing.T) domain.ReversibilityCertificate
 	return unanalyzedCertificate(t, files...)
 }
 
+// partialCoverageCertificate is the two-axis case: a migration the engine read perfectly well,
+// beside migrations it cannot read at all.
+//
+// The SQL alone would grade A and gate PASS. It still grades A — coverage is a fact about the
+// changeset, not a penalty, and PARTIAL never moves a grade — and the gate is FAIL, because an
+// autonomous agent does not merge a changeset that was only partly understood.
+func partialCoverageCertificate(t *testing.T) domain.ReversibilityCertificate {
+	t.Helper()
+
+	return unanalyzedCertificate(t,
+		domain.ChangedFile{
+			Path:    "db/migrate/0001_add_index.up.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("CREATE INDEX CONCURRENTLY idx ON orders (status);\n"),
+		},
+		domain.ChangedFile{
+			Path:    "db/migrate/0001_add_index.down.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("DROP INDEX CONCURRENTLY idx;\n"),
+		},
+		domain.ChangedFile{
+			Path:    "db/migrate/0002_backfill_status.rb",
+			Status:  domain.StatusAdded,
+			Current: []byte("class BackfillStatus < ActiveRecord::Migration\nend\n"),
+		},
+	)
+}
+
 func goldenPath(t *testing.T, name, format string) string {
 	t.Helper()
 
@@ -180,6 +208,7 @@ func TestGolden(t *testing.T) {
 	}{
 		{"not-applicable", notApplicableCertificate},
 		{"unsupported-content", unsupportedContentCertificate},
+		{"partial-coverage", partialCoverageCertificate},
 	}
 
 	for _, scenario := range unanalyzed {

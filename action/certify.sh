@@ -82,6 +82,13 @@ fi
 
 FAIL_ON_GATE="${INPUT_FAIL_ON_GATE:-true}"
 
+# Off by default. gate-status already refuses to pass a partially analyzed change, so this only
+# decides whether the *job* fails too — which is a choice about the pipeline, not about safety.
+COVERAGE_ARGS=''
+if [ "${INPUT_REQUIRE_FULL_COVERAGE:-false}" = 'true' ]; then
+    COVERAGE_ARGS='--require-full-coverage'
+fi
+
 # ------------------------------------------------------------------------------------------
 # What to compare against
 # ------------------------------------------------------------------------------------------
@@ -139,7 +146,8 @@ set +f
 # The requested format carries the gate, because its exit code is the one the job is graded on.
 # Exit codes: 0 met, 1 below the gate, 2 the run did not complete.
 set +e
-"$REVCTL" check --base "$BASE" --format "$FORMAT" --output "$CERT" --min-grade "$GATE" "${SPEC[@]}"
+"$REVCTL" check --base "$BASE" --format "$FORMAT" --output "$CERT" --min-grade "$GATE" \
+    ${COVERAGE_ARGS} "${SPEC[@]}"
 RC=$?
 set -e
 
@@ -198,6 +206,11 @@ FINDINGS="$(jq -r '.findings | length' "$CERT_JSON")"
 # claim this field exists to stop being made silently.
 OUTCOME="$(jq -r '.outcome // ""' "$CERT_JSON")"
 
+# Coverage defaults to empty rather than FULL for the same reason: claiming a pre-1.6.0
+# certificate covered everything is a claim its producer never made.
+COVERAGE="$(jq -r '.coverage // ""' "$CERT_JSON")"
+UNANALYZED="$(jq -r '.unanalyzedFiles | length' "$CERT_JSON" 2> /dev/null || echo 0)"
+
 # An unreadable grade is UNKNOWN by another name, and UNKNOWN fails. jq emits "null" for a
 # missing key rather than failing, so the // defaults above do not catch a malformed document.
 #
@@ -248,6 +261,8 @@ emit 'gate-status' "$GATE_STATUS"
 emit 'findings-count' "$FINDINGS"
 emit 'applicable' "$APPLICABLE"
 emit 'outcome' "$OUTCOME"
+emit 'coverage' "$COVERAGE"
+emit 'unanalyzed-count' "$UNANALYZED"
 emit 'certificate-path' "$CERT"
 emit 'markdown-path' "$MARKDOWN"
 emit 'sarif-path' "$SARIF"
@@ -282,6 +297,13 @@ fi
 # changes what the log says about a job that is passing either way.
 if [ "$OUTCOME" = 'NO_CANDIDATES' ]; then
     log "Nothing in this change is analyzed by this engine, so no reversibility grade was produced. This is not a pass."
+    exit 0
+fi
+
+# The job passed and the agent gate did not. Saying so is the whole point of the coverage axis:
+# without this line the only trace is a field in a JSON file nobody opens on a green build.
+if [ "$COVERAGE" = 'PARTIAL' ]; then
+    warn "Grade $GRADE meets the minimum $GATE, but $UNANALYZED file(s) were not analyzed. gate-status is $GATE_STATUS: an autonomous agent must not merge this. See the certificate for the list, or set 'require-full-coverage: true' to fail the job here."
     exit 0
 fi
 

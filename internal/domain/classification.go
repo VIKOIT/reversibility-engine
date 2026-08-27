@@ -232,16 +232,54 @@ const (
 	GateNotApplicable GateStatus = "NOT_APPLICABLE"
 )
 
-// Gate returns PASS if and only if the grade is A, per docs/RULES.md §3.
+// Coverage is how much of the changeset the engine actually read.
+//
+// It is a fact about the changeset, not a penalty, and it is deliberately a separate axis from
+// the grade. A file the engine cannot parse is not evidence that the change is unsafe, and
+// inventing severity from ignorance is the mirror image of inventing safety from it — which is
+// the bug that produced schema 1.5.0. So coverage never moves a grade. It moves the gate.
+type Coverage string
+
+// The complete set of coverage states.
+const (
+	// CoverageFull means every file in the changeset that any analyzer could claim was claimed.
+	// A changeset with nothing claimable is vacuously full: nothing was skipped.
+	CoverageFull Coverage = "FULL"
+
+	// CoveragePartial means the changeset held files that plausibly are migrations and no
+	// analyzer could read them. UnanalyzedFiles names each one and why.
+	CoveragePartial Coverage = "PARTIAL"
+)
+
+// Valid reports whether c is one of the defined coverage states. The zero value is not.
+func (c Coverage) Valid() bool { return c == CoverageFull || c == CoveragePartial }
+
+// Full reports whether the engine read everything it could have.
+//
+// The zero value returns false. A certificate assembled by code that forgot to set coverage
+// cannot open the merge gate, which is the same rule the rest of this file follows: an unset
+// field is never the permissive one.
+func (c Coverage) Full() bool { return c == CoverageFull }
+
+// Gate returns the merge-gate verdict, per docs/RULES.md §3.
+//
+// PASS requires grade A *and* full coverage. An autonomous agent gets no merge on a changeset
+// that was only partly understood: a human reading a PARTIAL certificate can see the list of
+// files nobody read and judge for themselves, and an agent cannot. Humans keep their exit code;
+// agents do not get the benefit of the doubt.
 //
 // This is the single definition of the gate. No caller may re-derive it, because a second
-// definition is a second chance to get it wrong in the permissive direction.
-func (g Grade) Gate() GateStatus {
-	switch g {
-	case GradeA:
-		return GatePass
-	case GradeNotApplicable:
+// definition is a second chance to get it wrong in the permissive direction — and coverage is
+// a parameter rather than a field read elsewhere so that a caller who has not thought about
+// coverage cannot compile.
+func (g Grade) Gate(coverage Coverage) GateStatus {
+	switch {
+	case g == GradeNotApplicable:
+		// Nothing was assessed. That is neither a pass nor an accusation, whatever the coverage
+		// of the nothing turned out to be.
 		return GateNotApplicable
+	case g == GradeA && coverage.Full():
+		return GatePass
 	default:
 		return GateFail
 	}

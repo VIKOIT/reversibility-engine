@@ -138,6 +138,8 @@ type sarifRunProps struct {
 	EffectiveGrade string `json:"effectiveGrade"`
 	AIGateStatus   string `json:"aiGateStatus"`
 	Outcome        string `json:"outcome"`
+	Coverage       string `json:"coverage"`
+	Unanalyzed     int    `json:"unanalyzedFileCount"`
 	Applicable     bool   `json:"applicable"`
 	InputDigest    string `json:"inputDigest"`
 	PolicyDigest   string `json:"policyDigest,omitempty"`
@@ -168,6 +170,8 @@ func (SARIF) Render(w io.Writer, cert domain.ReversibilityCertificate) error {
 					EffectiveGrade: string(cert.EffectiveGrade),
 					AIGateStatus:   string(cert.AIGateStatus),
 					Outcome:        string(cert.Outcome),
+					Coverage:       string(cert.Coverage),
+					Unanalyzed:     len(cert.UnanalyzedFiles),
 					Applicable:     cert.Applicable,
 					InputDigest:    cert.InputDigest,
 					PolicyDigest:   cert.PolicyDigest,
@@ -197,6 +201,13 @@ func sarifExitDescription(cert domain.ReversibilityCertificate) string {
 	case domain.OutcomeUnsupportedContent:
 		return "not assessed: the changeset held files no analyzer supports; reversibility is unmeasured"
 	default:
+		if !cert.Coverage.Full() {
+			// A code-scanning UI shows results, and results only exist for files that were
+			// read. Without this line a partially covered run looks like a fully covered one
+			// that happened to find less.
+			return fmt.Sprintf("grade %s, AI merge gate %s, partial coverage: %d file(s) not analyzed",
+				cert.Grade, cert.AIGateStatus, len(cert.UnanalyzedFiles))
+		}
 		return fmt.Sprintf("grade %s, AI merge gate %s", cert.Grade, cert.AIGateStatus)
 	}
 }

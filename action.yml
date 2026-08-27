@@ -118,6 +118,15 @@ inputs:
     required: false
     default: '.github/** action.yml'
 
+  require-full-coverage:
+    description: >-
+      Fail the job when any file that may be a migration went unanalyzed. Off by default: a
+      partially covered change is still a real measurement of the part that was read, and
+      `gate-status` already refuses to pass it. Turn it on if your repository uses a migration
+      format this engine cannot read and you want to hear about it every time.
+    required: false
+    default: 'false'
+
   fail-on-gate:
     description: >-
       Fail the job when the grade is below `gate`. Set to false to report without blocking.
@@ -135,10 +144,19 @@ outputs:
     value: ${{ steps.certify.outputs.grade }}
   gate-status:
     description: >-
-      PASS, FAIL, or NOT_APPLICABLE — whether an autonomous agent may merge. Independent of
-      `gate`. Agents merge on PASS and nothing else, so NOT_APPLICABLE blocks exactly as FAIL
-      does.
+      PASS, FAIL, or NOT_APPLICABLE — whether an autonomous agent may merge. **This, not the
+      job's exit code, is what an agent reads.** PASS requires grade A and full coverage, so a
+      partially analyzed change fails it even when the job succeeds. Independent of `gate`.
     value: ${{ steps.certify.outputs.gate-status }}
+  coverage:
+    description: >-
+      FULL or PARTIAL — whether the engine read every file it could have. PARTIAL never changes
+      the grade; it only closes `gate-status`. Empty for a certificate produced before schema
+      1.6.0.
+    value: ${{ steps.certify.outputs.coverage }}
+  unanalyzed-count:
+    description: 'How many files the engine could not read. The certificate names each one.'
+    value: ${{ steps.certify.outputs.unanalyzed-count }}
   outcome:
     description: >-
       What the run was able to do at all: `ANALYZED`, `NO_CANDIDATES` (nothing here this engine

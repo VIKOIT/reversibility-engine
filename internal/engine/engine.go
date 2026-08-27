@@ -186,12 +186,21 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 		})
 	}
 
+	// Coverage is the second axis, and it is computed from the same candidate list the outcome
+	// was. It never touches the grade above — see domain.Coverage — and reaches only the gate.
+	coverage := domain.CoverageFull
+	if len(unsupported) > 0 {
+		coverage = domain.CoveragePartial
+	}
+
 	cert = domain.ReversibilityCertificate{
 		SchemaVersion:   domain.SchemaVersion,
 		Grade:           grade,
 		EffectiveGrade:  effective,
-		AIGateStatus:    grade.Gate(),
+		AIGateStatus:    grade.Gate(coverage),
 		Outcome:         outcome,
+		Coverage:        coverage,
+		UnanalyzedFiles: nonNilUnanalyzed(unanalyzedFiles(unsupported)),
 		Applicable:      outcome.Certifies(),
 		InputDigest:     digest,
 		PolicyDigest:    e.policyDigest(),
@@ -276,18 +285,25 @@ func panicCertificate(digest string, r any) domain.ReversibilityCertificate {
 		SchemaVersion:  domain.SchemaVersion,
 		Grade:          domain.GradeF,
 		EffectiveGrade: domain.GradeF,
-		AIGateStatus:   domain.GradeF.Gate(),
+		AIGateStatus:   domain.GradeF.Gate(domain.CoverageFull),
 
 		// ANALYZED, and Applicable stays true: the engine was asked for an opinion and failed to
 		// produce one, which is not the same as having nothing to say. Neither non-analyzed
 		// outcome would be honest here — both mean "there was nothing to read", and there was.
-		Outcome:        domain.OutcomeAnalyzed,
-		Applicable:     true,
-		InputDigest:    digest,
-		Findings:       []domain.Finding{finding},
-		UndoPlan:       []domain.UndoStep{noCompleteUndo},
-		Blockers:       []string{fmt.Sprintf("the engine panicked: %v", r)},
-		DownMigrations: []domain.DownMigrationStatus{},
+		//
+		// Coverage is FULL because no file was skipped: the run failed, it did not skip. What
+		// went wrong is a grade F with a blocker, and overloading the coverage axis with it
+		// would make PARTIAL mean two different things. FULL is safe here whatever it means —
+		// a PASS needs grade A, and this is an F.
+		Outcome:         domain.OutcomeAnalyzed,
+		Coverage:        domain.CoverageFull,
+		Applicable:      true,
+		InputDigest:     digest,
+		Findings:        []domain.Finding{finding},
+		UndoPlan:        []domain.UndoStep{noCompleteUndo},
+		Blockers:        []string{fmt.Sprintf("the engine panicked: %v", r)},
+		DownMigrations:  []domain.DownMigrationStatus{},
+		UnanalyzedFiles: []domain.UnanalyzedFile{},
 	}
 }
 
@@ -297,17 +313,20 @@ func failedCertificate(digest string, err error) domain.ReversibilityCertificate
 		SchemaVersion:  domain.SchemaVersion,
 		Grade:          domain.GradeF,
 		EffectiveGrade: domain.GradeF,
-		AIGateStatus:   domain.GradeF.Gate(),
+		AIGateStatus:   domain.GradeF.Gate(domain.CoverageFull),
 
 		// ANALYZED for the same reason as the panic certificate: the run engaged with a real
-		// changeset and could not finish. That is an F, not an absence of subject matter.
-		Outcome:        domain.OutcomeAnalyzed,
-		Applicable:     true,
-		InputDigest:    digest,
-		Findings:       []domain.Finding{},
-		UndoPlan:       []domain.UndoStep{noCompleteUndo},
-		Blockers:       []string{fmt.Sprintf("analysis did not run: %v", err)},
-		DownMigrations: []domain.DownMigrationStatus{},
+		// changeset and could not finish. That is an F, not an absence of subject matter, and
+		// not a coverage gap either.
+		Outcome:         domain.OutcomeAnalyzed,
+		Coverage:        domain.CoverageFull,
+		Applicable:      true,
+		InputDigest:     digest,
+		Findings:        []domain.Finding{},
+		UndoPlan:        []domain.UndoStep{noCompleteUndo},
+		Blockers:        []string{fmt.Sprintf("analysis did not run: %v", err)},
+		DownMigrations:  []domain.DownMigrationStatus{},
+		UnanalyzedFiles: []domain.UnanalyzedFile{},
 	}
 }
 
@@ -328,13 +347,15 @@ func UnavailableCertificate(ruleID string, cause error) domain.ReversibilityCert
 		SchemaVersion:  domain.SchemaVersion,
 		Grade:          domain.GradeF,
 		EffectiveGrade: domain.GradeF,
-		AIGateStatus:   domain.GradeF.Gate(),
+		AIGateStatus:   domain.GradeF.Gate(domain.CoverageFull),
 
 		// Applicable stays true: the engine was asked for an opinion and could not form one,
 		// which is not the same as having nothing to say. NO_CANDIDATES would be the exact
 		// wrong answer — it would report "there was nothing here" about a changeset nobody
-		// managed to look at.
+		// managed to look at. Coverage is FULL for the same reason it is on the other two
+		// failure certificates: nothing was skipped, the fetch failed, and this is an F.
 		Outcome:    domain.OutcomeAnalyzed,
+		Coverage:   domain.CoverageFull,
 		Applicable: true,
 
 		// No digest: hashing a changeset that was never retrieved would attribute the
@@ -347,9 +368,10 @@ func UnavailableCertificate(ruleID string, cause error) domain.ReversibilityCert
 			LockHazard:    domain.LockExclusive,
 			Rationale:     rationale,
 		}},
-		UndoPlan:       []domain.UndoStep{noCompleteUndo},
-		Blockers:       []string{rationale},
-		DownMigrations: []domain.DownMigrationStatus{},
+		UndoPlan:        []domain.UndoStep{noCompleteUndo},
+		Blockers:        []string{rationale},
+		DownMigrations:  []domain.DownMigrationStatus{},
+		UnanalyzedFiles: []domain.UnanalyzedFile{},
 	}
 }
 
@@ -383,6 +405,13 @@ func nonNilStrings(in []string) []string {
 func nonNilStatuses(in []domain.DownMigrationStatus) []domain.DownMigrationStatus {
 	if in == nil {
 		return []domain.DownMigrationStatus{}
+	}
+	return in
+}
+
+func nonNilUnanalyzed(in []domain.UnanalyzedFile) []domain.UnanalyzedFile {
+	if in == nil {
+		return []domain.UnanalyzedFile{}
 	}
 	return in
 }

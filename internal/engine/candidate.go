@@ -56,14 +56,26 @@ var candidateExtensions = map[string]bool{
 //     never arrives here, so this fires only when SQL was present and nothing was going to
 //     read it — which is precisely the case that must not pass.
 func Candidate(p string) bool {
+	ok, _ := classifyCandidate(p)
+	return ok
+}
+
+// classifyCandidate is Candidate plus the reason, which the certificate records per file.
+//
+// The reason describes the engine's limitation and never the file's quality. "No analyzer reads
+// Django-style .py migrations" is a fact about this tool; anything that reads as a complaint
+// about the changeset would be the engine inventing severity from its own ignorance, which is
+// the thing the two-axis certificate exists to prevent.
+func classifyCandidate(p string) (bool, string) {
 	clean := strings.ToLower(path.Clean(strings.ReplaceAll(p, "\\", "/")))
+	ext := path.Ext(clean)
 
 	if strings.HasSuffix(clean, ".sql") {
-		return true
+		return true, "no analyzer claimed this .sql file"
 	}
 
-	if !candidateExtensions[path.Ext(clean)] {
-		return false
+	if !candidateExtensions[ext] {
+		return false, ""
 	}
 
 	// The file's own name is not consulted as a directory, so a file literally called
@@ -71,11 +83,23 @@ func Candidate(p string) bool {
 	// more often a management script than a migration.
 	for _, segment := range strings.Split(path.Dir(clean), "/") {
 		if migrationDirs[segment] {
-			return true
+			return true, "no analyzer reads " + ext + " migrations"
 		}
 	}
 
-	return false
+	return false, ""
+}
+
+// unanalyzedFiles turns the candidate paths into the per-file record the certificate carries.
+//
+// Paths arrive sorted from outcome, so this is deterministic without sorting again.
+func unanalyzedFiles(paths []string) []domain.UnanalyzedFile {
+	out := make([]domain.UnanalyzedFile, 0, len(paths))
+	for _, p := range paths {
+		_, reason := classifyCandidate(p)
+		out = append(out, domain.UnanalyzedFile{Path: p, Reason: reason})
+	}
+	return out
 }
 
 // outcome decides what the run was able to do at all, before any question of grading.

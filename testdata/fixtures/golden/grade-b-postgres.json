@@ -1,9 +1,11 @@
 {
-  "schemaVersion": "1.5.0",
+  "schemaVersion": "1.6.0",
   "grade": "B",
   "outcome": "ANALYZED",
   "effectiveGrade": "B",
   "aiGateStatus": "FAIL",
+  "coverage": "FULL",
+  "unanalyzedFiles": [],
   "applicable": true,
   "inputDigest": "160d9f861d205a505ad372b8134720cd1f81f3794078c9e6369981b81e1fd690",
   "findings": [

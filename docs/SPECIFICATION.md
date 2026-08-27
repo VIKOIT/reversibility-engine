@@ -87,6 +87,28 @@ The general form, which is the part a future session should apply to a case not 
 > missing a value — and adding a branch to the permissive answer will not fix it, because the
 > next path to that verdict will not have the branch.
 
+### The pattern: the grade describes the evidence, the gate decides what to do about it
+
+**This is the project's answer to a whole class of question, and it has now been applied
+twice.** When something that is not evidence about the change wants to influence the verdict, it
+goes on a second axis and moves the gate. It never moves the grade.
+
+| Session | The pressure | Where it went |
+| --- | --- | --- |
+| S10 | A team has accepted a risk and wants their pipeline unblocked. | `EffectiveGrade` and the exit code. `Grade` is untouched, and `AIGateStatus` follows `Grade`, so a waiver can never authorise an agent to merge. |
+| P0 follow-up | Part of the changeset could not be read, and something should reflect that. | `Coverage` and `AIGateStatus`. `Grade` is untouched, and PARTIAL never moves it. |
+
+The two push in opposite directions — a waiver argues for leniency, a coverage gap argues for
+severity — and the answer is the same, which is what makes it a pattern rather than two ad-hoc
+rulings. **A grade that configuration can improve stops meaning "reversibility". A grade that
+ignorance can worsen stops meaning it just as thoroughly**, and it fails in the direction that is
+harder to notice, because a tool that over-reports looks conscientious. Inventing severity from
+ignorance is the mirror image of inventing safety from it, and this document has now been wrong
+in the second direction once.
+
+The next time something wants to change a grade and is not evidence about the change, the answer
+is a new axis, not a new cap.
+
 ## 3. Scope
 
 **In:** static analysis only. PostgreSQL `.sql` migrations. Rendered Kubernetes manifests
@@ -265,10 +287,11 @@ placeholder fetch code — use `fakeProvider`.
 ## 8. Domain types
 
 ```go
-type Reversibility  string // REVERSIBLE, COSTLY, IRREVERSIBLE, UNKNOWN, WILL_FAIL
-type LockHazard     string // NONE, SHORT, FULL_SCAN, TABLE_REWRITE, EXCLUSIVE
-type Grade          string // A, B, C, F, N/A
+type Reversibility   string // REVERSIBLE, COSTLY, IRREVERSIBLE, UNKNOWN, WILL_FAIL
+type LockHazard      string // NONE, SHORT, FULL_SCAN, TABLE_REWRITE, EXCLUSIVE
+type Grade           string // A, B, C, F, N/A
 type AnalysisOutcome string // ANALYZED, NO_CANDIDATES, UNSUPPORTED_CONTENT
+type Coverage        string // FULL, PARTIAL — a second axis; never folded into Grade
 
 type Finding struct {
     RuleID        string        // stable, e.g. "PG001"
@@ -282,11 +305,13 @@ type Finding struct {
 }
 
 type ReversibilityCertificate struct {
-    SchemaVersion  string    // "1.5.0" — bump on any breaking field change
-    Grade          Grade     // the measurement; no policy may move it. N/A when nothing was analyzed
+    SchemaVersion  string    // "1.6.0" — bump on any breaking field change
+    Grade          Grade     // the measurement; nothing may move it. N/A when nothing was analyzed
     EffectiveGrade Grade     // Grade minus waived findings; what CI compares (S10)
-    AIGateStatus   string    // PASS | FAIL | NOT_APPLICABLE — follows Grade, never EffectiveGrade
-    Outcome        AnalysisOutcome // what the run was able to do at all; see docs/RULES.md §3
+    AIGateStatus   string    // PASS | FAIL | NOT_APPLICABLE. PASS needs Grade A AND Coverage FULL
+    Outcome        AnalysisOutcome  // what the run was able to do at all; see docs/RULES.md §3
+    Coverage       Coverage         // how much of it was read; moves the gate, never the grade
+    UnanalyzedFiles []UnanalyzedFile // every file not read, and why. Empty when Coverage is FULL
     Applicable     bool      // Outcome == ANALYZED, kept for consumers pinned to 1.4.0
     InputDigest    string    // SHA256 over sorted (path, content), plus the policy and
                              // the catalog when either was used
@@ -312,6 +337,7 @@ here.** It lives in exactly one place, `domain.SchemaVersion`, re-exported as
 | `1.3.0` | `WILL_FAIL` — a new value in an existing enum | S11-patch |
 | `1.4.0` | `CatalogVersion` | S12 |
 | `1.5.0` | `Outcome`; `Grade` gained `N/A`; `AIGateStatus` gained `NOT_APPLICABLE` | P0 |
+| `1.6.0` | `Coverage`, `UnanalyzedFiles`; a PASS now requires full coverage | P0 follow-up |
 
 Two of these warrant attention rather than a footnote, and they are the same kind of bump: a
 consumer switching exhaustively on an enum gained a case it had not seen. `1.3.0` added
@@ -1040,24 +1066,52 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    table in `docs/RULES.md` §3. WILL_FAIL is not part of this question — a statement that aborts
    leaves nothing to undo, which is a fact about the transaction rather than a presentation
    choice.
-7. **Partial coverage — a changeset the engine analyzed only part of.** OPEN, raised by the P0
-   and deliberately not decided while fixing it.
+7. ~~**Partial coverage — a changeset the engine analyzed only part of.**~~ **RESOLVED by the
+   owner: a two-axis certificate.** Schema `1.6.0`.
 
-   The three-way outcome in [`docs/RULES.md` §3](RULES.md#3-scoring) asks one question of the
-   whole changeset: did any analyzer claim any file. A changeset holding one trivial `.sql`
-   migration and thirteen Django `.py` migrations answers **yes**, grades `ANALYZED` on the one
-   file that was read, and can reach **A / PASS** with thirteen migrations unexamined.
+   Coverage is a fact about the changeset, not a penalty, and it is not folded into the grade.
+   The certificate carries `Coverage: FULL | PARTIAL` and `UnanalyzedFiles`, each with the
+   reason it was not claimed. The rules, which are the executable form of the ruling:
 
-   That is the P0's own disease in a milder form, and the milder form is the one more likely to
-   occur, because a real pull request usually touches something the engine does understand. It
-   was left open rather than fixed in the same change for two reasons. It needs a ruling, not an
-   implementation: the options are to cap the grade, to report the unsupported files as a
-   finding, or to declare partial coverage acceptable and say so. And every option changes the
-   grade of changesets that are being analyzed correctly today, which is a different blast
-   radius from the P0 — that one only changed changesets whose verdict was already meaningless.
+   - **PARTIAL never changes the grade.** A file the engine cannot read is not evidence that the
+     change is unsafe, and inventing severity from ignorance is the mirror of the bug the P0
+     fixed. `TestPartialCoverageNeverChangesTheGrade` certifies the same SQL with and without an
+     unreadable sibling and compares every measured field.
+   - **A PASS requires grade A and full coverage.** An autonomous agent gets no merge on a
+     changeset that was only partly understood. The enforcement lives in `Grade.Gate(Coverage)`,
+     with coverage as a parameter rather than a field read elsewhere, so a caller who has not
+     thought about coverage cannot compile.
+   - **The markdown certificate names every unanalyzed file, above the findings.** A reader must
+     never have to infer what was skipped, and a list of what the engine *did* find, printed
+     first, is exactly what makes an incomplete analysis look complete.
+   - **`--require-full-coverage` makes PARTIAL exit 2 for humans too.** Off by default; a team
+     standardised on a format this engine cannot read wants to hear about it every time.
 
-   The candidate paths are already computed for every run, including `ANALYZED` ones, and are
-   discarded there. Whatever the ruling, the input it needs is in hand.
+   **The exit code and `AIGateStatus` deliberately diverge here.** Grade A with partial coverage
+   exits **0** under `--gate` and reports `aiGateStatus: FAIL`. The exit code is the human
+   pipeline's gate — it compares `EffectiveGrade` and honours waivers, per S10 — and a human can
+   read the list of skipped files and judge. An agent cannot, so the field it reads is stricter.
+   `--require-full-coverage` is how a pipeline opts into the agent's bar.
+   `TestGateExitCodeAndAgentGateDivergeOnPartialCoverage` pins it so nobody closes the gap by
+   accident in either direction.
+
+   The help text for `--gate` used to call it "the setting autonomous agents must use". That was
+   already loose and is now wrong, and it was corrected in the same change: an agent reads the
+   certificate, never an exit status.
+8. **Does a policy `ignore:` count against coverage?** OPEN, and narrower than §16.7 was.
+
+   `ignore: ["**/migrations/**"]` plus one `.sql` file grades **A** with `Coverage: FULL`, and
+   the ignored migrations appear nowhere on the certificate. The same changeset without the
+   policy is `PARTIAL`.
+
+   The argument for leaving it: `ignore` means ignore, that is what the setting has meant since
+   S10, and the decision is attributable — the policy is in the input digest and `PolicyDigest`
+   is on the certificate. The argument against: the P0 was precisely that a green certificate
+   said nothing about content nobody read, and "the user asked for it" is exactly what a
+   misconfigured ignore list looks like from the inside.
+
+   Not decided while implementing the coverage ruling, because it would change S10 semantics
+   rather than extend them. Raised here so the next session does not have to rediscover it.
 
 ## 17. Fixture conventions
 
