@@ -141,10 +141,37 @@ const (
 	GradeB Grade = "B"
 	GradeC Grade = "C"
 	GradeF Grade = "F"
+
+	// GradeNotApplicable means the engine did not analyze this changeset, so it has no
+	// measurement to report. It is not a good grade and it is not a bad one: it is the absence
+	// of one.
+	//
+	// It exists because A used to carry two meanings — "analyzed and found reversible" and
+	// "nothing here was analyzed" — and every reader, merge bot, and branch protection rule
+	// took the first. A grade that can say "no answer" is what stops absence of analysis from
+	// reading as evidence of safety. See docs/SPECIFICATION.md §2 and docs/RULES.md §3.
+	GradeNotApplicable Grade = "N/A"
 )
 
 // Valid reports whether g is one of the defined grades.
+//
+// N/A is included: it is a value a certificate may legitimately carry. It is deliberately NOT
+// a value a --min-grade threshold may carry, and that is a separate question — see Threshold.
 func (g Grade) Valid() bool {
+	switch g {
+	case GradeA, GradeB, GradeC, GradeF, GradeNotApplicable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Threshold reports whether g may be used as a gating minimum.
+//
+// Only the four measured grades can. "At least N/A" is not a comparison anyone can mean: N/A is
+// the absence of a measurement, so nothing is above or below it, and accepting it as a
+// threshold would create a gate that every run satisfies.
+func (g Grade) Threshold() bool {
 	switch g {
 	case GradeA, GradeB, GradeC, GradeF:
 		return true
@@ -154,6 +181,11 @@ func (g Grade) Valid() bool {
 }
 
 // Rank orders grades from worst to best, so that A > B > C > F.
+//
+// N/A has no rank. It returns the same value an unset grade does — below F — so that a caller
+// who compares it against a threshold without first branching on the outcome fails closed. The
+// branch that gives N/A its real meaning lives in exactly one place, the CLI's applyGate, and
+// it decides the exit code from AnalysisOutcome rather than from this number.
 func (g Grade) Rank() int {
 	switch g {
 	case GradeF:
@@ -165,7 +197,8 @@ func (g Grade) Rank() int {
 	case GradeA:
 		return 3
 	default:
-		// An unset grade is the worst grade. Nothing may escape scoring by being empty.
+		// An unset grade — and N/A, which is not a measurement — is the worst grade. Nothing
+		// may escape scoring by being empty or by being unmeasured.
 		return -1
 	}
 }
@@ -188,6 +221,15 @@ type GateStatus string
 const (
 	GatePass GateStatus = "PASS"
 	GateFail GateStatus = "FAIL"
+
+	// GateNotApplicable means there is no gate verdict because there was no analysis. It is
+	// reported instead of FAIL because the change is not being accused of anything, and
+	// instead of PASS because nothing was checked.
+	//
+	// An autonomous agent merges on PASS and on nothing else, so NOT_APPLICABLE blocks it
+	// exactly as FAIL does. The distinction is for the human reading the certificate, who
+	// needs to know whether to fix a migration or to teach the engine a new format.
+	GateNotApplicable GateStatus = "NOT_APPLICABLE"
 )
 
 // Gate returns PASS if and only if the grade is A, per docs/RULES.md §3.
@@ -195,8 +237,53 @@ const (
 // This is the single definition of the gate. No caller may re-derive it, because a second
 // definition is a second chance to get it wrong in the permissive direction.
 func (g Grade) Gate() GateStatus {
-	if g == GradeA {
+	switch g {
+	case GradeA:
 		return GatePass
+	case GradeNotApplicable:
+		return GateNotApplicable
+	default:
+		return GateFail
 	}
-	return GateFail
 }
+
+// AnalysisOutcome records what the run was able to do at all, before any question of grading.
+//
+// It is the first question, and the grade is the second. Without it the certificate had no way
+// to distinguish "analyzed and found reversible" from "analyzed nothing", and the two shared
+// the value A — which is the P0 recorded in docs/SPECIFICATION.md §2.
+type AnalysisOutcome string
+
+// The complete set of outcomes, per docs/RULES.md §3.
+const (
+	// OutcomeAnalyzed means at least one analyzer claimed at least one file. Only this outcome
+	// can produce a measured grade, and therefore only this outcome can produce a PASS.
+	OutcomeAnalyzed AnalysisOutcome = "ANALYZED"
+
+	// OutcomeNoCandidates means the changeset holds no file any analyzer could ever claim: a
+	// docs-only pull request, or Go source alone. There was genuinely nothing to assess, which
+	// is a real and useful answer — it is simply not a passing one.
+	OutcomeNoCandidates AnalysisOutcome = "NO_CANDIDATES"
+
+	// OutcomeUnsupportedContent means files that plausibly ARE migrations or manifests were
+	// present and no analyzer claimed them. This is the Django case: thirteen .py migrations
+	// the engine cannot read. It must never pass a gate.
+	OutcomeUnsupportedContent AnalysisOutcome = "UNSUPPORTED_CONTENT"
+)
+
+// Valid reports whether o is one of the defined outcomes. The zero value is not.
+func (o AnalysisOutcome) Valid() bool {
+	switch o {
+	case OutcomeAnalyzed, OutcomeNoCandidates, OutcomeUnsupportedContent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Certifies reports whether this outcome permits a measured grade at all.
+//
+// The zero value returns false, so a certificate assembled by code that forgot to set the
+// outcome cannot carry a grade anyone should act on. That is the same rule as "an unset
+// Reversibility is invalid", applied to the shape of the run rather than to a finding.
+func (o AnalysisOutcome) Certifies() bool { return o == OutcomeAnalyzed }

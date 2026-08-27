@@ -21,8 +21,8 @@ const SchemaVersion = domain.SchemaVersion
 
 // Grade is the overall verdict on a changeset.
 //
-// A means fully reversible. F means a rollback would lose data, hit an unknown construct, or
-// depend on an analysis that failed.
+// A means analyzed and found fully reversible, and nothing else. F means a rollback would lose
+// data, hit an unknown construct, or depend on an analysis that failed.
 type Grade string
 
 // The complete set of grades.
@@ -31,6 +31,13 @@ const (
 	GradeB Grade = "B"
 	GradeC Grade = "C"
 	GradeF Grade = "F"
+
+	// GradeNotApplicable means the engine did not analyze this changeset and so has no
+	// measurement to report. Added in schema 1.5.0.
+	//
+	// A gate written as grade == "A" is unaffected. A gate written as grade != "F" is not:
+	// switch on Outcome, or compare against A explicitly.
+	GradeNotApplicable Grade = "N/A"
 )
 
 // GateStatus is the merge-gate verdict. Autonomous agents merge on PASS and nothing else.
@@ -40,6 +47,35 @@ type GateStatus string
 const (
 	GatePass GateStatus = "PASS"
 	GateFail GateStatus = "FAIL"
+
+	// GateNotApplicable means there is no gate verdict because there was no analysis. Added in
+	// schema 1.5.0. It blocks an agent exactly as FAIL does; the distinction is for the human
+	// deciding whether to fix a migration or to teach the engine a new format.
+	GateNotApplicable GateStatus = "NOT_APPLICABLE"
+)
+
+// AnalysisOutcome records what the run was able to do at all, before any question of grading.
+// Added in schema 1.5.0.
+//
+// This is the field to switch on. It is the only one that separates "there was nothing here to
+// check" from "there was something here I could not check", and those need different responses
+// from whoever reads the certificate.
+type AnalysisOutcome string
+
+// The complete set of outcomes.
+const (
+	// OutcomeAnalyzed means at least one analyzer claimed at least one file. Only this outcome
+	// can produce a measured grade, and therefore only this outcome can produce a PASS.
+	OutcomeAnalyzed AnalysisOutcome = "ANALYZED"
+
+	// OutcomeNoCandidates means the changeset held nothing any analyzer could ever claim — a
+	// docs-only pull request, Go source alone. Nothing to assess, which is a real answer.
+	OutcomeNoCandidates AnalysisOutcome = "NO_CANDIDATES"
+
+	// OutcomeUnsupportedContent means files that plausibly are migrations or manifests were
+	// present and no analyzer claimed them: Django .py migrations, for instance. Blockers names
+	// what was seen. This must never be treated as a pass.
+	OutcomeUnsupportedContent AnalysisOutcome = "UNSUPPORTED_CONTENT"
 )
 
 // Reversibility is the verdict on a single change.
@@ -163,8 +199,14 @@ type DownMigrationStatus struct {
 type Certificate struct {
 	SchemaVersion string `json:"schemaVersion"`
 
-	// Grade is what the evidence says about the change. No policy setting moves it.
+	// Grade is what the evidence says about the change. No policy setting moves it. It is N/A
+	// when Outcome is not ANALYZED — the engine never reports a passing grade for a changeset
+	// it did not read.
 	Grade Grade `json:"grade"`
+
+	// Outcome records what the run was able to do at all. Switch on this rather than inferring
+	// it from Grade: N/A says there is no measurement, and only Outcome says why.
+	Outcome AnalysisOutcome `json:"outcome"`
 
 	// EffectiveGrade is Grade with waived findings set aside — the one to compare against a CI
 	// threshold. With no policy in play it equals Grade, so this is always the right field to
@@ -175,8 +217,9 @@ type Certificate struct {
 	// EffectiveGrade: a waiver may unblock a human's pipeline, never an agent's merge.
 	AIGateStatus GateStatus `json:"aiGateStatus"`
 
-	// Applicable is false when the changeset contained no files the engine understands. Such a
-	// changeset grades A: the engine has no opinion, rather than a positive one.
+	// Applicable is true exactly when Outcome is ANALYZED. Retained for consumers pinned to
+	// schema 1.4.0; new code should read Outcome, which distinguishes the two ways a changeset
+	// can be inapplicable.
 	Applicable bool `json:"applicable"`
 
 	// InputDigest is the SHA-256 over the analyzed changeset, which is what makes a certificate
@@ -207,7 +250,9 @@ type Certificate struct {
 	// irreversible or unknown it is replaced by a statement that no complete undo exists.
 	UndoPlan []string `json:"undoPlan"`
 
-	// Blockers lists the reasons the grade is F. Empty for any other grade.
+	// Blockers lists the reasons this changeset cannot be certified as reversible: every reason
+	// the grade is F, and for UNSUPPORTED_CONTENT the files that could not be assessed. Empty
+	// for A, B, C, and NO_CANDIDATES.
 	Blockers []string `json:"blockers"`
 
 	DownMigrations []DownMigrationStatus `json:"downMigrations"`
@@ -219,6 +264,13 @@ type Certificate struct {
 // definition of the gate rather than one per consumer.
 func (c Certificate) Passed() bool { return c.AIGateStatus == GatePass }
 
+// Assessed reports whether the engine actually analyzed this changeset.
+//
+// A consumer that treats "not F" as safe should call this first. It is false for both
+// non-analyzed outcomes, and false for a certificate whose outcome is missing entirely — an
+// unreadable certificate is not an assessed one.
+func (c Certificate) Assessed() bool { return c.Outcome == OutcomeAnalyzed }
+
 // FromDomain converts the internal certificate to the public schema.
 //
 // Slices are normalized to empty rather than nil so the JSON form is stable: encoding/json
@@ -229,6 +281,7 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 		Grade:           Grade(in.Grade),
 		EffectiveGrade:  Grade(in.EffectiveGrade),
 		AIGateStatus:    GateStatus(in.AIGateStatus),
+		Outcome:         AnalysisOutcome(in.Outcome),
 		Applicable:      in.Applicable,
 		InputDigest:     in.InputDigest,
 		PolicyDigest:    in.PolicyDigest,

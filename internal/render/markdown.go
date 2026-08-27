@@ -31,7 +31,29 @@ var gradeSummary = map[domain.Grade]string{
 	// F now covers three different failures, and the summary names all three: a reader whose
 	// migration will not even apply should not be told it would lose data on rollback.
 	domain.GradeF: "**Not reversible.** Rolling this back would lose data, the engine could not determine what the change does, or the change will not apply at all.",
+
+	// N/A is not a verdict about the change; it is the absence of one. The summary has to say
+	// that in the first line, because the first line is all most readers see, and the line that
+	// used to appear here said "Fully reversible" about a changeset nobody had read.
+	domain.GradeNotApplicable: "**Not assessed.** The engine did not analyze this change, so it is making no claim about whether it can be rolled back.",
 }
+
+// The disclaiming sentences, named so that TestProseAndFieldsNeverDisagree can assert on them
+// directly rather than matching on wording that is free to change.
+//
+// They exist because the prose and the fields disagreed once and it shipped: the markdown said
+// "the engine has no opinion on it" three lines under a green **PASS**. A reader resolves that
+// contradiction in favour of the badge every time.
+const (
+	// DisclaimerNoCandidates is printed when there was genuinely nothing to assess.
+	DisclaimerNoCandidates = "_No PostgreSQL migrations, Kubernetes manifests, or Terraform plans were found in this change, " +
+		"so there was nothing for the engine to assess. **This is not a pass** — it is the absence of a verdict._"
+
+	// DisclaimerUnsupportedContent is printed when there was something to assess and no
+	// analyzer could. Blockers names the files immediately below it.
+	DisclaimerUnsupportedContent = "_This change contains files that may be migrations, and no analyzer in this engine can read them. " +
+		"**Reversibility was not assessed.** Do not merge this on the strength of this certificate._"
+)
 
 var reversibilityIcon = map[domain.Reversibility]string{
 	domain.ReversibilityReversible:   "🟢",
@@ -62,9 +84,16 @@ func (Markdown) Render(w io.Writer, cert domain.ReversibilityCertificate) error 
 }
 
 func writeHeader(b *strings.Builder, cert domain.ReversibilityCertificate) {
-	gate := "❌ FAIL"
-	if cert.AIGateStatus == domain.GatePass {
+	var gate string
+	switch cert.AIGateStatus {
+	case domain.GatePass:
 		gate = "✅ PASS"
+	case domain.GateNotApplicable:
+		// Not a green check and not a red cross. A grey dash is the honest rendering of a gate
+		// that was never evaluated, and it is visually distinct from both at a glance.
+		gate = "➖ NOT APPLICABLE"
+	default:
+		gate = "❌ FAIL"
 	}
 
 	fmt.Fprintf(b, "## Reversibility Certificate — Grade %s\n\n", cert.Grade)
@@ -73,11 +102,15 @@ func writeHeader(b *strings.Builder, cert domain.ReversibilityCertificate) {
 		fmt.Fprintf(b, "%s\n\n", summary)
 	}
 
-	// The changeset had nothing the engine understands. Saying so plainly matters: a silent A
-	// would look like an endorsement it is not.
-	if !cert.Applicable {
-		b.WriteString("_No PostgreSQL migrations or Kubernetes manifests were found in this change, " +
-			"so the engine has no opinion on it._\n\n")
+	// Why there is no verdict, in the reader's terms. The two cases need different words: one
+	// is "nothing here concerns me", the other is "something here concerns me and I cannot read
+	// it", and telling a reviewer the second when it is the first — or the reverse — is how a
+	// disclaimer stops being read at all.
+	switch cert.Outcome {
+	case domain.OutcomeNoCandidates:
+		b.WriteString(DisclaimerNoCandidates + "\n\n")
+	case domain.OutcomeUnsupportedContent:
+		b.WriteString(DisclaimerUnsupportedContent + "\n\n")
 	}
 
 	fmt.Fprintf(b, "| | |\n| --- | --- |\n")
@@ -139,8 +172,18 @@ func writeBlockers(b *strings.Builder, cert domain.ReversibilityCertificate) {
 		return
 	}
 
-	b.WriteString("### Blockers\n\n")
-	b.WriteString("This change cannot be merged by an autonomous agent. Each item below is a reason on its own.\n\n")
+	// The heading and the sentence under it differ by outcome. Under UNSUPPORTED_CONTENT these
+	// lines are not accusations against the change — they are a list of what the engine could
+	// not read, and calling them blockers would suggest the migrations were examined and found
+	// wanting.
+	if cert.Outcome == domain.OutcomeUnsupportedContent {
+		b.WriteString("### Not assessed\n\n")
+		b.WriteString("The engine cannot read the following, so it has measured nothing. " +
+			"An autonomous agent must not merge this change.\n\n")
+	} else {
+		b.WriteString("### Blockers\n\n")
+		b.WriteString("This change cannot be merged by an autonomous agent. Each item below is a reason on its own.\n\n")
+	}
 	for _, blocker := range cert.Blockers {
 		fmt.Fprintf(b, "- %s\n", blocker)
 	}

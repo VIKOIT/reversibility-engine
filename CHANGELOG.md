@@ -18,6 +18,85 @@ move:
 
 ### Fixed
 
+**A changeset the engine could not read graded A and passed the merge gate.**
+Certificate schema bumped to `1.5.0`.
+
+A pull request of thirteen Django `.py` migrations produced grade **A**,
+`aiGateStatus: PASS`, exit 0. No rule misfired. The scoring specification said
+that an empty changeset with zero relevant files grades A with
+`applicable: false` and gate PASS, and the code implemented that faithfully —
+so "no findings" and "no analysis" were the same value, and the value was the
+permissive one.
+
+This is the **second** occurrence of the class. The first was the `:v1` image,
+where `revctl` with no arguments exited 0. Two independent occurrences meant the
+invariant was missing from the architecture, so it is now written down with the
+same authority as fail-closed:
+
+> The engine never emits a passing grade for a changeset it did not analyze.
+> Absence of analysis is not evidence of safety.
+
+Grading is now the *second* question a run answers. The first is what it was able
+to do at all, and it has three answers, reported in the new `outcome` field:
+
+| `outcome` | Reached when | Grade | Gate | Exit under a gate |
+| --- | --- | --- | --- | --- |
+| `ANALYZED` | An analyzer claimed at least one file. | graded normally | follows the grade | `0` / `1` by the grade |
+| `NO_CANDIDATES` | Nothing here any analyzer could ever claim — a docs-only pull request, Go source alone. | **`N/A`** | `NOT_APPLICABLE` | **`0`** |
+| `UNSUPPORTED_CONTENT` | Files that plausibly **are** migrations, and no analyzer claimed them. | **`N/A`** | `NOT_APPLICABLE` | **`2`** |
+
+`A` now means analyzed and found reversible, and nothing else.
+
+`UNSUPPORTED_CONTENT` names what it saw rather than reporting a bare "not
+applicable", because a bare "not applicable" is what made the Django case read as
+"nothing here":
+
+```
+found 13 files in django/contrib/auth/migrations that no analyzer supports
+(.py migrations). Reversibility was not assessed.
+```
+
+Candidate files are now fetched and shown to the engine by both the CLI and the
+GitHub App. Until this change a docs-only pull request and thirteen unreadable
+migrations arrived at the engine as the same empty file list, and no amount of
+scoring logic could have told them apart.
+
+**Migration.** A gate written as `grade == 'A'`, `aiGateStatus == 'PASS'`, or on
+the exit code is unaffected. A gate written as `grade != 'F'` now passes
+changesets nobody analyzed — switch it to `grade == 'A'` or read `outcome`. The
+`applicable` field still means exactly `outcome == 'ANALYZED'` and is retained
+for consumers pinned to `1.4.0`.
+
+**The certificate no longer contradicts itself.** The markdown certificate used to
+print "the engine has no opinion on it" three lines under a green ✅ **PASS**, and
+a reader resolves that in favour of the badge every time.
+`TestProseAndFieldsNeverDisagree` now asserts that when the prose disclaims, no
+field says PASS — driven through the real engine, because the disagreement was in
+the certificate before any renderer saw it.
+
+### Added
+
+**A property test over the CLI surface, replacing the case list that missed both
+bypasses.** `TestNoArgumentCombinationPassesAGateWithoutAnalysis` enumerates 588
+combinations — 14 tree shapes × 6 gating modes × 7 modifiers, covering an empty
+directory, an unreadable directory, unsupported extensions, a path matching
+nothing, a glob that expanded to nothing, a config ignoring everything, and
+`--before` pointing at an identical tree — and checks six properties against an
+oracle that never asks the engine anything.
+
+The oracle restates the extension conventions independently on purpose. Deriving
+them from `Engine.Supports` would make the test agree with the engine by
+construction, and whether the engine and the world agree about what was read is
+the entire question.
+
+Verified by mutation rather than by passing: reintroducing the P0 fails 324 of the
+588 cases, making `UNSUPPORTED_CONTENT` exit 0 fails 90, disabling candidate
+detection fails 90, and stopping the CLI from showing candidates to the engine
+fails 90. The first version of the file caught only the first of those four — the
+sixth property exists because the mutation found the hole.
+
+### Fixed
+
 **Four documents said a snapshot source mismatch was silently ignored. It stops
 the run.** README.md, CLAUDE.md and the `v1.1.2` notes below all carried the same
 sentence — "a missing snapshot, a stale one, or a fingerprint that does not match

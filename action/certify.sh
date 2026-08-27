@@ -193,10 +193,19 @@ GATE_STATUS="$(jq -r '.aiGateStatus // "FAIL"' "$CERT_JSON")"
 APPLICABLE="$(jq -r '.applicable // true' "$CERT_JSON")"
 FINDINGS="$(jq -r '.findings | length' "$CERT_JSON")"
 
+# Schema 1.5.0 added .outcome. A certificate without one predates it, and the honest default is
+# the one that assumes nothing: ANALYZED would claim the run read something, which is exactly the
+# claim this field exists to stop being made silently.
+OUTCOME="$(jq -r '.outcome // ""' "$CERT_JSON")"
+
 # An unreadable grade is UNKNOWN by another name, and UNKNOWN fails. jq emits "null" for a
 # missing key rather than failing, so the // defaults above do not catch a malformed document.
+#
+# N/A is readable and is not a pass: it says the engine did not analyze this changeset. It is
+# accepted here so that a docs-only pull request does not read as a broken run — whether it
+# *fails* is decided below, from the exit code revctl already returned.
 case "$GRADE" in
-    A|B|C|F) ;;
+    A|B|C|F|N/A) ;;
     *)
         error "The certificate carries no readable grade (got '$GRADE'). Unknown means unsafe."
         exit 2
@@ -238,6 +247,7 @@ emit 'grade' "$GRADE"
 emit 'gate-status' "$GATE_STATUS"
 emit 'findings-count' "$FINDINGS"
 emit 'applicable' "$APPLICABLE"
+emit 'outcome' "$OUTCOME"
 emit 'certificate-path' "$CERT"
 emit 'markdown-path' "$MARKDOWN"
 emit 'sarif-path' "$SARIF"
@@ -261,6 +271,17 @@ if [ "$RC" -eq 1 ]; then
         exit 1
     fi
     log "Grade $GRADE is below $GATE, but fail-on-gate is false; not failing the job."
+    exit 0
+fi
+
+# RC is 0 from here. That still does not mean the change was measured: NO_CANDIDATES exits 0
+# because there was genuinely nothing to read. Saying so in the log is the difference between a
+# green check somebody trusts and a green check somebody has to go and interpret.
+#
+# 'fail-on-gate: false' is deliberately not consulted — nothing is being failed. This branch only
+# changes what the log says about a job that is passing either way.
+if [ "$OUTCOME" = 'NO_CANDIDATES' ]; then
+    log "Nothing in this change is analyzed by this engine, so no reversibility grade was produced. This is not a pass."
     exit 0
 fi
 

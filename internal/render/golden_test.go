@@ -75,20 +75,43 @@ func certificateFor(t *testing.T, ref domain.ChangeRef) domain.ReversibilityCert
 	return cert
 }
 
-// notApplicableCertificate is the one scenario no fixture produces: a changeset the engine has
-// no opinion on. The renderers must say so rather than presenting a bare A.
-func notApplicableCertificate(t *testing.T) domain.ReversibilityCertificate {
+// The two scenarios no fixture produces: the changesets the engine does not analyze. They are
+// pinned as golden files for the same reason every other verdict is — these bytes are what a
+// pull-request comment and a merge gate actually read, and the P0 lived in exactly this output.
+func unanalyzedCertificate(t *testing.T, files ...domain.ChangedFile) domain.ReversibilityCertificate {
 	t.Helper()
 
 	eng := engine.New([]analyzer.Analyzer{postgres.New(), kubernetes.New()})
 
-	cert, err := eng.Certify(context.Background(), []domain.ChangedFile{
-		{Path: "README.md", Status: domain.StatusModified, Current: []byte("# hello")},
-	})
+	cert, err := eng.Certify(context.Background(), files)
 	if err != nil {
 		t.Fatalf("Certify: %v", err)
 	}
 	return cert
+}
+
+// notApplicableCertificate is a docs-only change: nothing here any analyzer could ever claim.
+func notApplicableCertificate(t *testing.T) domain.ReversibilityCertificate {
+	t.Helper()
+
+	return unanalyzedCertificate(t,
+		domain.ChangedFile{Path: "README.md", Status: domain.StatusModified, Current: []byte("# hello")})
+}
+
+// unsupportedContentCertificate is the Django case: migrations the engine can see and cannot
+// read. It is the shape that used to render as a green PASS.
+func unsupportedContentCertificate(t *testing.T) domain.ReversibilityCertificate {
+	t.Helper()
+
+	var files []domain.ChangedFile
+	for _, name := range []string{"0001_initial.py", "0002_alter_permission.py", "0003_alter_email.py"} {
+		files = append(files, domain.ChangedFile{
+			Path:    "django/contrib/auth/migrations/" + name,
+			Status:  domain.StatusAdded,
+			Current: []byte("from django.db import migrations\n"),
+		})
+	}
+	return unanalyzedCertificate(t, files...)
 }
 
 func goldenPath(t *testing.T, name, format string) string {
@@ -151,20 +174,30 @@ func TestGolden(t *testing.T) {
 		}
 	}
 
-	for _, format := range render.Formats() {
-		t.Run("not-applicable/"+format, func(t *testing.T) {
-			renderer, err := render.For(format)
-			if err != nil {
-				t.Fatalf("render.For(%q): %v", format, err)
-			}
+	unanalyzed := []struct {
+		name string
+		cert func(*testing.T) domain.ReversibilityCertificate
+	}{
+		{"not-applicable", notApplicableCertificate},
+		{"unsupported-content", unsupportedContentCertificate},
+	}
 
-			var buf bytes.Buffer
-			if err := renderer.Render(&buf, notApplicableCertificate(t)); err != nil {
-				t.Fatalf("Render: %v", err)
-			}
+	for _, scenario := range unanalyzed {
+		for _, format := range render.Formats() {
+			t.Run(scenario.name+"/"+format, func(t *testing.T) {
+				renderer, err := render.For(format)
+				if err != nil {
+					t.Fatalf("render.For(%q): %v", format, err)
+				}
 
-			assertGolden(t, "not-applicable", format, buf.Bytes())
-		})
+				var buf bytes.Buffer
+				if err := renderer.Render(&buf, scenario.cert(t)); err != nil {
+					t.Fatalf("Render: %v", err)
+				}
+
+				assertGolden(t, scenario.name, format, buf.Bytes())
+			})
+		}
 	}
 }
 

@@ -33,6 +33,15 @@ var errGateFailed = errors.New("reversibility gate failed")
 // that analyzed nothing must never be reported as a run that found nothing wrong.
 var errNoCommand = errors.New("no command given: nothing was analyzed, which is not a pass")
 
+// errNotAssessed signals that a gate was asked for over content no analyzer could read.
+//
+// It is an ExitError, not an ExitGateFailed, and the distinction is the point. ExitGateFailed
+// means the engine measured the change and the measurement was too low; this means there was no
+// measurement. Reporting it as a failed gate would invite the same fix a failed gate invites —
+// lower the threshold — and no threshold makes an unread migration safe.
+var errNotAssessed = errors.New(
+	"the changeset was not assessed: it holds files that may be migrations and no analyzer supports them")
+
 // Options configures a CLI invocation. Streams are injected so the command tree is testable
 // without touching the process's own stdout.
 type Options struct {

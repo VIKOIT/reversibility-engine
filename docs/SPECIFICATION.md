@@ -34,9 +34,11 @@ Two interfaces over one decoupled core:
   `UNKNOWN` fails.
 - **A gate must prove it ran. No certificate produced means exit 2, never exit 0.** Absence of
   output is never success.
+- **The engine never emits a passing grade for a changeset it did not analyze. Absence of
+  analysis is not evidence of safety.**
 
-The last one is newer than the rest and was learned the expensive way, so it is worth saying
-why it is not implied by the others. Every rule above governs what happens once a change has
+The last two are newer than the rest and were learned the expensive way, so it is worth saying
+why neither is implied by the others. Every rule above governs what happens once a change has
 been read. None of them says anything about a run that read nothing at all — and that run had
 the most permissive outcome in the system, because "no findings" and "no analysis" produced the
 same green check. The `:v1` image incident (§11e) was exactly this: no rule misfired, no grade
@@ -53,6 +55,37 @@ So the invariant is about the **shape of the run**, not the verdict:
   entrypoint is a silent dependency on a value somebody else can change.
 
 Each of those is enforced by a test that fails when the gate stops gating, not by convention.
+
+### The same failure one level in: a run that read files and analyzed none of them
+
+Those rules all describe a run that produced no certificate. None of them said anything about a
+run that produced one *over content no analyzer understands*, and that run had the same
+permissive outcome for the same reason: the scoring rules mapped an empty changeset to grade
+**A**, `Applicable: false`, gate **PASS**. A pull request of thirteen Django `.py` migrations
+was therefore certified fully reversible by an engine that had not read one of them.
+
+**This is the second occurrence of the class, not the same mistake twice.** The first was the
+`:v1` image above. Both were specified deliberately, both were reasoned about in writing, and
+both shipped — which is the evidence that the invariant was missing from the architecture
+rather than that the reasoning slipped on two occasions. `Applicable: false` even had its
+justification recorded: that a completed run with an empty answer is distinguishable from a
+broken one *because a certificate exists to say so*. The justification was wrong, and it was
+wrong in a way worth naming, because the next case will be defended the same way. The
+certificate did exist. It said **A / PASS** — and no reader, no merge bot, and no branch
+protection rule distinguishes that from a real A.
+
+So the grade itself has to be able to say "no answer". **`A` means analyzed and found
+reversible, and nothing else.** A changeset the engine did not analyze gets `Grade: N/A` and
+`AIGateStatus: NOT_APPLICABLE` — never `A`, never `PASS`. The three-way outcome that replaces
+the empty-changeset rule, and the exit code each outcome produces, live with the rest of the
+scoring in [`docs/RULES.md` §3](RULES.md#3-scoring).
+
+The general form, which is the part a future session should apply to a case not listed here:
+
+> Every path that can reach a verdict must be asked what it returns when it reaches that
+> verdict having examined nothing. If the answer is the permissive one, the verdict type is
+> missing a value — and adding a branch to the permissive answer will not fix it, because the
+> next path to that verdict will not have the branch.
 
 ## 3. Scope
 
@@ -232,9 +265,10 @@ placeholder fetch code — use `fakeProvider`.
 ## 8. Domain types
 
 ```go
-type Reversibility string // REVERSIBLE, COSTLY, IRREVERSIBLE, UNKNOWN, WILL_FAIL
-type LockHazard   string // NONE, SHORT, FULL_SCAN, TABLE_REWRITE, EXCLUSIVE
-type Grade        string // A, B, C, F
+type Reversibility  string // REVERSIBLE, COSTLY, IRREVERSIBLE, UNKNOWN, WILL_FAIL
+type LockHazard     string // NONE, SHORT, FULL_SCAN, TABLE_REWRITE, EXCLUSIVE
+type Grade          string // A, B, C, F, N/A
+type AnalysisOutcome string // ANALYZED, NO_CANDIDATES, UNSUPPORTED_CONTENT
 
 type Finding struct {
     RuleID        string        // stable, e.g. "PG001"
@@ -248,11 +282,12 @@ type Finding struct {
 }
 
 type ReversibilityCertificate struct {
-    SchemaVersion  string    // "1.4.0" — bump on any breaking field change
-    Grade          Grade     // the measurement; no policy may move it
+    SchemaVersion  string    // "1.5.0" — bump on any breaking field change
+    Grade          Grade     // the measurement; no policy may move it. N/A when nothing was analyzed
     EffectiveGrade Grade     // Grade minus waived findings; what CI compares (S10)
-    AIGateStatus   string    // PASS | FAIL — follows Grade, never EffectiveGrade
-    Applicable     bool
+    AIGateStatus   string    // PASS | FAIL | NOT_APPLICABLE — follows Grade, never EffectiveGrade
+    Outcome        AnalysisOutcome // what the run was able to do at all; see docs/RULES.md §3
+    Applicable     bool      // Outcome == ANALYZED, kept for consumers pinned to 1.4.0
     InputDigest    string    // SHA256 over sorted (path, content), plus the policy and
                              // the catalog when either was used
     PolicyDigest   string    // SHA256 over the resolved policy, "" if none (S10)
@@ -276,10 +311,15 @@ here.** It lives in exactly one place, `domain.SchemaVersion`, re-exported as
 | `1.2.0` | `Finding.Context`, `ContextWarnings` | S11 |
 | `1.3.0` | `WILL_FAIL` — a new value in an existing enum | S11-patch |
 | `1.4.0` | `CatalogVersion` | S12 |
+| `1.5.0` | `Outcome`; `Grade` gained `N/A`; `AIGateStatus` gained `NOT_APPLICABLE` | P0 |
 
-`1.3.0` is the one that warrants attention rather than a footnote: a consumer switching
-exhaustively on reversibility gained a case it had not seen. Every other bump only added
-optional fields.
+Two of these warrant attention rather than a footnote, and they are the same kind of bump: a
+consumer switching exhaustively on an enum gained a case it had not seen. `1.3.0` added
+`WILL_FAIL` to `Reversibility`. `1.5.0` added `N/A` to `Grade` and `NOT_APPLICABLE` to
+`AIGateStatus`, which is the more disruptive of the two — a gate written as `grade == "A"`
+keeps working, but one written as `grade != "F"` starts passing a changeset nobody analyzed.
+Consumers must switch on `Outcome`, or compare against `A` explicitly, and that migration note
+is the reason the bump is not silent. Every other bump only added optional fields.
 
 Findings gained two fields in S11: `Subject` (how a snapshot is matched to a finding, internal
 only) and `Context` (`*FindingContext` — row estimate, size, estimated duration, band, note).
@@ -314,8 +354,15 @@ types, not policy — **no scoring, parsing, or I/O lives in `domain`**, and it 
 stdlib-only.
 
 **Zero values are never safe.** An unset `Reversibility` is invalid, an unset `LockHazard` sorts
-above `EXCLUSIVE`, and an unset `Grade` ranks below `F` and gates `FAIL`. A finding nobody
-classified must never read as harmless. `TestZeroValuesAreNeverSafe` enforces this.
+above `EXCLUSIVE`, an unset `Grade` ranks below `F` and gates `FAIL`, and an unset
+`AnalysisOutcome` does not certify. A finding nobody classified, and a run nobody recorded the
+shape of, must never read as harmless. `TestZeroValuesAreNeverSafe` enforces this.
+
+**`N/A` is not a rank.** It is the absence of a measurement, so it is never compared against a
+threshold: `Grade("N/A").Rank()` returns the same value an unset grade does, which is below
+`F`, precisely so that a caller who forgets to branch on `Outcome` fails closed rather than
+passing. The branch lives in exactly one place — `applyGate` — and the exit code it produces
+comes from the outcome, never from the rank.
 
 ## 9-11, 15. Classification and scoring — moved
 
@@ -993,6 +1040,24 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    table in `docs/RULES.md` §3. WILL_FAIL is not part of this question — a statement that aborts
    leaves nothing to undo, which is a fact about the transaction rather than a presentation
    choice.
+7. **Partial coverage — a changeset the engine analyzed only part of.** OPEN, raised by the P0
+   and deliberately not decided while fixing it.
+
+   The three-way outcome in [`docs/RULES.md` §3](RULES.md#3-scoring) asks one question of the
+   whole changeset: did any analyzer claim any file. A changeset holding one trivial `.sql`
+   migration and thirteen Django `.py` migrations answers **yes**, grades `ANALYZED` on the one
+   file that was read, and can reach **A / PASS** with thirteen migrations unexamined.
+
+   That is the P0's own disease in a milder form, and the milder form is the one more likely to
+   occur, because a real pull request usually touches something the engine does understand. It
+   was left open rather than fixed in the same change for two reasons. It needs a ruling, not an
+   implementation: the options are to cap the grade, to report the unsupported files as a
+   finding, or to declare partial coverage acceptable and say so. And every option changes the
+   grade of changesets that are being analyzed correctly today, which is a different blast
+   radius from the P0 — that one only changed changesets whose verdict was already meaningless.
+
+   The candidate paths are already computed for every run, including `ANALYZED` ones, and are
+   discarded there. Whatever the ruling, the input it needs is in hand.
 
 ## 17. Fixture conventions
 

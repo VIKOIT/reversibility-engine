@@ -158,7 +158,9 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 		return failedCertificate(digest, wrapped), wrapped
 	}
 
-	applicable := e.applicable(files)
+	// What the run was able to do at all, decided before anything is graded. A grade is a
+	// statement about files that were read, so the question of whether any were comes first.
+	outcome, unsupported := e.outcome(files)
 
 	// Grade is computed from every finding, waived ones included. It states what the evidence
 	// says about the change, and no configuration may move it: a waiver accepts a risk, it does
@@ -167,7 +169,8 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 		findings:       decision.All,
 		downMigrations: downMigrations,
 		analyzerErrors: analyzerErrors,
-		applicable:     applicable,
+		outcome:        outcome,
+		unsupported:    unsupported,
 	})
 
 	// EffectiveGrade is the same scoring with waived findings set aside. It is what a CI
@@ -178,7 +181,8 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 			findings:       decision.Findings,
 			downMigrations: downMigrations,
 			analyzerErrors: analyzerErrors,
-			applicable:     applicable,
+			outcome:        outcome,
+			unsupported:    unsupported,
 		})
 	}
 
@@ -187,7 +191,8 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 		Grade:           grade,
 		EffectiveGrade:  effective,
 		AIGateStatus:    grade.Gate(),
-		Applicable:      applicable,
+		Outcome:         outcome,
+		Applicable:      outcome.Certifies(),
 		InputDigest:     digest,
 		PolicyDigest:    e.policyDigest(),
 		CatalogVersion:  catalogVersion,
@@ -253,16 +258,6 @@ func (e *Engine) Supports(path string) bool {
 	return false
 }
 
-// applicable reports whether any analyzer claims any file in the changeset.
-func (e *Engine) applicable(files []domain.ChangedFile) bool {
-	for _, f := range files {
-		if e.Supports(f.Path) {
-			return true
-		}
-	}
-	return false
-}
-
 // panicCertificate is the verdict when the engine itself failed.
 func panicCertificate(digest string, r any) domain.ReversibilityCertificate {
 	finding := domain.Finding{
@@ -283,8 +278,10 @@ func panicCertificate(digest string, r any) domain.ReversibilityCertificate {
 		EffectiveGrade: domain.GradeF,
 		AIGateStatus:   domain.GradeF.Gate(),
 
-		// Applicable stays true: the engine was asked for an opinion and failed to produce one,
-		// which is not the same as having nothing to say.
+		// ANALYZED, and Applicable stays true: the engine was asked for an opinion and failed to
+		// produce one, which is not the same as having nothing to say. Neither non-analyzed
+		// outcome would be honest here — both mean "there was nothing to read", and there was.
+		Outcome:        domain.OutcomeAnalyzed,
 		Applicable:     true,
 		InputDigest:    digest,
 		Findings:       []domain.Finding{finding},
@@ -301,6 +298,10 @@ func failedCertificate(digest string, err error) domain.ReversibilityCertificate
 		Grade:          domain.GradeF,
 		EffectiveGrade: domain.GradeF,
 		AIGateStatus:   domain.GradeF.Gate(),
+
+		// ANALYZED for the same reason as the panic certificate: the run engaged with a real
+		// changeset and could not finish. That is an F, not an absence of subject matter.
+		Outcome:        domain.OutcomeAnalyzed,
 		Applicable:     true,
 		InputDigest:    digest,
 		Findings:       []domain.Finding{},
@@ -330,7 +331,10 @@ func UnavailableCertificate(ruleID string, cause error) domain.ReversibilityCert
 		AIGateStatus:   domain.GradeF.Gate(),
 
 		// Applicable stays true: the engine was asked for an opinion and could not form one,
-		// which is not the same as having nothing to say.
+		// which is not the same as having nothing to say. NO_CANDIDATES would be the exact
+		// wrong answer — it would report "there was nothing here" about a changeset nobody
+		// managed to look at.
+		Outcome:    domain.OutcomeAnalyzed,
 		Applicable: true,
 
 		// No digest: hashing a changeset that was never retrieved would attribute the

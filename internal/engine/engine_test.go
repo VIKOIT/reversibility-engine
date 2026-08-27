@@ -121,8 +121,9 @@ func TestCertifyMissingDownMigrationCapsAtC(t *testing.T) {
 	}
 }
 
-// An empty changeset has nothing to say, and saying so is not the same as failing.
-func TestCertifyEmptyChangeset(t *testing.T) {
+// A changeset with nothing to analyze has nothing to say, and saying so is not the same as
+// approving it. Grade A once meant both, which is the P0 this asserts against.
+func TestCertifyNoCandidates(t *testing.T) {
 	t.Parallel()
 
 	cert := certify(t,
@@ -130,17 +131,23 @@ func TestCertifyEmptyChangeset(t *testing.T) {
 		domain.ChangedFile{Path: "main.go", Status: domain.StatusModified, Current: []byte("package main")},
 	)
 
-	if cert.Grade != domain.GradeA {
-		t.Errorf("Grade = %q, want A", cert.Grade)
+	if cert.Grade != domain.GradeNotApplicable {
+		t.Errorf("Grade = %q, want N/A. A means analyzed and found reversible, and nothing else", cert.Grade)
+	}
+	if cert.Outcome != domain.OutcomeNoCandidates {
+		t.Errorf("Outcome = %q, want NO_CANDIDATES", cert.Outcome)
 	}
 	if cert.Applicable {
 		t.Error("Applicable = true for a changeset no analyzer claims")
 	}
-	if cert.AIGateStatus != domain.GatePass {
-		t.Errorf("AIGateStatus = %q, want PASS", cert.AIGateStatus)
+	if cert.AIGateStatus != domain.GateNotApplicable {
+		t.Errorf("AIGateStatus = %q, want NOT_APPLICABLE", cert.AIGateStatus)
 	}
 	if len(cert.Findings) != 0 {
 		t.Errorf("got %d findings, want 0", len(cert.Findings))
+	}
+	if len(cert.Blockers) != 0 {
+		t.Errorf("Blockers = %v; nothing is wrong with a docs-only change", cert.Blockers)
 	}
 }
 
@@ -150,11 +157,82 @@ func TestCertifyNoFiles(t *testing.T) {
 
 	cert := certify(t)
 
-	if cert.Grade != domain.GradeA || cert.Applicable {
-		t.Errorf("Grade = %q, Applicable = %v; want A / false", cert.Grade, cert.Applicable)
+	if cert.Grade != domain.GradeNotApplicable || cert.Applicable {
+		t.Errorf("Grade = %q, Applicable = %v; want N/A / false", cert.Grade, cert.Applicable)
+	}
+	if cert.Outcome != domain.OutcomeNoCandidates {
+		t.Errorf("Outcome = %q, want NO_CANDIDATES", cert.Outcome)
 	}
 	if cert.InputDigest == "" {
 		t.Error("an empty changeset still needs a digest")
+	}
+}
+
+// The Django case, and the reason the P0 was filed. Thirteen files that plainly are migrations,
+// no analyzer that can read one of them, and the engine must say so rather than grade it.
+func TestCertifyUnsupportedContent(t *testing.T) {
+	t.Parallel()
+
+	var files []domain.ChangedFile
+	for _, name := range []string{
+		"0001_initial.py", "0002_alter_permission_name_max_length.py", "0003_alter_user_email_max_length.py",
+	} {
+		files = append(files, domain.ChangedFile{
+			Path:    "django/contrib/auth/migrations/" + name,
+			Status:  domain.StatusAdded,
+			Current: []byte("from django.db import migrations\n"),
+		})
+	}
+
+	cert := certify(t, files...)
+
+	if cert.Grade != domain.GradeNotApplicable {
+		t.Errorf("Grade = %q, want N/A", cert.Grade)
+	}
+	if cert.Outcome != domain.OutcomeUnsupportedContent {
+		t.Errorf("Outcome = %q, want UNSUPPORTED_CONTENT", cert.Outcome)
+	}
+	if cert.AIGateStatus == domain.GatePass {
+		t.Error("AIGateStatus = PASS for three unread migrations")
+	}
+
+	// The message has to name what it saw. A bare "not applicable" is what made this readable
+	// as "nothing here" for as long as it shipped.
+	if len(cert.Blockers) != 1 {
+		t.Fatalf("Blockers = %v, want exactly one line naming the directory", cert.Blockers)
+	}
+	for _, want := range []string{"3 files", "django/contrib/auth/migrations", ".py", "not assessed"} {
+		if !strings.Contains(cert.Blockers[0], want) {
+			t.Errorf("blocker %q does not mention %q", cert.Blockers[0], want)
+		}
+	}
+}
+
+// One readable file is enough to make the run ANALYZED, and the unsupported siblings are
+// currently discarded. This pins today's behaviour so that resolving the partial-coverage open
+// question (docs/SPECIFICATION.md §16.7) shows up here as a deliberate diff rather than a
+// surprise.
+func TestCertifyMixedContentIsAnalyzed(t *testing.T) {
+	t.Parallel()
+
+	cert := certify(t,
+		domain.ChangedFile{
+			Path:    "db/migrate/0001_add_index.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("CREATE INDEX CONCURRENTLY idx ON orders (status);\n"),
+		},
+		domain.ChangedFile{
+			Path:    "app/migrations/0001_initial.py",
+			Status:  domain.StatusAdded,
+			Current: []byte("from django.db import migrations\n"),
+		},
+	)
+
+	if cert.Outcome != domain.OutcomeAnalyzed {
+		t.Errorf("Outcome = %q, want ANALYZED", cert.Outcome)
+	}
+	if !cert.Applicable {
+		t.Error("Applicable = false despite a .sql migration being claimed")
 	}
 }
 

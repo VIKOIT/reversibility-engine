@@ -5,7 +5,7 @@ package domain
 
 // SchemaVersion is the version of the certificate wire format. It follows semantic versioning
 // and is bumped on any breaking field change, because downstream merge gates parse this.
-const SchemaVersion = "1.4.0"
+const SchemaVersion = "1.5.0"
 
 // DownMigrationStatus records the outcome of down-migration validation for one migration pair,
 // at the three levels defined in docs/RULES.md §1.
@@ -51,7 +51,19 @@ type ReversibilityCertificate struct {
 	// DROP TABLE is irreversible whoever signed off on it, and a grade that policy could
 	// improve would stop meaning "reversibility" and start meaning "reversibility, unless
 	// somebody filed a form".
+	//
+	// It is N/A when Outcome is not ANALYZED. A means analyzed and found reversible, and
+	// nothing else — the engine never reports a passing grade for a changeset it did not read.
 	Grade Grade `json:"grade"`
+
+	// Outcome records what the run was able to do at all: whether any analyzer claimed any
+	// file, and if not, whether the changeset held anything that looked like it should have
+	// been claimed. It is the field a consumer should switch on, because it is the only one
+	// that distinguishes "nothing to check here" from "something to check that I could not".
+	//
+	// It is deliberately not derivable from Grade. N/A tells a reader there is no measurement;
+	// only this says why, and the exit code the CLI produces follows from it.
+	Outcome AnalysisOutcome `json:"outcome"`
 
 	// EffectiveGrade is Grade with waived findings set aside — the grade a CI gate compares
 	// against a threshold. Without a policy it equals Grade, so a consumer has exactly one
@@ -66,9 +78,13 @@ type ReversibilityCertificate struct {
 	// ever authorising an agent to merge something nobody could undo.
 	AIGateStatus GateStatus `json:"aiGateStatus"`
 
-	// Applicable is false when the changeset contained no files any analyzer understands.
-	// Such a changeset grades A and passes the gate: the engine has no opinion, and inventing
-	// one would train users to ignore it.
+	// Applicable is true exactly when Outcome is ANALYZED. It is retained for consumers pinned
+	// to schema 1.4.0 and it is derived, never set independently — two fields that can disagree
+	// about the same fact are two chances to read the wrong one.
+	//
+	// It used to be the whole story, and it was not enough: a false Applicable sat beside grade
+	// A and gate PASS, and nothing downstream read past the grade. Outcome is the field to
+	// branch on.
 	Applicable bool `json:"applicable"`
 
 	// InputDigest is the SHA-256 over the sorted (path, content) pairs of the analyzed input.
@@ -111,7 +127,11 @@ type ReversibilityCertificate struct {
 	// the waived half would claim a completeness it does not have.
 	UndoPlan []UndoStep `json:"undoPlan"`
 
-	// Blockers lists, in human-readable form, every reason the grade is F.
+	// Blockers lists, in human-readable form, every reason this changeset cannot be certified
+	// as reversible. That is every reason the grade is F, and — since the P0 — the reason an
+	// UNSUPPORTED_CONTENT run could not assess anything, naming the files it could not read.
+	//
+	// It is empty for A, B, and C, and for NO_CANDIDATES, where there is nothing to report.
 	Blockers []string `json:"blockers"`
 
 	// DownMigrations records down-migration validation per migration pair.

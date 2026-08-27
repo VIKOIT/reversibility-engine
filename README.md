@@ -59,7 +59,7 @@ never `0` — absence of output is never success. See [Fail-closed by
 construction](#fail-closed-by-construction).
 
 > **Status: v1.1.2.** Usable end to end, and packaged as a GitHub Action. Every
-> certificate carries its own `schemaVersion`, currently `1.4.0`, which bumps on
+> certificate carries its own `schemaVersion`, currently `1.5.0`, which bumps on
 > any breaking field change — so a consumer can pin against the schema rather than
 > against the tool. Every rule ID has a fixture pair in `testdata/`: a rule with no
 > fixture does not exist.
@@ -268,6 +268,7 @@ when the gate stops gating, not by convention:
 | The action wrote **no certificate file** | exit 2 |
 | A certificate exists but its **verdict cannot be read back** | exit 2 |
 | A policy that will not resolve (a waiver missing `reason` or `expires`) | exit 2 |
+| Files that may be migrations that **no analyzer supports**, under a gate | **exit 2**, grade `N/A`, and the certificate names the files |
 | The provider cannot fetch the changeset (rate limit, 5xx, oversized diff) | grade **F**, and the certificate is still posted |
 | A panic anywhere in an analyzer | grade **F**, rule `ENGINE_PANIC` |
 | SQL that will not parse, or a YAML file that is not a manifest | grade **F** (`PG027` / `K8S014`, `UNKNOWN`) |
@@ -625,6 +626,23 @@ to match them.
 | **B** | One or two costly-to-reverse changes, a lock heavier than SHORT, or a `DISRUPTIVE` lock band | ❌ FAIL |
 | **C** | Three or more costly changes, a missing/unparseable down migration, or an `OUTAGE` lock band | ❌ FAIL |
 | **F** | Irreversible data loss, a change that **will not apply**, an unknown construct, or an analyzer failure | ❌ FAIL |
+| **N/A** | **The engine did not analyze this change**, so there is no measurement. Never a pass. | ➖ NOT APPLICABLE |
+
+**`A` means analyzed and found reversible, and nothing else.** A changeset with
+nothing this engine reads does not grade A — it grades `N/A`, and the certificate
+says which of two things happened:
+
+| `outcome` | What it means | Exit under `--gate` |
+| --- | --- | --- |
+| `ANALYZED` | An analyzer claimed at least one file. The grade above is a real measurement. | `0` / `1` by the grade |
+| `NO_CANDIDATES` | Nothing here this engine reads — a docs-only pull request, Go source alone. Genuinely nothing to assess. | **`0`** |
+| `UNSUPPORTED_CONTENT` | Files that plausibly **are** migrations, and no analyzer can read them — Django `.py` migrations, Rails `.rb` migrations. | **`2`** |
+
+The last row is the one that matters. Until schema `1.5.0` a pull request of
+thirteen Django migrations graded **A** with gate **PASS**, because "no findings"
+and "no analysis" were the same value. If you gate on `grade != 'F'`, switch to
+`grade == 'A'` or read `outcome`; if you gate on `aiGateStatus == 'PASS'` or on
+the exit code, you are already correct.
 
 The five verdicts a finding can carry, in severity order:
 

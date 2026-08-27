@@ -128,11 +128,24 @@ inputs:
 
 outputs:
   grade:
-    description: 'The certificate grade: A, B, C, or F.'
+    description: >-
+      The certificate grade: A, B, C, F, or N/A. `N/A` means the engine did not analyze this
+      change and is making no claim about it — read `outcome` to find out why. A workflow that
+      tests `grade != 'F'` will treat N/A as good; test `grade == 'A'` instead.
     value: ${{ steps.certify.outputs.grade }}
   gate-status:
-    description: 'PASS or FAIL — whether an autonomous agent may merge. Independent of `gate`.'
+    description: >-
+      PASS, FAIL, or NOT_APPLICABLE — whether an autonomous agent may merge. Independent of
+      `gate`. Agents merge on PASS and nothing else, so NOT_APPLICABLE blocks exactly as FAIL
+      does.
     value: ${{ steps.certify.outputs.gate-status }}
+  outcome:
+    description: >-
+      What the run was able to do at all: `ANALYZED`, `NO_CANDIDATES` (nothing here this engine
+      reads — a docs-only pull request), or `UNSUPPORTED_CONTENT` (files that may be migrations
+      that no analyzer supports; the job fails with exit 2). Empty for a certificate produced
+      before schema 1.5.0.
+    value: ${{ steps.certify.outputs.outcome }}
   findings-count:
     description: 'How many findings the certificate carries.'
     value: ${{ steps.certify.outputs.findings-count }}
@@ -145,7 +158,10 @@ outputs:
     description: 'DEPRECATED — use `gate-status`.'
     value: ${{ steps.certify.outputs.gate-status }}
   applicable:
-    description: 'true when the change touched at least one file an analyzer claims.'
+    description: >-
+      true when the change touched at least one file an analyzer claims. Equivalent to
+      `outcome == 'ANALYZED'`; prefer `outcome`, which distinguishes the two ways this can be
+      false.
     value: ${{ steps.certify.outputs.applicable }}
   certificate:
     description: 'DEPRECATED — use `certificate-path`.'

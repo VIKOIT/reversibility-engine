@@ -306,8 +306,17 @@ func TestCheckOnAnIrrelevantChangeset(t *testing.T) {
 	if cert.Applicable {
 		t.Error("Applicable = true for a changeset with no migrations or manifests")
 	}
-	if cert.Grade != certificate.GradeA {
-		t.Errorf("Grade = %q, want A", cert.Grade)
+
+	// N/A, not A. Exit 0 is correct here — there was genuinely nothing to read — but the
+	// certificate must not claim the change was found reversible, which is what A says.
+	if cert.Grade != certificate.GradeNotApplicable {
+		t.Errorf("Grade = %q, want N/A", cert.Grade)
+	}
+	if cert.Outcome != certificate.OutcomeNoCandidates {
+		t.Errorf("Outcome = %q, want NO_CANDIDATES", cert.Outcome)
+	}
+	if cert.Passed() {
+		t.Error("a changeset the engine never analyzed reports the gate as passed")
 	}
 }
 

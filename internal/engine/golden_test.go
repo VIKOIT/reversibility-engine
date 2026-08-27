@@ -60,11 +60,15 @@ func TestVerdictSnapshot(t *testing.T) {
 
 			cert, _ := e.Certify(context.Background(), changed)
 
-			fmt.Fprintf(&out, "%-52s grade=%s gate=%-4s applicable=%-5v findings=%-2d undo=%-2d blockers=%-2d digest=%s\n",
+			// The outcome is in the snapshot because it is the field that decides whether a
+			// grade means anything. A fixture that silently stopped being ANALYZED would
+			// otherwise show up only as a grade moving to N/A, one column over, in a file
+			// nobody reads closely.
+			fmt.Fprintf(&out, "%-52s grade=%-3s gate=%-14s outcome=%-19s findings=%-2d undo=%-2d blockers=%-2d digest=%s\n",
 				group+"/"+tc.Name,
 				cert.Grade,
 				cert.AIGateStatus,
-				cert.Applicable,
+				cert.Outcome,
 				len(cert.Findings),
 				len(cert.UndoPlan),
 				len(cert.Blockers),

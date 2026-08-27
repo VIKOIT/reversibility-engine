@@ -61,7 +61,7 @@ depends on:
 | --- | --- | --- |
 | `0` | The run completed and the gate was met. | The effective grade is at or above the threshold. |
 | `1` | The run completed and the gate was **not** met. | The effective grade is below the threshold. The certificate is still written — it is the artifact the user asked for. |
-| `2` | **The run did not complete.** | No arguments were given; no certificate was produced; a certificate's verdict cannot be read back; a policy file cannot be resolved; the changeset could not be fetched. |
+| `2` | **The run did not complete.** | No arguments were given; no certificate was produced; a certificate's verdict cannot be read back; a policy file cannot be resolved; the changeset could not be fetched; the changeset held files that plausibly are migrations and no analyzer could assess them (`UNSUPPORTED_CONTENT`, and only when a gate was asked for — with no `--gate` or `--min-grade` nothing is being gated, exactly as grade F exits 0 there). |
 
 Three consequences follow, and each is enforced by a test rather than by convention:
 
@@ -74,10 +74,17 @@ Three consequences follow, and each is enforced by a test rather than by convent
   turn an error into a passing grade" applied one level up. A run that analyzed nothing has no
   verdict to report, and a missing verdict is never a good one.
 
-`Applicable: false` is the one shape that looks like this and is not: a changeset genuinely
-containing no file any analyzer claims grades **A** with `Applicable: false` and gate **PASS**.
-That is a completed run with a real, empty answer, and it is distinguishable from a broken run
-precisely because a certificate exists to say so.
+There used to be an exception written here, and it was the P0. It said that a changeset
+genuinely containing no file any analyzer claims grades **A** with `Applicable: false` and gate
+**PASS** — a completed run with a real, empty answer, distinguishable from a broken run because
+a certificate exists to say so. The certificate did exist, and it said A / PASS, which nothing
+downstream distinguishes from an analyzed A.
+
+**There is no exception now.** A run that analyzed nothing reports `Grade: N/A` and
+`AIGateStatus: NOT_APPLICABLE`, and the three-way outcome in §3 decides whether that is an
+exit 0 or an exit 2. The distinction the old rule wanted is real — a docs-only pull request
+genuinely is different from a broken run — and it is now carried by `Outcome`, which is a field
+a reader can act on, rather than by a grade that reads as an endorsement.
 
 ## Changing a rule
 
@@ -317,11 +324,55 @@ documented in [`ESTIMATES.md`](ESTIMATES.md). **They are estimates and are label
 wherever they appear.**
 
 ```
-AIGateStatus = PASS  <=>  Grade == A
-AIGateStatus = FAIL   otherwise
+AIGateStatus = PASS            <=>  Grade == A
+AIGateStatus = NOT_APPLICABLE  <=>  Grade == N/A
+AIGateStatus = FAIL             otherwise
 ```
 
-Empty changeset with zero relevant files → grade **A**, `Applicable: false`, gate **PASS**.
+### What the run was able to do at all
+
+**The engine never emits a passing grade for a changeset it did not analyze. Absence of
+analysis is not evidence of safety.** Grading is therefore the second question. The first is
+what the run was able to do at all, and it has three answers.
+
+| Outcome | Reached when | Grade | Gate | Exit under a gate |
+| --- | --- | --- | --- | --- |
+| `ANALYZED` | At least one analyzer claimed at least one file. | graded normally | follows the grade | 0 / 1 by the grade |
+| `NO_CANDIDATES` | The changeset contains no file any analyzer could ever claim — a docs-only pull request, Go source only. | **N/A** | `NOT_APPLICABLE` | **0** |
+| `UNSUPPORTED_CONTENT` | Files are present that plausibly **are** migrations or manifests, and no analyzer claimed them. | **N/A** | `NOT_APPLICABLE` | **2** |
+
+`A` means **analyzed and found reversible**, and nothing else. Neither non-analyzed outcome may
+ever produce `A`, and neither may ever produce `PASS`. This replaces the rule that stood here
+until the P0: *empty changeset with zero relevant files → grade A, `Applicable: false`, gate
+PASS*. That rule shipped, it was wrong, and it is recorded rather than deleted because the
+argument for it was plausible and will be made again — see
+[`docs/SPECIFICATION.md` §2](SPECIFICATION.md#2-the-philosophy-fail-closed).
+
+**What counts as plausibly a migration.** The predicate is deliberately narrow, because a false
+`UNSUPPORTED_CONTENT` is an exit 2 on a pull request that deserved a clean 0:
+
+- any file whose extension is `.py`, `.rb`, `.js`, or `.ts` **and** which sits under a path
+  segment named `migrations`, `migration`, or `migrate` — Django's `<app>/migrations/` and
+  Rails' `db/migrate/` are the two shapes this is drawn from;
+- any `.sql` file no analyzer claimed, wherever it sits. A claimed `.sql` that fails to parse
+  is not this case: it is `ANALYZED`, and PG027 grades it **F**.
+
+A file under `migrations/` with any other extension — a `README.md`, a `.gitkeep`, a `.go`
+source file — is **not** a candidate. The directory name alone is not the signal; the directory
+name together with a language a migration is written in is.
+
+**The message must name what it saw and what it could not do.** One line per directory, listing
+the count, the directory, and the extensions:
+
+```
+found 13 files in django/contrib/auth/migrations that no analyzer supports
+(.py migrations). Reversibility was not assessed.
+```
+
+**Partial coverage is not covered by this rule and is an open question** — see
+[`docs/SPECIFICATION.md` §16](SPECIFICATION.md). A changeset holding one `.sql` file and
+thirteen Django `.py` migrations is `ANALYZED` today, and grades on the one file the engine
+read. That is the same disease in a milder form.
 
 ### UndoPlan
 

@@ -234,19 +234,60 @@ func TestMarkdownLeadsWithTheVerdict(t *testing.T) {
 	}
 }
 
-// A changeset the engine has no opinion on must say so. A bare A would read as an endorsement.
-func TestMarkdownStatesWhenNotApplicable(t *testing.T) {
+// A changeset the engine did not analyze must say so, and the two reasons it can happen read
+// differently: "nothing here concerns me" against "something here concerns me and I cannot read
+// it". A reviewer needs to know which, because only the second is their problem.
+//
+// The certificate this used to build is worth remembering: grade A, gate PASS, Applicable false,
+// asserted to contain the phrase "no opinion". Every field in it was the P0, and the test passed.
+func TestMarkdownStatesWhyItDidNotAssess(t *testing.T) {
 	t.Parallel()
 
-	cert := domain.ReversibilityCertificate{
-		SchemaVersion: domain.SchemaVersion, Grade: domain.GradeA, AIGateStatus: domain.GatePass,
-		Applicable: false, Findings: []domain.Finding{}, UndoPlan: []domain.UndoStep{},
+	base := domain.ReversibilityCertificate{
+		SchemaVersion: domain.SchemaVersion,
+		Grade:         domain.GradeNotApplicable,
+		AIGateStatus:  domain.GateNotApplicable,
+		Applicable:    false,
+		Findings:      []domain.Finding{}, UndoPlan: []domain.UndoStep{},
 		Blockers: []string{}, DownMigrations: []domain.DownMigrationStatus{},
 	}
 
-	out := renderTo(t, render.FormatMarkdown, cert)
-	if !strings.Contains(out, "no opinion") {
-		t.Errorf("an inapplicable certificate does not say so:\n%s", out)
+	noCandidates := base
+	noCandidates.Outcome = domain.OutcomeNoCandidates
+
+	unsupported := base
+	unsupported.Outcome = domain.OutcomeUnsupportedContent
+	unsupported.Blockers = []string{
+		"found 13 files in django/contrib/auth/migrations that no analyzer supports " +
+			"(.py migrations). Reversibility was not assessed.",
+	}
+
+	for _, tc := range []struct {
+		name string
+		cert domain.ReversibilityCertificate
+		want string
+	}{
+		{"no candidates", noCandidates, render.DisclaimerNoCandidates},
+		{"unsupported content", unsupported, render.DisclaimerUnsupportedContent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			out := renderTo(t, render.FormatMarkdown, tc.cert)
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("certificate does not carry its disclaimer:\n%s", out)
+			}
+			if strings.Contains(out, "PASS") {
+				t.Errorf("an unassessed certificate shows PASS:\n%s", out)
+			}
+		})
+	}
+
+	// The message names the files. Without it the reviewer is told a verdict is missing and not
+	// which part of their pull request caused it.
+	out := renderTo(t, render.FormatMarkdown, unsupported)
+	if !strings.Contains(out, "django/contrib/auth/migrations") {
+		t.Errorf("the unsupported-content certificate does not name what it could not read:\n%s", out)
 	}
 }
 

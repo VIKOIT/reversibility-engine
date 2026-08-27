@@ -12,9 +12,10 @@ import (
 
 // This file is the executable form of the authoritative scoring rules in docs/RULES.md §3:
 //
-//	Any IRREVERSIBLE   -> F
-//	Any UNKNOWN        -> F        (fail-closed, no exceptions)
-//	Any analyzer error -> F        (never degrade to a passing grade)
+//	Any analyzer error       -> F     (never degrade to a passing grade)
+//	Any IRREVERSIBLE         -> F
+//	Any UNKNOWN              -> F     (fail-closed, no exceptions)
+//	Outcome != ANALYZED      -> N/A   (never A, never PASS)
 //
 //	Otherwise:
 //	  missing or unparseable down.sql            -> cap at C
@@ -35,8 +36,14 @@ type scoreInput struct {
 	// survivable: an incomplete analysis cannot certify anything.
 	analyzerErrors []string
 
-	// applicable is false when no analyzer claimed any file in the changeset.
-	applicable bool
+	// outcome is what the run was able to do at all. Only ANALYZED can produce a measured
+	// grade; the other two produce N/A, because a grade is a statement about something that
+	// was read.
+	outcome domain.AnalysisOutcome
+
+	// unsupported holds the candidate paths behind an UNSUPPORTED_CONTENT outcome, so the
+	// blockers can name them. Ignored for every other outcome.
+	unsupported []string
 }
 
 // score computes the grade and, when the grade is F, the human-readable reasons for it.
@@ -56,10 +63,34 @@ func score(in scoreInput) (domain.Grade, []string) {
 		return domain.GradeF, blockers
 	}
 
-	// An empty changeset has nothing to say. Inventing an opinion would train users to ignore
-	// the gate; per docs/RULES.md §3 it grades A with Applicable false.
-	if !in.applicable {
-		return domain.GradeA, nil
+	// What the run was able to do at all, per docs/RULES.md §3. This sits below the two checks
+	// above deliberately: a broken analyzer outranks a changeset with nothing in it, because a
+	// run that crashed on the way to finding nothing did not establish that there was nothing.
+	//
+	// Neither non-analyzed outcome grades. A used to mean both "analyzed and found reversible"
+	// and "read nothing", and only readers of the second meaning were ever surprised.
+	switch in.outcome {
+	case domain.OutcomeAnalyzed:
+		// Fall through to scoring.
+
+	case domain.OutcomeNoCandidates:
+		// Genuinely nothing to assess. That is a real answer and it is reported as one — it is
+		// simply not a passing one, and it carries no blockers because nothing is wrong.
+		return domain.GradeNotApplicable, nil
+
+	case domain.OutcomeUnsupportedContent:
+		// The Django case. Files that plausibly are migrations, and nothing that could read
+		// them. The blockers name what was seen and what could not be done with it, because
+		// "not applicable" on its own reads as "nothing here".
+		return domain.GradeNotApplicable, unsupportedContentBlockers(in.unsupported)
+
+	default:
+		// An outcome the domain does not recognise means the caller assembled a score input
+		// incorrectly — most likely by leaving the field at its zero value. Fail closed: the
+		// shape of the run is unknown, and unknown is unsafe.
+		return domain.GradeF, []string{
+			"the engine could not establish what this run analyzed, so nothing about it can be certified",
+		}
 	}
 
 	costly := 0

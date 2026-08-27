@@ -137,6 +137,7 @@ type sarifRunProps struct {
 	Grade          string `json:"grade"`
 	EffectiveGrade string `json:"effectiveGrade"`
 	AIGateStatus   string `json:"aiGateStatus"`
+	Outcome        string `json:"outcome"`
 	Applicable     bool   `json:"applicable"`
 	InputDigest    string `json:"inputDigest"`
 	PolicyDigest   string `json:"policyDigest,omitempty"`
@@ -161,11 +162,12 @@ func (SARIF) Render(w io.Writer, cert domain.ReversibilityCertificate) error {
 				// otherwise would make code scanning treat a correctly-detected destructive
 				// migration as a broken tool.
 				ExecutionSuccessful: true,
-				ExitCodeDescription: fmt.Sprintf("grade %s, AI merge gate %s", cert.Grade, cert.AIGateStatus),
+				ExitCodeDescription: sarifExitDescription(cert),
 				Properties: sarifRunProps{
 					Grade:          string(cert.Grade),
 					EffectiveGrade: string(cert.EffectiveGrade),
 					AIGateStatus:   string(cert.AIGateStatus),
+					Outcome:        string(cert.Outcome),
 					Applicable:     cert.Applicable,
 					InputDigest:    cert.InputDigest,
 					PolicyDigest:   cert.PolicyDigest,
@@ -181,6 +183,22 @@ func (SARIF) Render(w io.Writer, cert domain.ReversibilityCertificate) error {
 		return fmt.Errorf("render sarif: %w", err)
 	}
 	return nil
+}
+
+// sarifExitDescription is the one line a code-scanning UI shows for the whole run.
+//
+// A run that assessed nothing says so here rather than reporting "grade N/A, AI merge gate
+// NOT_APPLICABLE" and leaving a reader to work out that no result rows means no problems found.
+// Zero results and zero analysis look identical in every SARIF viewer there is.
+func sarifExitDescription(cert domain.ReversibilityCertificate) string {
+	switch cert.Outcome {
+	case domain.OutcomeNoCandidates:
+		return "not assessed: the changeset held nothing this engine analyzes"
+	case domain.OutcomeUnsupportedContent:
+		return "not assessed: the changeset held files no analyzer supports; reversibility is unmeasured"
+	default:
+		return fmt.Sprintf("grade %s, AI merge gate %s", cert.Grade, cert.AIGateStatus)
+	}
 }
 
 // sarifRules describes each distinct rule that fired.

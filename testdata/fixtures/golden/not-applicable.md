@@ -1,15 +1,15 @@
-## Reversibility Certificate — Grade A
+## Reversibility Certificate — Grade N/A
 
-Fully reversible. This change can be rolled back with no data loss.
+**Not assessed.** The engine did not analyze this change, so it is making no claim about whether it can be rolled back.
 
-_No PostgreSQL migrations or Kubernetes manifests were found in this change, so the engine has no opinion on it._
+_No PostgreSQL migrations, Kubernetes manifests, or Terraform plans were found in this change, so there was nothing for the engine to assess. **This is not a pass** — it is the absence of a verdict._
 
 | | |
 | --- | --- |
-| **Grade** | A |
-| **AI merge gate** | ✅ PASS |
+| **Grade** | N/A |
+| **AI merge gate** | ➖ NOT APPLICABLE |
 | **Findings** | 0 |
 
 ---
 
-<sub>Reversibility Engine · schema 1.4.0 · input digest `fcc5feb8bb9243c71d87a4e66b27fedaa26a1cbf54651d4324ce333b2493f88e`</sub>
+<sub>Reversibility Engine · schema 1.5.0 · input digest `fcc5feb8bb9243c71d87a4e66b27fedaa26a1cbf54651d4324ce333b2493f88e`</sub>

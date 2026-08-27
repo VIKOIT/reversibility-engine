@@ -139,8 +139,17 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	// An ignored path is never read, so it is never classified and never returned as context
 	// either. Filtering after analysis would leave the ignore list one refactor away from being
 	// forgotten.
+	//
+	// Candidates are admitted alongside supported files, and that is not an optimisation to
+	// undo. The engine can only classify a changeset it can see, and until this line existed a
+	// docs-only pull request and thirteen unreadable Django migrations both arrived here as an
+	// empty file list — indistinguishable, and both graded A. The engine hands these to the
+	// analyzers too, which ignore anything they do not claim.
 	include := func(path string) bool {
-		return eng.Supports(path) && !policy.IsPolicyFile(path) && !pol.Ignores(path)
+		if policy.IsPolicyFile(path) || pol.Ignores(path) {
+			return false
+		}
+		return eng.Supports(path) || engine.Candidate(path)
 	}
 
 	source, err := resolveProvider(flags, paths, include)
@@ -264,8 +273,11 @@ func policySearchRoot(paths []string) string {
 // noticed would be the wrong way round.
 func resolveMinGrade(flags *checkFlags, pol *policy.Policy) (domain.Grade, error) {
 	if flags.minGrade != "" {
+		// Threshold, not Valid. N/A is a grade a certificate can carry and is not a bar anything
+		// can clear: accepting it here would build a gate every run satisfies, which is the
+		// exact shape of the bug this whole change exists to remove.
 		grade := domain.Grade(strings.ToUpper(flags.minGrade))
-		if !grade.Valid() {
+		if !grade.Threshold() {
 			return "", fmt.Errorf("invalid --min-grade %q: want A, B, C, or F", flags.minGrade)
 		}
 		return grade, nil
@@ -291,7 +303,30 @@ func resolveMinGrade(flags *checkFlags, pol *policy.Policy) (domain.Grade, error
 // merge gate, which follows Grade and so can never be opened by a waiver.
 func applyGate(stderr io.Writer, cert domain.ReversibilityCertificate, minGrade domain.Grade) error {
 	if minGrade == "" {
+		// Nothing was asked to be gated, so nothing is gated — the same reason grade F exits 0
+		// here. This branch precedes the outcome switch below deliberately: an UNSUPPORTED_CONTENT
+		// exit 2 is a *gate* verdict, and a user who asked only for a report gets a report.
 		return nil
+	}
+
+	// The outcome decides before the grade does. N/A has no rank, so comparing it against a
+	// threshold would be meaningless — and it is the comparison a caller reaches for by reflex,
+	// which is why domain.Grade.Rank puts N/A below F rather than leaving it to chance.
+	switch cert.Outcome {
+	case domain.OutcomeNoCandidates:
+		// There was genuinely nothing to assess. The certificate says so, in a grade and a gate
+		// status that cannot be mistaken for approval, and the run itself succeeded.
+		return nil
+
+	case domain.OutcomeUnsupportedContent:
+		// The Django case. Files that plausibly are migrations, and nothing here that could read
+		// them — so the gate has no evidence to act on, and a gate with no evidence must not
+		// open. Exit 2 rather than 1: the change is not being failed, the run is.
+		_, _ = fmt.Fprintf(stderr, "revctl: reversibility was not assessed, so the gate cannot pass\n")
+		for _, blocker := range cert.Blockers {
+			_, _ = fmt.Fprintf(stderr, "  - %s\n", blocker)
+		}
+		return errNotAssessed
 	}
 
 	effective := cert.EffectiveGrade

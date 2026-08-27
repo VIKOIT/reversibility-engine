@@ -1,6 +1,7 @@
 {
-  "schemaVersion": "1.4.0",
+  "schemaVersion": "1.5.0",
   "grade": "A",
+  "outcome": "ANALYZED",
   "effectiveGrade": "A",
   "aiGateStatus": "PASS",
   "applicable": true,

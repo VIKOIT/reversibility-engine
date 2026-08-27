@@ -96,7 +96,15 @@ func (p *CertificateProcessor) Process(ctx context.Context, job Job) error {
 // is an explicit grade F naming the failure rather than a grade derived from whichever files
 // happened to arrive — an incomplete diff must never yield a passing grade.
 func (p *CertificateProcessor) certify(ctx context.Context, client *gh.Client, job Job) (domain.ReversibilityCertificate, error) {
-	files, err := provider.NewGitHub(client, p.engine.Supports).
+	// Candidates are fetched alongside supported files for the same reason the CLI includes
+	// them: the engine cannot report that it failed to read something it was never shown. A
+	// pull request the app cannot analyze must say so on the pull request, and this is what
+	// gives it the evidence to.
+	include := func(path string) bool {
+		return p.engine.Supports(path) || engine.Candidate(path)
+	}
+
+	files, err := provider.NewGitHub(client, include).
 		ChangedFiles(ctx, provider.Ref(job.target.owner, job.target.repo, job.Base, job.Head))
 	if err != nil {
 		p.log.Error("could not fetch the changeset",

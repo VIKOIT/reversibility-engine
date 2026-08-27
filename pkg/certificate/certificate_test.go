@@ -207,9 +207,41 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 
 	// Downstream merge gates pin this. A change here is a deliberate, breaking act.
 	//
-	// 1.4.0 added CatalogVersion, absent unless a Terraform plan was analyzed. Purely additive;
-	// 1.3.0 was the bump that added a new value to an existing enum.
-	if certificate.SchemaVersion != "1.4.0" {
-		t.Errorf("SchemaVersion = %q, want 1.4.0", certificate.SchemaVersion)
+	// 1.5.0 added Outcome, plus N/A to Grade and NOT_APPLICABLE to GateStatus. A consumer
+	// testing `grade == "A"` is unaffected; one testing `grade != "F"` now passes changesets
+	// nobody analyzed, which is why the bump is a minor rather than a patch.
+	if certificate.SchemaVersion != "1.5.0" {
+		t.Errorf("SchemaVersion = %q, want 1.5.0", certificate.SchemaVersion)
+	}
+}
+
+// The public schema must carry the outcome, because it is the field a consumer branches on and
+// the only one that separates "nothing here to check" from "something here I could not check".
+func TestPublicSchemaCarriesTheOutcome(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		outcome  domain.AnalysisOutcome
+		assessed bool
+	}{
+		{domain.OutcomeAnalyzed, true},
+		{domain.OutcomeNoCandidates, false},
+		{domain.OutcomeUnsupportedContent, false},
+		{domain.AnalysisOutcome(""), false},
+	} {
+		got := certificate.FromDomain(domain.ReversibilityCertificate{Outcome: tc.outcome})
+
+		if string(got.Outcome) != string(tc.outcome) {
+			t.Errorf("Outcome = %q, want %q", got.Outcome, tc.outcome)
+		}
+		if got.Assessed() != tc.assessed {
+			t.Errorf("Assessed() = %v for outcome %q, want %v", got.Assessed(), tc.outcome, tc.assessed)
+		}
+
+		// Passed and Assessed answer different questions and must never be conflated: a
+		// certificate can be assessed and fail, but it can never pass without being assessed.
+		if got.Passed() && !got.Assessed() {
+			t.Errorf("outcome %q passes the gate without having been assessed", tc.outcome)
+		}
 	}
 }

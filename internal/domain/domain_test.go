@@ -62,6 +62,74 @@ func TestZeroValuesAreNeverSafe(t *testing.T) {
 	if g.Gate() != domain.GateFail {
 		t.Errorf("zero Grade gate = %q, want FAIL", g.Gate())
 	}
+	if g.Threshold() {
+		t.Error("zero Grade is accepted as a gating threshold; an unset minimum gates nothing")
+	}
+
+	// The shape of the run has a zero value too, and it was the missing one. An outcome nobody
+	// set must not certify — otherwise a certificate assembled by code that forgot the field
+	// carries a grade someone will act on.
+	var o domain.AnalysisOutcome
+	if o.Valid() {
+		t.Error("zero AnalysisOutcome is valid; an unrecorded run shape must not pass validation")
+	}
+	if o.Certifies() {
+		t.Error("zero AnalysisOutcome certifies; absence of analysis is not evidence of safety")
+	}
+}
+
+// N/A is the absence of a measurement. Everything that could mistake it for a good one is
+// checked here, because every one of those mistakes reintroduces the P0.
+func TestNotApplicableIsNeverAPass(t *testing.T) {
+	t.Parallel()
+
+	na := domain.GradeNotApplicable
+
+	if na.Gate() == domain.GatePass {
+		t.Error("N/A gates PASS; a changeset nobody analyzed must never authorise a merge")
+	}
+	if na.Gate() != domain.GateNotApplicable {
+		t.Errorf("N/A gate = %q, want NOT_APPLICABLE", na.Gate())
+	}
+	if na.Rank() >= domain.GradeF.Rank() {
+		t.Errorf("N/A ranks %d, at or above F (%d); an unmeasured change must not clear a threshold",
+			na.Rank(), domain.GradeF.Rank())
+	}
+	if na.Threshold() {
+		t.Error("N/A is accepted as a gating threshold; that would build a gate every run satisfies")
+	}
+	if !na.Valid() {
+		t.Error("N/A is not a valid grade; it is a value certificates carry and must round-trip")
+	}
+
+	// A cap must never be able to lift a real grade to N/A, or lower one to it. N/A is outside
+	// the ordering entirely, and Cap is the only operation that could smuggle it in.
+	for _, g := range []domain.Grade{domain.GradeA, domain.GradeB, domain.GradeC, domain.GradeF} {
+		if got := g.Cap(na); got == domain.GradeA {
+			t.Errorf("%s.Cap(N/A) = %q; capping must never produce a passing grade", g, got)
+		}
+	}
+}
+
+// Only ANALYZED certifies. Stated as an exhaustive check over the enum so that adding a fourth
+// outcome forces a decision here rather than defaulting into the permissive branch.
+func TestOnlyAnalyzedCertifies(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		outcome domain.AnalysisOutcome
+		want    bool
+	}{
+		{domain.OutcomeAnalyzed, true},
+		{domain.OutcomeNoCandidates, false},
+		{domain.OutcomeUnsupportedContent, false},
+		{domain.AnalysisOutcome(""), false},
+		{domain.AnalysisOutcome("SOMETHING_NEW"), false},
+	} {
+		if got := tc.outcome.Certifies(); got != tc.want {
+			t.Errorf("AnalysisOutcome(%q).Certifies() = %v, want %v", tc.outcome, got, tc.want)
+		}
+	}
 }
 
 func TestLockHazardOrdering(t *testing.T) {
@@ -235,11 +303,12 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 	// Downstream merge gates parse this. Changing it is a deliberate, breaking act — if this
 	// test fails, the version was bumped, and that must be intentional.
 	//
-	// 1.4.0 added CatalogVersion, which identifies the Terraform resource-type catalog that
-	// classified a plan. Additive and optional: it is absent unless a plan was analyzed. The
-	// version before it, 1.3.0, is the one that added a new enum value.
-	if domain.SchemaVersion != "1.4.0" {
-		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.4.0")
+	// 1.5.0 added Outcome, and added N/A to Grade and NOT_APPLICABLE to AIGateStatus. That is
+	// the second bump to widen an existing enum, after 1.3.0's WILL_FAIL, and it is the more
+	// disruptive of the two: a gate written as `grade == "A"` is unaffected, but one written as
+	// `grade != "F"` starts passing changesets nobody analyzed.
+	if domain.SchemaVersion != "1.5.0" {
+		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.5.0")
 	}
 }
 
