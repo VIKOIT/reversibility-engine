@@ -78,6 +78,59 @@ PG013 already followed it: *a statement that overwrites state the migration does
 COSTLY, not REVERSIBLE.* PG028, PG043, PG050, PG054 and PG057 are the same shape. PG033
 (`COMMENT ON`) is the one deliberate exception, flagged rather than smoothed over.
 
+### Changed
+
+**A partial pass is a bypass. Coverage now fails closed, and this reverses an earlier ruling in
+the same unreleased cycle.**
+
+The engine will not vouch for a changeset it only partially understands. If any file in a
+migration directory went unread: `coverage: PARTIAL`, **grade F**, `aiGateStatus: FAIL`, and
+**exit 2** — with no flag and no threshold.
+
+```
+Cannot guarantee reversibility. Unanalyzed files found in migration directories.
+Remove them or explicitly ignore them in the config.
+```
+
+**The coverage math changed with it.** The denominator is now every file in a migration
+directory, not every file an analyzer wanted — a `README.md`, a `.gitkeep`, a helper script all
+count. Counting only the files the engine already understands made the numerator and the
+denominator the same number, which is a check that always passes. A directory qualifies if it is
+**named** for migrations or **holds a file an analyzer claimed**; the second clause stops a
+rename from defeating the check.
+
+**What it reverses, and why.** The earlier ruling was that `PARTIAL` never moves the grade — *a
+file the engine cannot read is not evidence the change is unsafe, and inventing severity from
+ignorance is the mirror of the P0* — with `--require-full-coverage` opt-in because defaulting it
+on *"would fail every Django and Rails PR on day one, and a gate everyone disables protects
+nobody."* Both are real arguments. What overrides them:
+
+- **F does not mean "this change is dangerous". It means "this cannot be certified"** — already
+  exactly what it means for an analyzer error and for PG027. Reading F as a severity claim is
+  what made the mirror argument persuasive, and it never was one.
+- **An analysis that read four of five migrations did not complete.** Grading it on the four is a
+  verdict about a changeset that does not exist.
+- The gate-everyone-disables risk is answered by the escape hatch rather than a softer default:
+  `ignore:` in the policy is explicit, mixed into `policyDigest`, and printed on the certificate.
+  A recorded decision is not a bypass.
+
+**The escape hatch needed one correction to actually work.** §16.8 says a policy-ignored
+candidate closes the merge gate. Applied to every ignored path it would make strict coverage
+unusable — the only way to satisfy it would permanently deny an agent a merge. So only ignored
+**candidates** count against the gate: ignoring a `README.md` beside the migrations is telling
+the engine what a README is; ignoring a `.rb` migration is accepting a reversibility risk and
+still closes it. Both directions are pinned by tests.
+
+**Migration.** `--require-full-coverage`, and the action input of the same name, are deprecated
+no-ops — kept accepted so an upgrade does not turn a pipeline into an unknown-flag error. Remove
+them. A repository using a migration format this engine cannot read should list those paths under
+`ignore:` once.
+
+**Known limitation, recorded rather than discovered:** coverage is complete for
+migration-*named* directories and not for directories identified only by holding an analyzable
+file, because a provider decides whether to read a file from its path alone. `docs/SPECIFICATION.md`
+§16.9 has the reason and the fix.
+
 ### Fixed
 
 **`SELECT` is now classified by effect, and the near-miss is why there is a new invariant.**

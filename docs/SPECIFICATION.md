@@ -1180,38 +1180,88 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    table in `docs/RULES.md` §3. WILL_FAIL is not part of this question — a statement that aborts
    leaves nothing to undo, which is a fact about the transaction rather than a presentation
    choice.
-7. ~~**Partial coverage — a changeset the engine analyzed only part of.**~~ **RESOLVED by the
-   owner: a two-axis certificate.** Schema `1.5.0`.
+7. ~~**Partial coverage — a changeset the engine analyzed only part of.**~~ **RESOLVED, twice.
+   The second ruling reverses the first, and both are recorded because the argument matters more
+   than the outcome.** Schema `1.5.0`.
 
-   Coverage is a fact about the changeset, not a penalty, and it is not folded into the grade.
-   The certificate carries `Coverage: FULL | PARTIAL` and `UnanalyzedFiles`, each with the
-   reason it was not claimed. The rules, which are the executable form of the ruling:
+   **The ruling in force: a partial pass is a bypass.** A security tool cannot vouch for a
+   changeset it only partially understands.
 
-   - **PARTIAL never changes the grade.** A file the engine cannot read is not evidence that the
-     change is unsafe, and inventing severity from ignorance is the mirror of the bug the P0
-     fixed. `TestPartialCoverageNeverChangesTheGrade` certifies the same SQL with and without an
-     unreadable sibling and compares every measured field.
-   - **A PASS requires grade A and full coverage.** An autonomous agent gets no merge on a
-     changeset that was only partly understood. The enforcement lives in `Grade.Gate(Coverage)`,
-     with coverage as a parameter rather than a field read elsewhere, so a caller who has not
-     thought about coverage cannot compile.
-   - **The markdown certificate names every unanalyzed file, above the findings.** A reader must
-     never have to infer what was skipped, and a list of what the engine *did* find, printed
-     first, is exactly what makes an incomplete analysis look complete.
-   - **`--require-full-coverage` makes PARTIAL exit 2 for humans too.** Off by default; a team
-     standardised on a format this engine cannot read wants to hear about it every time.
+   - **Coverage is measured over every file in a migration directory**, not over the files an
+     analyzer happened to want. A `.md`, a `.gitkeep`, a helper script beside the migrations all
+     count: the engine cannot tell from the outside which of them is inert, and a file it did
+     not read is a file it cannot vouch for. Counting only the files an analyzer wanted would
+     make the numerator and the denominator the same number and the check vacuous.
+   - **A directory is a migration directory** if it is named for one (`migrations/`,
+     `migration/`, `db/migrate/`) **or** it holds at least one file an analyzer claimed. The
+     second clause matters: requiring the conventional name would let a rename defeat the check.
+   - **Anything less than full coverage fails closed.** `Coverage: PARTIAL`, **grade F**,
+     `AIGateStatus: FAIL`, and **exit 2** — unconditionally, with no flag and no threshold. Exit
+     2 rather than 1 because the grade was not too low; part of the changeset was never measured,
+     which is a run that did not complete.
+   - **The message names the remedy**, since a refusal a reader cannot act on is one they will
+     route around: *"Cannot guarantee reversibility. Unanalyzed files found in migration
+     directories. Remove them or explicitly ignore them in the config."*
+   - **`--require-full-coverage` is a deprecated no-op**, kept accepted so an upgrade does not
+     turn a pipeline into an unknown-flag error.
 
-   **The exit code and `AIGateStatus` deliberately diverge here.** Grade A with partial coverage
-   exits **0** under `--gate` and reports `aiGateStatus: FAIL`. The exit code is the human
-   pipeline's gate — it compares `EffectiveGrade` and honours waivers, per S10 — and a human can
-   read the list of skipped files and judge. An agent cannot, so the field it reads is stricter.
-   `--require-full-coverage` is how a pipeline opts into the agent's bar.
-   `TestGateExitCodeAndAgentGateDivergeOnPartialCoverage` pins it so nobody closes the gap by
-   accident in either direction.
+   **What the first ruling said, and what changed it.** The first was: *PARTIAL never changes the
+   grade — a file the engine cannot read is not evidence that the change is unsafe, and inventing
+   severity from ignorance is the mirror of the bug the P0 fixed.* Coverage moved only the gate,
+   and `--require-full-coverage` was opt-in on the reasoning that defaulting it on *"would fail
+   every Django and Rails PR on day one, and a gate everyone disables protects nobody."*
+
+   Both of those are real arguments and neither was wrong on its own terms. What overrides them:
+
+   - **F does not mean "this change is dangerous". It means "this cannot be certified"** — which
+     is already exactly what it means for an analyzer error and for PG027. Reading F as a
+     severity claim is what made the mirror argument persuasive, and F has never been one.
+   - **An analysis that read four of five migrations did not complete.** Grading it on the four
+     is a verdict about a changeset that does not exist. That is not severity invented from
+     ignorance; it is declining to publish a measurement that was not taken.
+   - The gate-everyone-disables risk is answered by the escape hatch rather than by a softer
+     default: `ignore:` in the policy, which is **explicit, digested into `PolicyDigest`, and
+     printed on the certificate.** A recorded decision is not a bypass.
+
+   **The escape hatch has to actually work, and that needed one correction.** §16.8 says a
+   policy-ignored candidate closes the merge gate. Applied to *every* ignored path it would make
+   strict coverage unusable — the only way to satisfy it would permanently deny an agent a merge.
+   So only ignored **candidates** count against the gate: ignoring a `README.md` beside the
+   migrations is somebody telling the engine what a README is, not somebody accepting a
+   reversibility risk. Ignoring a `.rb` migration still closes the gate, which is what stops the
+   hatch from being a bypass. Both directions are pinned by tests.
+
+   **Coverage has therefore left the waiver pattern.** The grade-describes-evidence rule below
+   still governs waivers; coverage no longer belongs to it, because an incomplete analysis is not
+   a risk somebody accepted — it is a measurement that was not taken.
 
    The help text for `--gate` used to call it "the setting autonomous agents must use". That was
-   already loose and is now wrong, and it was corrected in the same change: an agent reads the
-   certificate, never an exit status.
+   already loose and is now wrong: an agent reads the certificate, never an exit status.
+9. **Strict coverage is complete for migration-named directories and not for the others.** OPEN,
+   and known rather than discovered — the property test encodes the boundary deliberately.
+
+   A directory is a migration directory two ways: it is **named** for one, or it **holds a file
+   an analyzer claimed**. The second clause exists so a rename cannot defeat the check. Coverage
+   is complete for the first and incomplete for the second, and the reason is structural:
+
+   > **A provider decides whether to read a file from its path alone**, before it has seen the
+   > rest of the changeset. `Include` is a `func(path string) bool`. "This directory holds a
+   > `.sql` file, so fetch its `README` too" is not a decision a per-path predicate can make.
+
+   So `db/migrate/notes.txt` is fetched, counted, and fails the changeset;
+   `db/schema/notes.txt` beside a `.sql` file is never fetched and never counted. A repository
+   that keeps migrations in an unconventionally named directory gets a weaker check than one that
+   follows the convention, which is precisely backwards.
+
+   **What closes it: make the provider list before it reads.** The filesystem walk already visits
+   every path without reading it, and the git provider already has the full name-status list
+   before it fetches blobs. Both could decide the directory set first and then read. It was not
+   done in the same change as the ruling because it changes the `FileProvider` contract that all
+   four implementations share, and §16.4 records how much depends on those four agreeing.
+
+   The cheap alternative — admit every file and let the engine filter — was rejected: it makes
+   `revctl check .` read the whole repository, and it makes the GitHub app fetch every file in
+   every touched directory, which is an API-quota decision rather than an engineering one.
 8. ~~**Does a policy `ignore:` count against coverage?**~~ **RESOLVED by the owner: no, and it
    closes the gate instead.** Schema `1.5.0`.
 

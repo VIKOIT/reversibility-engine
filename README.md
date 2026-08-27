@@ -197,10 +197,11 @@ configure.
 follows the grade and honours policy waivers.
 
 **An autonomous agent must read `gate-status`, not the job's exit code.** The two
-are not the same and are not meant to be — `gate-status` is `PASS` only at grade
-A *and* full coverage, so a change the engine only partly read fails it while the
-job still succeeds. Set `require-full-coverage: true` if you want the job to fail
-there too.
+are not the same and are not meant to be: a waiver can satisfy the exit code and
+can never open `gate-status`.
+
+A change the engine only partly read fails **both** — grade `F`, exit 2 — because
+a partial pass is a bypass. See [Coverage](#coverage--a-partial-pass-is-a-bypass).
 
 ### This is a composite action, not a Docker action
 
@@ -275,7 +276,7 @@ when the gate stops gating, not by convention:
 | A certificate exists but its **verdict cannot be read back** | exit 2 |
 | A policy that will not resolve (a waiver missing `reason` or `expires`) | exit 2 |
 | Files that may be migrations that **no analyzer supports**, under a gate | **exit 2**, grade `N/A`, and the certificate names the files |
-| `--require-full-coverage` and some file was not analyzed | **exit 2**, and stderr names each file and why |
+| Any file in a migration directory was **not analyzed** | **exit 2**, grade `F`, and stderr names each file and why |
 | The provider cannot fetch the changeset (rate limit, 5xx, oversized diff) | grade **F**, and the certificate is still posted |
 | A panic anywhere in an analyzer | grade **F**, rule `ENGINE_PANIC` |
 | SQL that will not parse, or a YAML file that is not a manifest | grade **F** (`PG027` / `K8S014`, `UNKNOWN`) |
@@ -651,40 +652,51 @@ and "no analysis" were the same value. If you gate on `grade != 'F'`, switch to
 `grade == 'A'` or read `outcome`; if you gate on `aiGateStatus == 'PASS'` or on
 the exit code, you are already correct.
 
-### Coverage — how much of the change was read
+### Coverage — a partial pass is a bypass
 
-A changeset can be part readable and part not: one `.sql` migration beside three
-Django `.py` ones. **Coverage is a second axis, and it is deliberately not folded
-into the grade.**
-
-| `coverage` | Meaning |
-| --- | --- |
-| `FULL` | Everything any analyzer could claim was claimed. A change with nothing claimable is vacuously full — nothing was skipped. |
-| `PARTIAL` | Files that may be migrations went unread. `unanalyzedFiles` names every one, with the reason. |
-
-- **`PARTIAL` never changes the grade.** A file this engine cannot read is not
-  evidence that your change is unsafe. Inventing severity from ignorance is the
-  mirror of inventing safety from it.
-- **`aiGateStatus` is `PASS` only at grade A *and* `FULL` coverage.** An
-  autonomous agent gets no merge on a change that was only partly understood. You
-  can read the list of skipped files and decide; it cannot.
-- **The certificate names every unanalyzed file, above the findings**, so you
-  never have to infer what was skipped.
+**This engine will not vouch for a change it only partially understands.** If any
+file in a migration directory went unread, the changeset fails.
 
 ```console
-$ revctl check --gate ./db/migrate          # one .sql, one .rb
-grade A · coverage PARTIAL · aiGateStatus FAIL · exit 0
-
-$ revctl check --gate --require-full-coverage ./db/migrate
-revctl: --require-full-coverage: 1 file(s) that may be migrations were not analyzed
+$ revctl check ./db/migrate          # one .sql migration, one .rb one
+revctl: Cannot guarantee reversibility. Unanalyzed files found in migration
+directories. Remove them or explicitly ignore them in the config.
   - db/migrate/0002_backfill.rb (no analyzer reads .rb migrations)
 exit 2
 ```
 
-**The exit code and `aiGateStatus` diverge here on purpose.** The exit code is
-your pipeline's gate — it follows the grade and honours waivers — and
-`--require-full-coverage` is how you opt into the agent's stricter bar. Teams
-standardised on a migration format this engine cannot read will want it on.
+Grade **F**, `coverage: PARTIAL`, `aiGateStatus: FAIL`, exit **2** — with no flag
+and no threshold. Exit 2 rather than 1 because your change was not judged too
+risky; part of it was never measured, and that is a run that did not complete.
+
+**The denominator is every file in the directory**, not just the ones an analyzer
+recognises. A `README.md`, a `.gitkeep`, a helper script — the engine cannot tell
+from the outside which of them is inert, and counting only the files it already
+understands would make the check always pass.
+
+A directory counts as a migration directory if it is **named** for one
+(`migrations/`, `db/migrate/`) **or** holds at least one file an analyzer claimed.
+Outside those, only migration-shaped files matter: a `.py` at your repository root
+is a script, and failing your change over it would be the opposite mistake.
+
+**The way out is the config, and it is meant to be used:**
+
+```yaml
+# .reversibility.yml
+ignore:
+  - "**/README.md"
+```
+
+That is an explicit, recorded decision — it lands in `policyDigest` and is printed
+on the certificate under **Excluded by policy**. Ignoring something that *is* a
+migration still closes the AI merge gate, because a human accepting a risk never
+buys an agent a merge; ignoring a README does not, because telling the engine what
+a README is was never a risk decision.
+
+> This is stricter than v1.1.2, where partial coverage exited 0 and only failed
+> behind `--require-full-coverage`. That flag is now a deprecated no-op — remove
+> it. If a repository uses a migration format this engine cannot read, list those
+> paths under `ignore:` once and the check goes quiet.
 
 The five verdicts a finding can carry, in severity order:
 

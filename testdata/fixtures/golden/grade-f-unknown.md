@@ -1,6 +1,6 @@
 ## Reversibility Certificate — Grade F
 
-**Not reversible.** Rolling this back would lose data, the engine could not determine what the change does, or the change will not apply at all.
+**Cannot be certified as reversible.** Rolling this back would lose data, the engine could not determine what the change does, the change will not apply at all, or part of the changeset was never analyzed.
 
 | | |
 | --- | --- |

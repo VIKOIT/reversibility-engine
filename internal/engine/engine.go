@@ -232,9 +232,25 @@ func (e *Engine) Certify(
 	// Policy-ignored candidates are deliberately NOT part of coverage. The engine could have
 	// read them; it was told not to, and coverage describes capability rather than permission.
 	// They reach the gate instead, through GateConditions.
+	// Only ignored *candidates* close the gate. §16.8's rule is that a human decision never
+	// buys an agent a merge, and it is about files that might be migrations — ignoring a
+	// README that happens to live beside them is not somebody accepting a reversibility risk,
+	// it is somebody telling the engine what a README is.
+	//
+	// Every ignored path is still listed on the certificate. Transparency about what was
+	// skipped and the gate's arithmetic are separate questions, and conflating them here would
+	// make the config escape hatch unusable: the only way to satisfy strict coverage would
+	// permanently close the gate.
+	ignoredCandidates := 0
+	for _, p := range run.ignoredByPolicy {
+		if Candidate(p) {
+			ignoredCandidates++
+		}
+	}
+
 	conditions := domain.GateConditions{
 		Coverage:      coverage,
-		PolicyIgnored: len(run.ignoredByPolicy),
+		PolicyIgnored: ignoredCandidates,
 	}
 
 	cert = domain.ReversibilityCertificate{

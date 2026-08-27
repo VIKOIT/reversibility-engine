@@ -87,7 +87,7 @@ func newCheckCommand(opts Options) *cobra.Command {
 	// alone and honours waivers, so it can be 0 on a changeset whose aiGateStatus is FAIL. An
 	// agent must read the certificate, not the exit status.
 	cmd.Flags().BoolVar(&flags.gate, "gate", false,
-		"exit non-zero unless the grade is A; shorthand for --min-grade A. This is a grade threshold for your pipeline — an autonomous agent must read aiGateStatus, which also requires full coverage, or pass --require-full-coverage alongside this")
+		"exit non-zero unless the grade is A; shorthand for --min-grade A. This is a grade threshold for your pipeline — an autonomous agent must read aiGateStatus, which never passes on a partially analyzed change")
 	cmd.Flags().StringVar(&flags.minGrade, "min-grade", "",
 		"exit non-zero if the grade is worse than this (A, B, C, or F)")
 	cmd.Flags().StringVar(&flags.config, "config", "",
@@ -96,8 +96,14 @@ func newCheckCommand(opts Options) *cobra.Command {
 		"ignore any .reversibility.yml, including one that would be discovered")
 	cmd.Flags().StringArrayVar(&flags.context, "context", nil,
 		"production snapshot from `revctl snapshot`, repeatable; a path that does not exist is skipped, because context is an enhancement rather than a requirement")
+	// Deprecated and now a no-op: full coverage is required unconditionally. The flag is kept
+	// accepted rather than removed so that a pipeline carrying it keeps running — removing it
+	// would turn an upgrade into an unknown-flag error, which is a worse failure than a warning
+	// on a line that no longer does anything.
 	cmd.Flags().BoolVar(&flags.requireFullCoverage, "require-full-coverage", false,
-		"exit 2 when any file that may be a migration went unanalyzed; the AI merge gate already requires full coverage, and this applies the same bar to your pipeline")
+		"DEPRECATED and ignored: partial coverage always fails now. Remove this flag.")
+	_ = cmd.Flags().MarkDeprecated("require-full-coverage",
+		"partial coverage now always fails; this flag is ignored and can be removed")
 	cmd.Flags().StringArrayVar(&flags.plans, "terraform-plan", nil,
 		"analyze this file as a Terraform plan whatever it is called; repeatable. The default convention is *.tfplan.json, and this is the escape hatch for a plan named otherwise")
 
@@ -165,11 +171,15 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	// sees a changeset, an ignored file is indistinguishable from a file that was never there.
 	var ignoredCandidates []string
 
+	// The third clause is what makes strict coverage measurable. Coverage counts every file in
+	// a migration directory, so the engine has to be shown every file in one — including the
+	// README and the .gitkeep it will refuse to vouch for. Filtering them out here would make
+	// the denominator the numerator and the check vacuous.
 	include := func(path string) bool {
 		if policy.IsPolicyFile(path) {
 			return false
 		}
-		if !eng.Supports(path) && !engine.Candidate(path) {
+		if !eng.Supports(path) && !engine.Candidate(path) && !engine.InMigrationDir(path) {
 			return false
 		}
 		if pol.Ignores(path) {
@@ -209,7 +219,7 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 		_, _ = fmt.Fprintf(opts.Stderr, "revctl: analysis reported errors, grade forced to F: %v\n", analysisErr)
 	}
 
-	return applyGate(opts.Stderr, cert, minGrade, flags.requireFullCoverage)
+	return applyGate(opts.Stderr, cert, minGrade)
 }
 
 // resolveProvider picks the source of the changeset from the flags.
@@ -332,20 +342,19 @@ func applyGate(
 	stderr io.Writer,
 	cert domain.ReversibilityCertificate,
 	minGrade domain.Grade,
-	requireFullCoverage bool,
 ) error {
-	// Two independent questions, asked in order of how badly the run failed to inform anyone.
+	// Questions in order of how badly the run failed to inform anyone: did it read nothing, did
+	// it read only some of it, and only then how the part it read graded.
 	//
-	// This is the same separation the S10 waiver ruling established and it is now the project's
-	// pattern: the grade describes the evidence, and the gate decides what to do about it. A
-	// waiver moves the gate and never the grade. Coverage moves the gate and never the grade.
-	// Neither is allowed to rewrite the measurement, because a measurement that configuration
-	// can move stops being a measurement.
+	// A waiver still moves the gate and never the grade — that half of the S10 pattern stands.
+	// Coverage no longer belongs to it: an incomplete analysis is not a risk somebody accepted,
+	// it is a measurement that was not taken, and it now fails closed in the grade itself. See
+	// docs/SPECIFICATION.md §16.7 for the reversal and the argument.
 	gateInForce := minGrade != ""
 
 	// Nothing was read at all. The gate has no evidence to act on, and a gate with no evidence
 	// must not open. Exit 2 rather than 1: the change is not being failed, the run is.
-	if cert.Outcome == domain.OutcomeUnsupportedContent && (gateInForce || requireFullCoverage) {
+	if cert.Outcome == domain.OutcomeUnsupportedContent {
 		_, _ = fmt.Fprintf(stderr, "revctl: reversibility was not assessed, so the gate cannot pass\n")
 		for _, blocker := range cert.Blockers {
 			_, _ = fmt.Fprintf(stderr, "  - %s\n", blocker)
@@ -353,13 +362,15 @@ func applyGate(
 		return errNotAssessed
 	}
 
-	// Something was read and something was not. This is checked whether or not a grade threshold
-	// was given, because --require-full-coverage is itself the request to gate: a user who typed
-	// it asked about coverage, not about the grade.
-	if requireFullCoverage && !cert.Coverage.Full() {
-		_, _ = fmt.Fprintf(stderr,
-			"revctl: --require-full-coverage: %d file(s) that may be migrations were not analyzed\n",
-			len(cert.UnanalyzedFiles))
+	// Something was read and something was not. **A partial pass is a bypass**, so this is not
+	// conditional on a flag and not conditional on a threshold: a changeset the engine can only
+	// partly vouch for is a run that did not complete, and exit 2 is what that means.
+	//
+	// It sits above the `gateInForce` check deliberately. Without a gate nothing else here
+	// fails, but this is not a verdict about the change — it is the engine reporting that it
+	// could not finish, which is true whether or not anybody asked it to gate.
+	if !cert.Coverage.Full() {
+		_, _ = fmt.Fprintf(stderr, "revctl: %s\n", engine.PartialCoverageBlocker)
 		for _, u := range cert.UnanalyzedFiles {
 			_, _ = fmt.Fprintf(stderr, "  - %s (%s)\n", u.Path, u.Reason)
 		}

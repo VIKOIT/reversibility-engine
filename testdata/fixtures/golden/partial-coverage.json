@@ -1,8 +1,8 @@
 {
   "schemaVersion": "1.5.0",
-  "grade": "A",
+  "grade": "F",
   "outcome": "ANALYZED",
-  "effectiveGrade": "A",
+  "effectiveGrade": "F",
   "aiGateStatus": "FAIL",
   "coverage": "PARTIAL",
   "unanalyzedFiles": [
@@ -30,10 +30,12 @@
   "undoPlan": [
     "DROP INDEX CONCURRENTLY idx;"
   ],
-  "blockers": [],
+  "blockers": [
+    "Cannot guarantee reversibility. Unanalyzed files found in migration directories. Remove them or explicitly ignore them in the config.",
+    "not analyzed: db/migrate/0002_backfill_status.rb"
+  ],
   "gradeCauses": [
-    "assigned A: every finding is REVERSIBLE",
-    "nothing capped this grade"
+    "graded F: coverage is PARTIAL — 1 file(s) in migration directories were not analyzed"
   ],
   "downMigrations": [
     {

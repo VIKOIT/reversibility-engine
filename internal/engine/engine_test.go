@@ -250,12 +250,19 @@ func TestCertifyMixedContentIsAnalyzedAndPartial(t *testing.T) {
 	}
 }
 
-// The ruling, stated as a test: PARTIAL never changes the grade.
+// The ruling, stated as a test: a partial pass is a bypass, so partial coverage fails closed.
+//
+// **This reverses an earlier ruling and the reversal is deliberate.** The first version of this
+// test asserted the opposite — that coverage never moves the grade, on the argument that
+// inventing severity from ignorance is the mirror of inventing safety from it. What changed the
+// answer is that F does not mean "this change is dangerous". It means "this cannot be certified",
+// which is already what it means for an analyzer error and for PG027. An analysis that read four
+// of five migrations did not complete, and grading it on the four is a verdict about a changeset
+// that does not exist.
 //
 // The same SQL is certified twice, once alone and once beside a migration the engine cannot
-// read. Every measured field must be identical. Inventing severity from ignorance is the exact
-// mirror of inventing safety from it, and it would be the easier of the two mistakes to defend.
-func TestPartialCoverageNeverChangesTheGrade(t *testing.T) {
+// read, and the two must now differ.
+func TestPartialCoverageFailsClosed(t *testing.T) {
 	t.Parallel()
 
 	sql := []domain.ChangedFile{
@@ -285,28 +292,109 @@ func TestPartialCoverageNeverChangesTheGrade(t *testing.T) {
 			full.Coverage, partial.Coverage)
 	}
 
-	if partial.Grade != full.Grade {
-		t.Errorf("Grade = %q with an unreadable sibling, %q without; coverage must not move the grade",
-			partial.Grade, full.Grade)
+	if full.Grade != domain.GradeA {
+		t.Fatalf("the fully covered changeset grades %q, want A — the test is not exercising what it claims",
+			full.Grade)
 	}
-	if partial.EffectiveGrade != full.EffectiveGrade {
-		t.Errorf("EffectiveGrade = %q with an unreadable sibling, %q without",
-			partial.EffectiveGrade, full.EffectiveGrade)
+	if partial.Grade != domain.GradeF {
+		t.Errorf("Grade = %q with an unread sibling, want F; a changeset the engine only partly read cannot be certified",
+			partial.Grade)
 	}
-	if len(partial.Findings) != len(full.Findings) {
-		t.Errorf("findings = %d with an unreadable sibling, %d without", len(partial.Findings), len(full.Findings))
-	}
-	if len(partial.Blockers) != len(full.Blockers) {
-		t.Errorf("blockers = %v with an unreadable sibling, %v without", partial.Blockers, full.Blockers)
-	}
-
-	// And the gate is the one thing that does move.
-	if full.AIGateStatus != domain.GatePass {
-		t.Fatalf("the fully covered certificate gates %q, want PASS — the test is not exercising what it claims",
-			full.AIGateStatus)
+	if partial.EffectiveGrade != domain.GradeF {
+		t.Errorf("EffectiveGrade = %q on partial coverage, want F", partial.EffectiveGrade)
 	}
 	if partial.AIGateStatus != domain.GateFail {
 		t.Errorf("AIGateStatus = %q on partial coverage, want FAIL", partial.AIGateStatus)
+	}
+
+	// The findings that were made are still reported. Failing closed is not a reason to throw
+	// away what was learned — the reader needs both the verdict and what produced it.
+	if len(partial.Findings) != len(full.Findings) {
+		t.Errorf("findings = %d with an unread sibling, %d without; the analysis that did run is still reported",
+			len(partial.Findings), len(full.Findings))
+	}
+
+	// The blocker says what to do about it, in the owner's words.
+	if len(partial.Blockers) == 0 || !strings.Contains(partial.Blockers[0], "Cannot guarantee reversibility") {
+		t.Errorf("blockers = %v, want the partial-coverage message first", partial.Blockers)
+	}
+	var named bool
+	for _, b := range partial.Blockers {
+		if strings.Contains(b, "0002_backfill.rb") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("blockers = %v; the file that could not be read is not named", partial.Blockers)
+	}
+}
+
+// Every file in a migration directory counts against coverage, not only the migration-shaped
+// ones. A README the engine declined to read is a file it cannot vouch for, and the denominator
+// is what makes the check mean anything: counting only files an analyzer wanted would make the
+// numerator and the denominator the same number.
+func TestCoverageCountsEveryFileInAMigrationDirectory(t *testing.T) {
+	t.Parallel()
+
+	cert := certify(t,
+		domain.ChangedFile{
+			Path:    "db/migrate/0001_idx.up.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("CREATE INDEX CONCURRENTLY idx ON orders (status);\n"),
+		},
+		domain.ChangedFile{
+			Path:    "db/migrate/0001_idx.down.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("DROP INDEX CONCURRENTLY idx;\n"),
+		},
+		domain.ChangedFile{
+			Path:    "db/migrate/README.md",
+			Status:  domain.StatusAdded,
+			Current: []byte("# how to write migrations\n"),
+		},
+	)
+
+	if cert.Coverage != domain.CoveragePartial {
+		t.Errorf("Coverage = %q with an unread README in the migration directory, want PARTIAL", cert.Coverage)
+	}
+	if cert.Grade != domain.GradeF {
+		t.Errorf("Grade = %q, want F", cert.Grade)
+	}
+
+	if len(cert.UnanalyzedFiles) != 1 || cert.UnanalyzedFiles[0].Path != "db/migrate/README.md" {
+		t.Fatalf("UnanalyzedFiles = %+v, want the README", cert.UnanalyzedFiles)
+	}
+	if cert.UnanalyzedFiles[0].Reason == "" {
+		t.Error("the unread file carries no reason")
+	}
+}
+
+// A file outside every migration directory does not count. The engine refuses to vouch for what
+// it did not read; it does not refuse to grade a changeset because a Python script exists.
+func TestCoverageIgnoresFilesOutsideMigrationDirectories(t *testing.T) {
+	t.Parallel()
+
+	cert := certify(t,
+		domain.ChangedFile{
+			Path:    "db/migrate/0001_idx.up.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("CREATE INDEX CONCURRENTLY idx ON orders (status);\n"),
+		},
+		domain.ChangedFile{
+			Path:    "db/migrate/0001_idx.down.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("DROP INDEX CONCURRENTLY idx;\n"),
+		},
+		domain.ChangedFile{Path: "README.md", Status: domain.StatusAdded, Current: []byte("# hi\n")},
+		domain.ChangedFile{Path: "tools/seed.py", Status: domain.StatusAdded, Current: []byte("print(1)\n")},
+	)
+
+	if cert.Coverage != domain.CoverageFull {
+		t.Errorf("Coverage = %q, want FULL: neither file is in a migration directory. Unanalyzed: %+v",
+			cert.Coverage, cert.UnanalyzedFiles)
+	}
+	if cert.Grade != domain.GradeA {
+		t.Errorf("Grade = %q, want A", cert.Grade)
 	}
 }
 

@@ -1,18 +1,24 @@
-## Reversibility Certificate — Grade A
+## Reversibility Certificate — Grade F
 
-Fully reversible. This change can be rolled back with no data loss.
+**Cannot be certified as reversible.** Rolling this back would lose data, the engine could not determine what the change does, the change will not apply at all, or part of the changeset was never analyzed.
 
 | | |
 | --- | --- |
-| **Grade** | A |
+| **Grade** | F |
 | **AI merge gate** | ❌ FAIL |
 | **Coverage** | ⚠️ PARTIAL — 1 file not analyzed |
 | **Findings** | 1 |
 
 **Why this grade**
 
-- assigned A: every finding is REVERSIBLE
-- nothing capped this grade
+- graded F: coverage is PARTIAL — 1 file(s) in migration directories were not analyzed
+
+### Blockers
+
+This change cannot be merged by an autonomous agent. Each item below is a reason on its own.
+
+- Cannot guarantee reversibility. Unanalyzed files found in migration directories. Remove them or explicitly ignore them in the config.
+- not analyzed: db/migrate/0002_backfill_status.rb
 
 ### Not analyzed
 

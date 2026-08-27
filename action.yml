@@ -120,12 +120,14 @@ inputs:
 
   require-full-coverage:
     description: >-
-      Fail the job when any file that may be a migration went unanalyzed. Off by default: a
-      partially covered change is still a real measurement of the part that was read, and
-      `gate-status` already refuses to pass it. Turn it on if your repository uses a migration
-      format this engine cannot read and you want to hear about it every time.
+      DEPRECATED and ignored. Partial coverage now always fails: if any file in a migration
+      directory went unanalyzed the job exits 2, with no flag needed. Remove this input. If your
+      repository holds files this engine cannot read, list them under `ignore:` in
+      `.reversibility.yml` -- that is an explicit decision, recorded on the certificate.
     required: false
     default: 'false'
+    deprecationMessage: >-
+      Partial coverage always fails now; this input is ignored and can be removed.
 
   fail-on-gate:
     description: >-

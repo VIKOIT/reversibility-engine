@@ -528,38 +528,63 @@ inherit it.**
 
 ### Coverage: how much of the changeset was read
 
-**Coverage is a fact about the changeset, not a penalty.** It is a second axis, and it is
-deliberately not folded into the grade.
+> **A partial pass is a bypass.** A tool cannot vouch for a changeset it only partially
+> understands, so anything less than full coverage fails closed.
+
+**The denominator is every file in a migration directory**, not every file an analyzer wanted.
+Counting only the files an analyzer wanted would make the numerator and the denominator the same
+number, and the check would always pass.
 
 | Coverage | Reached when |
 | --- | --- |
-| `FULL` | Every file any analyzer could claim was claimed. A changeset with nothing claimable is vacuously full — nothing was skipped. |
-| `PARTIAL` | Files that plausibly are migrations went unread. `UnanalyzedFiles` names every one of them, each with the reason. |
+| `FULL` | Every file in every migration directory was analyzed, or explicitly ignored by policy. A changeset with no migration directory is vacuously full — nothing was skipped. |
+| `PARTIAL` | Any file in a migration directory went unread. `UnanalyzedFiles` names every one, each with the reason. |
 
-- **`PARTIAL` never changes the grade.** A file the engine cannot read is not evidence that the
-  change is unsafe. Inventing severity from ignorance is the mirror image of inventing safety
-  from it, which is the bug §3 already had once — and it is the easier of the two to defend,
-  because a tool that over-reports looks conscientious.
-- **A PASS requires grade A *and* full coverage.** An autonomous agent gets no merge on a
-  changeset that was only partly understood. A human reading a `PARTIAL` certificate can see the
-  list of files nobody analyzed and judge for themselves; an agent cannot, so it does not get the
-  benefit of the doubt.
-- **The markdown certificate names every unanalyzed file, above the findings.** All of them,
-  never a count and never a sample. A list of what the engine *did* find, printed first, is
-  exactly what makes an incomplete analysis look complete.
-- **`--require-full-coverage` makes `PARTIAL` exit 2.** Off by default, because a partially
-  covered changeset is still a real measurement of the part that was read. A team standardised on
-  a migration format this engine cannot read will want it on.
+**A directory is a migration directory** if it is named for one — `migrations/`, `migration/`,
+`db/migrate/` — **or** it holds at least one file an analyzer claimed. The second clause is what
+stops a rename from defeating the check: a directory of `.sql` files called `db/schema/` is a
+migration directory by any honest reading.
 
-**The exit code and `AIGateStatus` diverge here, deliberately.** Grade A with partial coverage
-exits **0** under `--gate` and reports `aiGateStatus: FAIL`. The exit code is the human
-pipeline's gate — it compares `EffectiveGrade` and honours waivers — and `--require-full-coverage`
-is how a pipeline opts into the agent's stricter bar.
+Outside every migration directory, only a migration-shaped file counts. A `.py` at the repository
+root is a script, and failing a changeset over it would be severity invented from ignorance.
 
-This is the same separation as the S10 waiver ruling and it is now the project's pattern for the
-whole class: **the grade describes the evidence, and the gate decides what to do about it.** A
-waiver moves the gate and never the grade; coverage moves the gate and never the grade. See
-[`docs/SPECIFICATION.md` §2](SPECIFICATION.md#2-the-philosophy-fail-closed).
+**`PARTIAL` fails closed, unconditionally:**
+
+| | |
+| --- | --- |
+| `Coverage` | `PARTIAL` |
+| `Grade` | **F** — and F means *cannot be certified*, which is already what it means for an analyzer error and for PG027 |
+| `AIGateStatus` | `FAIL` |
+| Exit code | **2**, with no flag and no threshold |
+
+Exit **2** rather than 1 because the grade was not too low; part of the changeset was never
+measured, and that is a run that did not complete. `--require-full-coverage` is a deprecated
+no-op, kept accepted so an upgrade does not turn a pipeline into an unknown-flag error.
+
+**The message names the remedy**, because a refusal a reader cannot act on is one they will route
+around:
+
+```
+Cannot guarantee reversibility. Unanalyzed files found in migration directories.
+Remove them or explicitly ignore them in the config.
+```
+
+**The escape hatch is the policy, and it works.** `ignore:` is explicit, mixed into
+`PolicyDigest`, and printed on the certificate — a recorded decision is not a bypass. Only
+ignored **candidates** close the merge gate (§16.8): ignoring a `README.md` beside the migrations
+is telling the engine what a README is, and ignoring a `.rb` migration is accepting a
+reversibility risk. If every ignore closed the gate, the only way to satisfy strict coverage
+would permanently deny an agent a merge, and nobody would use either.
+
+**This reverses an earlier ruling**, under which `PARTIAL` never moved the grade and
+`--require-full-coverage` was opt-in. Both rulings and the argument that changed the answer are
+recorded in [`docs/SPECIFICATION.md` §16.7](SPECIFICATION.md) — the short version is that F was
+never a severity claim, and an analysis that read four of five migrations did not complete.
+
+**Coverage has therefore left the waiver pattern.** *The grade describes the evidence and the
+gate decides what to do about it* still governs waivers, which move the gate and never the grade.
+Coverage no longer belongs to it: an incomplete analysis is not a risk somebody accepted, it is a
+measurement that was not taken.
 
 ### What the run was able to do at all
 

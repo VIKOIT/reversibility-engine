@@ -75,6 +75,13 @@ func classifyCandidate(p string) (bool, string) {
 	}
 
 	if !candidateExtensions[ext] {
+		// Not migration-shaped. It still counts against coverage when it sits inside a
+		// migration directory — see Engine.outcome — and the reason has to say which of those
+		// two things happened, because they call for different responses: teach the engine a
+		// format, or move the file out and ignore it.
+		if InMigrationDir(p) {
+			return false, "not analyzed, and it sits in a migration directory"
+		}
 		return false, ""
 	}
 
@@ -97,27 +104,86 @@ func unanalyzedFiles(paths []string) []domain.UnanalyzedFile {
 	out := make([]domain.UnanalyzedFile, 0, len(paths))
 	for _, p := range paths {
 		_, reason := classifyCandidate(p)
+		if reason == "" {
+			reason = "not analyzed, and it sits in a migration directory"
+		}
 		out = append(out, domain.UnanalyzedFile{Path: p, Reason: reason})
 	}
 	return out
 }
 
-// outcome decides what the run was able to do at all, before any question of grading.
+// PartialCoverageBlocker is the message a partially covered changeset fails with.
 //
-// The three answers are docs/RULES.md §3's. unsupported holds the candidate paths, sorted, and
-// is returned even when the outcome is ANALYZED — a partially covered changeset is an open
-// question (docs/SPECIFICATION.md §16.7) and the input that ruling will need is computed here.
+// It is exported so the renderers and the CLI say the same sentence the certificate does. A
+// safety tool that phrases the same refusal three ways teaches the reader that the wording does
+// not matter, and then the wording is the thing nobody reads.
+const PartialCoverageBlocker = "Cannot guarantee reversibility. Unanalyzed files found in " +
+	"migration directories. Remove them or explicitly ignore them in the config."
+
+// InMigrationDir reports whether a path sits under a directory named for migrations.
+//
+// This is the half of "is this a migration directory" that can be answered from one path, which
+// is what a provider's include predicate has to work with: it decides whether to read a file
+// before it has seen the rest of the changeset.
+func InMigrationDir(p string) bool {
+	clean := strings.ToLower(path.Clean(strings.ReplaceAll(p, "\\", "/")))
+	for _, segment := range strings.Split(path.Dir(clean), "/") {
+		if migrationDirs[segment] {
+			return true
+		}
+	}
+	return false
+}
+
+// migrationDirectories identifies every directory this changeset treats as holding migrations.
+//
+// Two ways in, and the second is why this cannot be answered per path:
+//
+//   - the directory is named for migrations — migrations/, migration/, db/migrate/;
+//   - the directory holds at least one file an analyzer claimed, whatever it is called. A
+//     directory of .sql files named db/schema/ is a migration directory by any honest reading,
+//     and requiring the conventional name would let a rename defeat the coverage check.
+func (e *Engine) migrationDirectories(files []domain.ChangedFile) map[string]bool {
+	dirs := map[string]bool{}
+
+	for _, f := range files {
+		dir := path.Dir(normalizePath(f.Path))
+		if e.Supports(f.Path) || InMigrationDir(f.Path) {
+			dirs[dir] = true
+		}
+	}
+	return dirs
+}
+
+// outcome decides what the run was able to do at all, before any question of grading, and
+// reports every file inside a migration directory that no analyzer read.
+//
+// **The denominator is every file in those directories, not every file an analyzer might have
+// wanted.** That is the whole of the strict-coverage ruling: a `.md`, a `.gitkeep`, a helper
+// script sitting beside the migrations all count against coverage, because the engine cannot
+// tell from the outside which of them is inert. A file it did not read is a file it cannot
+// vouch for, and a changeset it can only partly vouch for is one it fails.
+//
+// The escape hatch is the policy, not a heuristic: ignore the file explicitly and the decision
+// is recorded, digested, and visible on the certificate.
 func (e *Engine) outcome(files []domain.ChangedFile) (domain.AnalysisOutcome, []string) {
 	var (
 		claimed     bool
 		unsupported []string
 	)
 
+	dirs := e.migrationDirectories(files)
+
 	for _, f := range files {
-		switch {
-		case e.Supports(f.Path):
+		if e.Supports(f.Path) {
 			claimed = true
-		case Candidate(f.Path):
+			continue
+		}
+
+		// Outside every migration directory, only a migration-shaped file counts: a .py at the
+		// repository root is a script, and holding a changeset hostage to it would be the
+		// severity-from-ignorance failure this engine is not allowed to commit.
+		if dirs[path.Dir(normalizePath(f.Path))] || Candidate(f.Path) {
 			unsupported = append(unsupported, f.Path)
 		}
 	}
@@ -132,6 +198,10 @@ func (e *Engine) outcome(files []domain.ChangedFile) (domain.AnalysisOutcome, []
 	default:
 		return domain.OutcomeNoCandidates, nil
 	}
+}
+
+func normalizePath(p string) string {
+	return path.Clean(strings.ReplaceAll(p, "\\", "/"))
 }
 
 // unsupportedContentBlockers turns the candidate paths into the message the certificate carries.

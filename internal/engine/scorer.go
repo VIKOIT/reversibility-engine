@@ -42,8 +42,10 @@ type scoreInput struct {
 	// was read.
 	outcome domain.AnalysisOutcome
 
-	// unsupported holds the candidate paths behind an UNSUPPORTED_CONTENT outcome, so the
-	// blockers can name them. Ignored for every other outcome.
+	// unsupported holds every file inside a migration directory that no analyzer read. It
+	// drives the UNSUPPORTED_CONTENT message when nothing at all was analyzed, and forces F
+	// when something was — a changeset the engine only partly understands is one it cannot
+	// vouch for.
 	unsupported []string
 }
 
@@ -98,7 +100,30 @@ func score(in scoreInput) scoreResult {
 	// and "read nothing", and only readers of the second meaning were ever surprised.
 	switch in.outcome {
 	case domain.OutcomeAnalyzed:
-		// Fall through to scoring.
+		// Analyzed, but not completely. **A partial pass is a bypass**, so this fails closed
+		// before anything is scored.
+		//
+		// This reverses the earlier ruling that partial coverage never moves the grade, and the
+		// reversal is recorded rather than silently applied — see docs/SPECIFICATION.md §16.7.
+		// The argument that changed it: F does not mean "this change is dangerous", it means
+		// "this cannot be certified", which is already what it means for an analyzer error and
+		// for PG027. An analysis that read four of five migrations did not complete. Grading it
+		// on the four is a verdict about a changeset that does not exist.
+		if len(in.unsupported) > 0 {
+			blockers := make([]string, 0, len(in.unsupported)+1)
+			blockers = append(blockers, PartialCoverageBlocker)
+			for _, p := range in.unsupported {
+				blockers = append(blockers, "not analyzed: "+p)
+			}
+
+			return scoreResult{
+				grade:    domain.GradeF,
+				blockers: blockers,
+				causes: []string{fmt.Sprintf(
+					"graded F: coverage is PARTIAL — %d file(s) in migration directories were not analyzed",
+					len(in.unsupported))},
+			}
+		}
 
 	case domain.OutcomeNoCandidates:
 		// Genuinely nothing to assess. That is a real answer and it is reported as one — it is

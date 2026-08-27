@@ -84,9 +84,10 @@ FAIL_ON_GATE="${INPUT_FAIL_ON_GATE:-true}"
 
 # Off by default. gate-status already refuses to pass a partially analyzed change, so this only
 # decides whether the *job* fails too — which is a choice about the pipeline, not about safety.
-COVERAGE_ARGS=''
-if [ "${INPUT_REQUIRE_FULL_COVERAGE:-false}" = 'true' ]; then
-    COVERAGE_ARGS='--require-full-coverage'
+# Deprecated and ignored: partial coverage always fails now, with no flag needed. The input is
+# still read so a workflow that sets it gets a warning rather than silence.
+if [ "alse" = 'true' ]; then
+    warn "'require-full-coverage' is deprecated and ignored: partial coverage always fails now. Remove it."
 fi
 
 # ------------------------------------------------------------------------------------------
@@ -146,8 +147,7 @@ set +f
 # The requested format carries the gate, because its exit code is the one the job is graded on.
 # Exit codes: 0 met, 1 below the gate, 2 the run did not complete.
 set +e
-"$REVCTL" check --base "$BASE" --format "$FORMAT" --output "$CERT" --min-grade "$GATE" \
-    ${COVERAGE_ARGS} "${SPEC[@]}"
+"$REVCTL" check --base "$BASE" --format "$FORMAT" --output "$CERT" --min-grade "$GATE" "${SPEC[@]}"
 RC=$?
 set -e
 

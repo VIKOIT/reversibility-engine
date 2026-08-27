@@ -57,10 +57,10 @@
       "invocations": [
         {
           "executionSuccessful": true,
-          "exitCodeDescription": "grade A, AI merge gate FAIL, partial coverage: 1 file(s) not analyzed",
+          "exitCodeDescription": "grade F, AI merge gate FAIL, partial coverage: 1 file(s) not analyzed",
           "properties": {
-            "grade": "A",
-            "effectiveGrade": "A",
+            "grade": "F",
+            "effectiveGrade": "F",
             "aiGateStatus": "FAIL",
             "outcome": "ANALYZED",
             "coverage": "PARTIAL",

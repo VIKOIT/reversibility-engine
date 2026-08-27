@@ -127,10 +127,66 @@ func oracleSeesMigrationShapedFiles(t *testing.T, c combination) bool {
 		if !migrationShapedExtensions[strings.ToLower(filepath.Ext(name))] {
 			return
 		}
-		for _, segment := range strings.Split(path.Dir(rel), "/") {
-			if migrationDirNames[segment] {
-				found = true
-			}
+		if inMigrationDir(rel) {
+			found = true
+		}
+	})
+	return found
+}
+
+func inMigrationDir(rel string) bool {
+	for _, segment := range strings.Split(path.Dir(rel), "/") {
+		if migrationDirNames[segment] {
+			return true
+		}
+	}
+	return false
+}
+
+// oracleSeesUnanalyzedInMigrationDir restates the strict-coverage denominator independently.
+//
+// **Every file in a migration directory counts, not only the migration-shaped ones.** An earlier
+// version of this file had no such oracle, and a mutation that reverted the denominator to
+// "candidates only" passed all 672 cases — the properties all still held, and the check the
+// ruling exists to enforce had quietly stopped enforcing anything.
+//
+// It checks the half of the denominator the engine can actually see, and the boundary is real
+// rather than a simplification for the test's convenience.
+//
+// A provider decides whether to READ a file from its path alone, before it has seen the rest of
+// the changeset. "This directory holds a .sql file, so fetch its README too" is not a decision a
+// per-path predicate can make. So a directory NAMED for migrations has every file fetched and
+// every file counted; a directory identified only by holding an analyzable file has its
+// unconventional siblings counted only if they are migration-shaped.
+//
+// docs/SPECIFICATION.md §16.9 records this as a known limitation with the fix that closes it.
+// The oracle encodes the boundary rather than the aspiration, because a property test that
+// asserts what the engine cannot do is a failing test, not a stricter one.
+func oracleSeesUnanalyzedInMigrationDir(t *testing.T, c combination) bool {
+	t.Helper()
+
+	analyzable := func(name string) bool {
+		return analyzedExtensions[strings.ToLower(filepath.Ext(name))] ||
+			strings.HasSuffix(strings.ToLower(name), ".tfplan.json")
+	}
+
+	found := false
+	oracleWalk(c, func(rel string, name string) {
+		if analyzable(name) {
+			return
+		}
+
+		// Everything in a migration-named directory counts, whatever it is.
+		if inMigrationDir(rel) {
+			found = true
+			return
+		}
+
+		// Elsewhere, only an unclaimed .sql counts. A .py or .rb outside a migration directory
+		// is a script: the engine deliberately does not fail a changeset over one, because that
+		// would be severity invented from ignorance, which is the opposite mistake.
+		if strings.HasSuffix(strings.ToLower(name), ".sql") {
+			found = true
 		}
 	})
 	return found
@@ -239,6 +295,25 @@ func trees() []tree {
 				"django/app/migrations/x0001.py": "from django.db import migrations\n",
 			})}
 		}},
+		{"migrations beside a readme", func(t *testing.T) []string {
+			// The strict-coverage denominator, as a tree. Neither the README nor the .gitkeep is
+			// migration-shaped, and both sit in a migration directory, so both count.
+			return []string{writeTree(t, map[string]string{
+				"db/migrate/0001_idx.up.sql":   "CREATE INDEX CONCURRENTLY idx ON orders (status);\n",
+				"db/migrate/0001_idx.down.sql": "DROP INDEX CONCURRENTLY idx;\n",
+				"db/migrate/README.md":         "# how to write migrations\n",
+				"db/migrate/.gitkeep":          "",
+			})}
+		}},
+		{"migrations in an unconventionally named directory", func(t *testing.T) []string {
+			// No migration-shaped directory name anywhere. The directory is identified by
+			// holding a .sql file, which is the clause that stops a rename defeating the check.
+			return []string{writeTree(t, map[string]string{
+				"db/schema/0001_idx.up.sql":   "CREATE INDEX CONCURRENTLY idx ON orders (status);\n",
+				"db/schema/0001_idx.down.sql": "DROP INDEX CONCURRENTLY idx;\n",
+				"db/schema/notes.txt":         "written by hand\n",
+			})}
+		}},
 		{"a kubernetes manifest", func(t *testing.T) []string {
 			return []string{writeTree(t, map[string]string{
 				"deploy.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\n",
@@ -282,10 +357,6 @@ type modifier struct {
 
 	// ignoreAll writes a policy that ignores every path.
 	ignoreAll bool
-
-	// requireFullCoverage passes --require-full-coverage, which turns partial coverage into a
-	// run that did not complete.
-	requireFullCoverage bool
 }
 
 func (m modifier) beforePaths(c combination) []string {
@@ -308,7 +379,9 @@ func modifiers() []modifier {
 		{name: "--terraform-plan naming nothing", args: []string{"--no-config", "--terraform-plan", "no-such-plan.json"}},
 		{name: "--context naming nothing", args: []string{"--no-config", "--context", "no-such-snapshot.json"}},
 		{name: "discovering a policy", args: nil},
-		{name: "--require-full-coverage", args: []string{"--no-config", "--require-full-coverage"}, requireFullCoverage: true},
+		// Kept in the space because a deprecated no-op that started doing something again would
+		// be a silent behaviour change, and this is where that would show.
+		{name: "--require-full-coverage (deprecated no-op)", args: []string{"--no-config", "--require-full-coverage"}},
 	}
 }
 
@@ -519,10 +592,30 @@ func assertCoverageProperty(t *testing.T, c combination, cert certificate.Certif
 		t.Errorf("Coverage FULL over a tree holding migration-shaped files no analyzer claimed")
 	}
 
-	// Property 11 — --require-full-coverage does what it says, and only what it says.
-	if c.mod.requireFullCoverage && !cert.FullyCovered() && code != cli.ExitError {
-		t.Errorf("--require-full-coverage exited %d at coverage %q, want %d\n%s",
-			code, cert.Coverage, cli.ExitError, stderr)
+	// Property 11 — a partial pass is a bypass. Unconditionally: no flag, no threshold, no
+	// argument combination makes a partially analyzed changeset anything but exit 2.
+	//
+	// This replaces a weaker property that only held when --require-full-coverage was passed.
+	// The flag is now a deprecated no-op and the check is unconditional, so the property is
+	// unconditional too.
+	if !cert.FullyCovered() && code != cli.ExitError {
+		t.Errorf("coverage %q exited %d, want %d — a partial pass is a bypass\n%s",
+			cert.Coverage, code, cli.ExitError, stderr)
+	}
+
+	// Property 12 — a partially covered changeset never carries a passing grade either. The
+	// exit code is what CI reads; this is what a merge bot reads, and they must agree.
+	if !cert.FullyCovered() && cert.Grade == certificate.GradeA {
+		t.Errorf("grade A at coverage %q", cert.Coverage)
+	}
+
+	// Property 13 — the denominator, checked against an oracle that does not ask the engine.
+	//
+	// Without this, reverting coverage to "count only the files an analyzer wanted" passes every
+	// other property here: nothing else can tell the difference between a check that is
+	// satisfied and a check that is vacuous.
+	if oracleSeesUnanalyzedInMigrationDir(t, c) && cert.FullyCovered() {
+		t.Errorf("Coverage FULL over a migration directory holding a file no analyzer can read")
 	}
 }
 

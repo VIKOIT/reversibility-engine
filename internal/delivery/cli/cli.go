@@ -42,13 +42,13 @@ var errNoCommand = errors.New("no command given: nothing was analyzed, which is 
 var errNotAssessed = errors.New(
 	"the changeset was not assessed: it holds files that may be migrations and no analyzer supports them")
 
-// errIncompleteCoverage signals --require-full-coverage over a partially analyzed changeset.
+// errIncompleteCoverage signals a changeset the engine could only partly read.
 //
 // ExitError rather than ExitGateFailed, for the same reason as errNotAssessed: the grade was not
 // too low, part of the changeset simply was not measured. Reporting it as a failed gate would
 // invite lowering the threshold, and no threshold makes an unread migration safe.
 var errIncompleteCoverage = errors.New(
-	"--require-full-coverage was given and part of the changeset was not analyzed")
+	"part of this changeset was not analyzed, so its reversibility cannot be certified")
 
 // Options configures a CLI invocation. Streams are injected so the command tree is testable
 // without touching the process's own stdout.

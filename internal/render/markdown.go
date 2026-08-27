@@ -32,9 +32,11 @@ var gradeSummary = map[domain.Grade]string{
 	domain.GradeA: "Fully reversible. This change can be rolled back with no data loss.",
 	domain.GradeB: "Reversible at a cost. Rolling back is possible but slow, disruptive, or only safe within a window.",
 	domain.GradeC: "Reversible with significant caveats. Review the findings before merging.",
-	// F now covers three different failures, and the summary names all three: a reader whose
-	// migration will not even apply should not be told it would lose data on rollback.
-	domain.GradeF: "**Not reversible.** Rolling this back would lose data, the engine could not determine what the change does, or the change will not apply at all.",
+	// F covers four different failures and the summary names all four. A reader whose migration
+	// will not even apply should not be told it would lose data on rollback, and a reader whose
+	// changeset merely contains a README the engine declined to read should not be told either.
+	// "Why this grade", directly below, says which one applies.
+	domain.GradeF: "**Cannot be certified as reversible.** Rolling this back would lose data, the engine could not determine what the change does, the change will not apply at all, or part of the changeset was never analyzed.",
 
 	// N/A is not a verdict about the change; it is the absence of one. The summary has to say
 	// that in the first line, because the first line is all most readers see, and the line that
