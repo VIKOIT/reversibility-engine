@@ -1,0 +1,7 @@
+{
+  "rule": "PG033",
+  "note": "Overwriting a comment loses the previous text, which the changeset does not record -- but a comment is not an object and not a row. The overwrite principle that governs PG028 deliberately stops short of it.",
+  "findings": [
+    {"ruleId":"PG033","file":"migrations/0001_document_orders.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

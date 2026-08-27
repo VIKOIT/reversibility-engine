@@ -27,8 +27,10 @@ func TestFromDomainCarriesEveryField(t *testing.T) {
 			Path:   "app/migrations/0001_initial.py",
 			Reason: "no analyzer reads .py migrations",
 		}},
-		Applicable:  true,
-		InputDigest: "deadbeef",
+		IgnoredByPolicy: []string{"vendor/migrations/0001_vendored.py"},
+		GradeCauses:     []string{"assigned C: 3 findings are COSTLY to reverse"},
+		Applicable:      true,
+		InputDigest:     "deadbeef",
 		Findings: []domain.Finding{{
 			RuleID:        "PG012",
 			File:          "migrations/0001.up.sql",
@@ -63,9 +65,11 @@ func TestFromDomainCarriesEveryField(t *testing.T) {
 			Path:   "app/migrations/0001_initial.py",
 			Reason: "no analyzer reads .py migrations",
 		}},
-		Applicable:     true,
-		EffectiveGrade: certificate.GradeC,
-		InputDigest:    "deadbeef",
+		IgnoredByPolicy: []string{"vendor/migrations/0001_vendored.py"},
+		GradeCauses:     []string{"assigned C: 3 findings are COSTLY to reverse"},
+		Applicable:      true,
+		EffectiveGrade:  certificate.GradeC,
+		InputDigest:     "deadbeef",
 		Findings: []certificate.Finding{{
 			RuleID:        "PG012",
 			File:          "migrations/0001.up.sql",
@@ -220,8 +224,8 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 	// 1.6.0 added Coverage and UnanalyzedFiles and narrowed the gate: PASS requires grade A and
 	// full coverage. A consumer reading aiGateStatus is correct without changes; one that
 	// re-derived the gate from the grade alone is now wrong, which is the reason for the bump.
-	if certificate.SchemaVersion != "1.6.0" {
-		t.Errorf("SchemaVersion = %q, want 1.6.0", certificate.SchemaVersion)
+	if certificate.SchemaVersion != "1.7.0" {
+		t.Errorf("SchemaVersion = %q, want 1.7.0", certificate.SchemaVersion)
 	}
 }
 

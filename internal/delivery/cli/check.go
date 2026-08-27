@@ -157,11 +157,26 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	// docs-only pull request and thirteen unreadable Django migrations both arrived here as an
 	// empty file list — indistinguishable, and both graded A. The engine hands these to the
 	// analyzers too, which ignore anything they do not claim.
+	// ignoredCandidates records what the policy excluded. The path is recorded, never the
+	// content: an ignored file is still never read, which is the property that makes an ignore
+	// list mean anything, and the certificate needs only to be able to name it.
+	//
+	// Recording happens here because here is the only place that knows. By the time the engine
+	// sees a changeset, an ignored file is indistinguishable from a file that was never there.
+	var ignoredCandidates []string
+
 	include := func(path string) bool {
-		if policy.IsPolicyFile(path) || pol.Ignores(path) {
+		if policy.IsPolicyFile(path) {
 			return false
 		}
-		return eng.Supports(path) || engine.Candidate(path)
+		if !eng.Supports(path) && !engine.Candidate(path) {
+			return false
+		}
+		if pol.Ignores(path) {
+			ignoredCandidates = append(ignoredCandidates, path)
+			return false
+		}
+		return true
 	}
 
 	source, err := resolveProvider(flags, paths, include)
@@ -176,7 +191,7 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 
 	// A failing certificate is still a certificate, and it is the thing the user asked for. The
 	// analysis error is reported alongside it rather than replacing it.
-	cert, analysisErr := eng.Certify(cmd.Context(), files)
+	cert, analysisErr := eng.Certify(cmd.Context(), files, engine.IgnoredByPolicy(ignoredCandidates))
 
 	out, closeOut, err := openOutput(opts.Stdout, flags.output)
 	if err != nil {
@@ -372,6 +387,19 @@ func applyGate(
 	}
 
 	if effective.Rank() >= minGrade.Rank() {
+		// The exit code and the AI merge gate can legitimately disagree, and when they do it is
+		// said out loud, first, in one line.
+		//
+		// Two signals in one certificate that quietly point opposite ways is the disease this
+		// project has now fixed three times: the :v1 image, the empty changeset, and the
+		// certificate whose prose disclaimed under a green PASS. Nobody reads a JSON field to
+		// discover that the green check they are looking at does not mean what it appears to.
+		if cert.AIGateStatus != domain.GatePass {
+			_, _ = fmt.Fprintf(stderr,
+				"revctl: this run exits 0 and the AI merge gate is %s — %s. An autonomous agent must not merge this change.\n",
+				cert.AIGateStatus, divergenceReason(cert))
+		}
+
 		if len(cert.Waived) > 0 && effective != cert.Grade {
 			_, _ = fmt.Fprintf(stderr,
 				"revctl: gate met at %s because %d finding(s) are waived; the change itself grades %s\n",
@@ -386,6 +414,26 @@ func applyGate(
 	}
 
 	return errGateFailed
+}
+
+// divergenceReason says, in one clause, why the merge gate is closed on a run that exited 0.
+//
+// It names the specific cause rather than saying "see the certificate", because the whole point
+// of printing this line is that the reader should not have to go and look.
+func divergenceReason(cert domain.ReversibilityCertificate) string {
+	switch {
+	case !cert.Coverage.Full():
+		return fmt.Sprintf("%d file(s) that may be migrations were not analyzed",
+			len(cert.UnanalyzedFiles))
+	case len(cert.IgnoredByPolicy) > 0:
+		return fmt.Sprintf("%d candidate file(s) are excluded by %s",
+			len(cert.IgnoredByPolicy), policy.FileName)
+	case len(cert.Waived) > 0:
+		return fmt.Sprintf("%d finding(s) are waived, and a waiver never opens the AI merge gate",
+			len(cert.Waived))
+	default:
+		return fmt.Sprintf("the change grades %s", cert.Grade)
+	}
 }
 
 // openOutput returns the destination for the certificate along with a close function.

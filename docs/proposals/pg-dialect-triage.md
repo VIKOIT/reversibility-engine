@@ -1,6 +1,18 @@
 # Proposal — PostgreSQL dialect coverage, first 30
 
-**STATUS: PROPOSED. NOT AUTHORITATIVE. NOT IMPLEMENTED.**
+**STATUS: PARTIALLY RULED. The rest is still PROPOSED, NOT AUTHORITATIVE, NOT IMPLEMENTED.**
+
+**Shipped, after the owner's ruling:** D1 (now **PG028**), D2 (now **PG029**), #18 `ADD
+CONSTRAINT ... USING INDEX` (**PG030**), #19 `VALIDATE CONSTRAINT` (**PG031**), #12/#13
+`GRANT`/`REVOKE` (**PG032**, both REVERSIBLE), #14 `COMMENT ON` (**PG033**, REVERSIBLE). Their
+rows are in [`docs/RULES.md`](../RULES.md) and each has a fixture. **The provisional IDs below no
+longer match: PG028–PG033 are taken, so the remaining proposals renumber from PG034.**
+
+**Still awaiting a ruling:** everything else in the table, plus the three open questions the
+owner deferred until the fixes were in front of them (#24 `DISABLE ROW LEVEL SECURITY`, #30
+`INSERT ... ON CONFLICT DO UPDATE`, and whether D1/D2 were handled as defects — they were).
+
+---
 
 Nothing in this file grades anything. [`docs/RULES.md`](../RULES.md) is the authoritative
 table; this is a request for rulings that would be added to it. No code, fixture, or rule ID
@@ -193,15 +205,99 @@ that the database could theoretically be restored.
   numbered in whatever order you approve them, since a retired or rejected ID is never reused.
 - **It does not rank by corpus frequency**, for the reason at the top. The tiers are judgment.
 
+---
+
+## The SELECT investigation — findings, no classification proposed
+
+You asked me to investigate before classifying, on the grounds that a bare `SELECT` in a
+migration is either a health check or your file-splitting heuristic cutting a statement in half.
+**Do not classify `SELECT` as a category.** Three findings, in order of how much they matter.
+
+### 1. `SELECT` is a node type, not a semantic category
+
+Measured, current binary:
+
+| Statement | Today | What it actually does |
+| --- | --- | --- |
+| `SELECT 1;` | F UNKNOWN | nothing |
+| `SELECT count(*) FROM orders;` | F UNKNOWN | nothing |
+| `SELECT pg_advisory_lock(42);` | F UNKNOWN | **takes a lock** |
+| `SELECT setval('orders_id_seq', 1000);` | F UNKNOWN | **resets a sequence — the PG010 hazard, IRREVERSIBLE** |
+| `WITH d AS (DELETE FROM orders WHERE id < 5 RETURNING *) SELECT count(*) FROM d;` | F UNKNOWN | **deletes rows** |
+
+The last two are the reason this cannot be one rule. A data-modifying CTE is a `DELETE` the
+parser reports as a `SelectStmt`, and `setval` is PG010 wearing a function call. **Classifying
+"SELECT" as REVERSIBLE would make both of those reversible**, which is the wrong-safe verdict
+this engine exists to prevent — and it would be introduced by a rule that looks obviously
+harmless. They fail closed today by luck rather than by design.
+
+If you want the harmless case covered, it has to be narrower than the node type: a `SelectStmt`
+with no CTE, no locking clause, and no call to a known side-effecting function. That is a real
+piece of analysis, not a table row, and I would not write it without a ruling.
+
+### 2. There is no file-splitting heuristic in this repository
+
+I checked, because the hypothesis was worth eliminating before anything else. `PgQuery.Parse`
+hands the **whole file** to `pg_query.Parse` and iterates `result.Stmts` — the splitting is done
+by the real PostgreSQL grammar, not by a heuristic here. `classifyPath` only pairs up/down files
+by name; it never splits their contents.
+
+So a `SELECT` this engine reports is a real statement in the file as written. If your corpus
+shows cut statements, the cut happened in the harness, upstream of this engine.
+
+### 3. A cut statement has a specific, detectable signature
+
+This is the useful part. **The two paths to PG027 already print different rationales**, and a
+split statement produces a distinctive pair:
+
+```console
+# migrations/0001_cut.up.sql   ← the head of "CREATE TABLE archive AS SELECT * FROM orders;"
+PG027 — This migration could not be parsed ... parse: syntax error at end of input.
+
+# migrations/0002_tail.up.sql  ← the tail of the same statement
+PG027 — this statement matches no rule in the PostgreSQL classification table
+```
+
+**`syntax error at end of input` is the signature.** A statement cut in half leaves a head that
+is valid SQL as far as it goes and then simply stops — which is exactly the error the grammar
+reports — paired with a tail that parses cleanly and classifies as nothing. A genuine typo
+produces `syntax error at or near "<token>"` instead.
+
+To test the hypothesis against the corpus in one pass:
+
+```console
+$ scripts/probe-dialect.sh --corpus path/to/corpus
+```
+
+It lists every file reaching PG027. Any file whose rationale says **at end of input** is a
+truncation candidate; grep those and check whether the adjacent file starts mid-statement. If
+that set is non-empty, it is a harness bug and it outranks this whole document, exactly as you
+said.
+
+I could not run this: the corpus is not on this machine.
+
+---
+
 ## Open questions for the ruling
 
-1. **#12 `GRANT` vs #13 `REVOKE`** — I proposed REVERSIBLE and COSTLY respectively. They can
-   reasonably be the same; say which.
-2. **#14 `COMMENT ON`** — the overwrite principle says COSTLY, I proposed REVERSIBLE.
-3. **#24 `DISABLE ROW LEVEL SECURITY`** — COSTLY by the data-loss test, and arguably worse than
-   COSTLY by any security reading. This engine measures reversibility, not security posture, so
-   I stayed with COSTLY; confirm that is the boundary you want.
-4. **#30 `INSERT ... ON CONFLICT DO UPDATE`** — confirm it routes to PG009 rather than to the
-   new INSERT row.
-5. **D1 and D2** — confirm they are handled as defects ahead of this list rather than as two
-   more rows in it.
+1. ~~**#12 `GRANT` vs #13 `REVOKE`**~~ **RULED: both REVERSIBLE.** Shipped as PG032, with the
+   rationale noting on every finding that the engine does not verify the reverse is present.
+2. ~~**#14 `COMMENT ON`**~~ **RULED: REVERSIBLE.** Shipped as PG033. The overwrite principle
+   stops short of it deliberately; it is saved for PG028, where it bites.
+3. **#24 `DISABLE ROW LEVEL SECURITY`** — still open. COSTLY by the data-loss test, and arguably
+   worse than COSTLY by any security reading. This engine measures reversibility, not security
+   posture, so I stayed with COSTLY; confirm that is the boundary you want.
+4. **#30 `INSERT ... ON CONFLICT DO UPDATE`** — still open. Confirm it routes to PG009 rather
+   than to the new INSERT row.
+5. ~~**D1 and D2**~~ **RULED: handled as defects, ahead of the list.** Shipped as PG028 and
+   PG029, with a build-time guard added so the D2 shape cannot recur.
+
+Two new ones, raised by the work rather than by the ruling:
+
+6. **`SELECT` — see the investigation above.** No classification proposed. The narrow rule that
+   would be safe (a `SelectStmt` with no CTE, no locking clause, no side-effecting function
+   call) is analysis rather than a table row, and I would want that scoped explicitly.
+7. **PG029's lock hazard was mine, not yours.** You ruled the verdict COSTLY and did not name a
+   lock; I chose EXCLUSIVE, on the grounds that `DROP MATERIALIZED VIEW` takes `ACCESS
+   EXCLUSIVE` on an object that queries read, which is the same treatment PG014 gives a
+   non-concurrent `DROP INDEX`. PG016's SHORT would be the alternative. Confirm or correct.

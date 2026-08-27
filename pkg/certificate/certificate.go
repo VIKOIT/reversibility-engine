@@ -254,6 +254,14 @@ type Certificate struct {
 	// FULL. Sorted by path.
 	UnanalyzedFiles []UnanalyzedFile `json:"unanalyzedFiles"`
 
+	// IgnoredByPolicy names every candidate file a .reversibility.yml excluded. Added in schema
+	// 1.7.0.
+	//
+	// These do not count against Coverage — the engine could have read them and was told not to
+	// — but they do close the merge gate. An ignore is a human accepting a risk, and an agent
+	// never inherits a human's acceptance.
+	IgnoredByPolicy []string `json:"ignoredByPolicy"`
+
 	// Applicable is true exactly when Outcome is ANALYZED. Retained for consumers pinned to
 	// schema 1.4.0; new code should read Outcome, which distinguishes the two ways a changeset
 	// can be inapplicable.
@@ -292,6 +300,10 @@ type Certificate struct {
 	// for A, B, C, and NO_CANDIDATES.
 	Blockers []string `json:"blockers"`
 
+	// GradeCauses explains the grade: the assignment, then every cap that lowered it. Added in
+	// schema 1.7.0. Never empty for a graded certificate — an A says that nothing capped it.
+	GradeCauses []string `json:"gradeCauses"`
+
 	DownMigrations []DownMigrationStatus `json:"downMigrations"`
 }
 
@@ -327,6 +339,7 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 		Outcome:         AnalysisOutcome(in.Outcome),
 		Coverage:        Coverage(in.Coverage),
 		UnanalyzedFiles: make([]UnanalyzedFile, 0, len(in.UnanalyzedFiles)),
+		IgnoredByPolicy: append([]string{}, in.IgnoredByPolicy...),
 		Applicable:      in.Applicable,
 		InputDigest:     in.InputDigest,
 		PolicyDigest:    in.PolicyDigest,
@@ -336,6 +349,7 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 		Waived:          make([]WaivedFinding, 0, len(in.Waived)),
 		UndoPlan:        make([]string, 0, len(in.UndoPlan)),
 		Blockers:        make([]string, 0, len(in.Blockers)),
+		GradeCauses:     append([]string{}, in.GradeCauses...),
 		DownMigrations:  make([]DownMigrationStatus, 0, len(in.DownMigrations)),
 	}
 

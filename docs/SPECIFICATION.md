@@ -109,6 +109,37 @@ in the second direction once.
 The next time something wants to change a grade and is not evidence about the change, the answer
 is a new axis, not a new cap.
 
+**A policy `ignore:` follows the waiver half of this pattern, not the coverage half** (§16.8).
+Coverage stays FULL, because the engine was capable of reading the file and was told not to —
+coverage describes capability, not permission. The ignore closes the merge gate instead, for the
+reason a waiver does: **a human may accept risk with their name on it, and an agent may not
+inherit it.** Which mechanism the human used does not change who is allowed to inherit.
+
+### Any field that constrains the verdict must appear in every rendered output
+
+> **Any field the engine computes that determines or constrains the verdict must appear in every
+> rendered output, not only in JSON. A reader must never have to open the JSON to learn why they
+> were blocked.**
+
+This has the same authority as the two invariants above and it is the same failure one step
+further out. Those are about the engine reaching a permissive answer; this is about the engine
+reaching a correct answer and then failing to hand over the reason.
+
+The instance that produced it: a capped grade was unexplainable from the certificate a reviewer
+actually reads. A changeset with every finding REVERSIBLE could arrive at **C**, and nothing in
+the markdown said which condition applied the ceiling — the reader's only recourse was to open
+the rule tables and re-derive it, which is precisely the work the engine had already done and
+then discarded. `GradeCauses` carries it now: the assignment, then every cap that lowered the
+grade, each naming the rule, file, or condition responsible. Grade A says explicitly that
+nothing capped it, because *"nothing capped this"* and *"nobody wrote down why"* must not render
+identically.
+
+`TestEveryCappedOrFailedGradeNamesItsCauseInMarkdown` holds it over every fixture, and it checks
+each cause individually rather than the certificate as a whole — an earlier version checked the
+whole and a mutation walked through it, because a vague cap line passed on the strength of a
+specific assignment line beside it. **The vague line is the one the reader is stuck on, so it is
+the one that has to be specific.**
+
 ## 3. Scope
 
 **In:** static analysis only. PostgreSQL `.sql` migrations. Rendered Kubernetes manifests
@@ -305,7 +336,7 @@ type Finding struct {
 }
 
 type ReversibilityCertificate struct {
-    SchemaVersion  string    // "1.6.0" — bump on any breaking field change
+    SchemaVersion  string    // "1.7.0" — bump on any breaking field change
     Grade          Grade     // the measurement; nothing may move it. N/A when nothing was analyzed
     EffectiveGrade Grade     // Grade minus waived findings; what CI compares (S10)
     AIGateStatus   string    // PASS | FAIL | NOT_APPLICABLE. PASS needs Grade A AND Coverage FULL
@@ -338,6 +369,7 @@ here.** It lives in exactly one place, `domain.SchemaVersion`, re-exported as
 | `1.4.0` | `CatalogVersion` | S12 |
 | `1.5.0` | `Outcome`; `Grade` gained `N/A`; `AIGateStatus` gained `NOT_APPLICABLE` | P0 |
 | `1.6.0` | `Coverage`, `UnanalyzedFiles`; a PASS now requires full coverage | P0 follow-up |
+| `1.7.0` | `IgnoredByPolicy`, `GradeCauses`; a PASS now requires no policy-ignored candidate | P0 follow-up |
 
 Two of these warrant attention rather than a footnote, and they are the same kind of bump: a
 consumer switching exhaustively on an enum gained a case it had not seen. `1.3.0` added
@@ -398,7 +430,7 @@ contributors who are not working through this file, so they were given a documen
 
 | Was | Now |
 | --- | --- |
-| §9 AUTHORITATIVE Classification — PostgreSQL | [`docs/RULES.md` §1](RULES.md#1-postgresql--pg001-to-pg027) |
+| §9 AUTHORITATIVE Classification — PostgreSQL | [`docs/RULES.md` §1](RULES.md#1-postgresql--pg001-to-pg033) |
 | §10 AUTHORITATIVE Classification — Kubernetes | [`docs/RULES.md` §2](RULES.md#2-kubernetes--k8s001-to-k8s015) |
 | §11 AUTHORITATIVE Scoring | [`docs/RULES.md` §3](RULES.md#3-scoring) |
 | §15 Owner rulings | [`docs/RULES.md` §4](RULES.md#4-owner-rulings) |
@@ -928,11 +960,25 @@ what stand between a new user and an immediate failing gate.
 ## 13. Testing rules
 
 - **Before implementing an analyzer, write its fixtures and failing tests first.**
-- **One fixture pair per rule ID** — all 27 Postgres rules, all 15 Kubernetes rules, and all
+- **One fixture pair per rule ID** — all 33 Postgres rules, all 15 Kubernetes rules, and all
   9 active Terraform rules. **A rule with no fixture does not exist.**
-  The one exception is a **retired** ID, declared in `internal/fixture/coverage_test.go`, which
+  The one exception is a **retired** ID, declared in `internal/fixture/table_test.go`, which
   has no fixture and is never reused or renumbered. `TF003` is the only one; see
   [`docs/RULES.md` §5](RULES.md#5-terraform--tf001-to-tf010).
+- **Every construct the code can classify must have a row in the authoritative table. A
+  classification with no table row does not exist.**
+
+  This is the sibling of the rule above and it was learned the same way. `convertDrop` folded
+  materialized views into `KindDropView`, so `DROP MATERIALIZED VIEW` was graded by PG016 — a
+  row that lists plain views, functions and triggers and says nothing about materialized views.
+  The code was classifying a construct the authoritative table did not list, the rationale it
+  printed asserted something false about the object, and every test in the repository passed.
+
+  **A fixture test cannot catch that**, which is the point of adding a second one: PG016 had a
+  fixture, and the fixture used a plain view. What was missing was the check in the other
+  direction. `TestEveryClassificationHasATableRow` enumerates the rule IDs the analyzer sources
+  can emit against the rows in `docs/RULES.md` and fails on either mismatch — a case with no
+  row, or a row nothing emits.
 - Golden-file tests for the Markdown and JSON renderers.
   As built: golden files exist for **all three** renderers across 8 scenarios spanning every
   grade plus the not-applicable case, in `testdata/fixtures/golden/`. Regenerate deliberately
@@ -1098,7 +1144,27 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    The help text for `--gate` used to call it "the setting autonomous agents must use". That was
    already loose and is now wrong, and it was corrected in the same change: an agent reads the
    certificate, never an exit status.
-8. **Does a policy `ignore:` count against coverage?** OPEN, and narrower than §16.7 was.
+8. ~~**Does a policy `ignore:` count against coverage?**~~ **RESOLVED by the owner: no, and it
+   closes the gate instead.** Schema `1.7.0`.
+
+   An ignore is a human decision, exactly like a waiver, so it follows the waiver pattern rather
+   than the coverage pattern:
+
+   - **Coverage stays `FULL`.** The engine was capable of reading those files; it was told not
+     to. Coverage describes capability, not permission.
+   - **`IgnoredByPolicy` lists every candidate the policy excluded**, and the markdown renders
+     it above the findings — the same reason `UnanalyzedFiles` is there. The reader must never
+     infer what was skipped. The path is recorded and the content still never read, which is the
+     property that makes an ignore list mean anything.
+   - **A PASS requires zero policy-ignored candidates.** A human decision never buys an agent a
+     merge. That is already the waiver rule, and it must not depend on which mechanism the human
+     used.
+
+   One principle now spans waivers, coverage and ignores: **humans may accept risk with their
+   names on it; agents may not inherit it.**
+
+   The original wording of the question follows, because the arguments on both sides were what
+   the ruling turned on.
 
    `ignore: ["**/migrations/**"]` plus one `.sql` file grades **A** with `Coverage: FULL`, and
    the ignored migrations appear nowhere on the certificate. The same changeset without the

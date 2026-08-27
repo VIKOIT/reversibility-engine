@@ -140,6 +140,7 @@ type sarifRunProps struct {
 	Outcome        string `json:"outcome"`
 	Coverage       string `json:"coverage"`
 	Unanalyzed     int    `json:"unanalyzedFileCount"`
+	PolicyIgnored  int    `json:"policyIgnoredFileCount"`
 	Applicable     bool   `json:"applicable"`
 	InputDigest    string `json:"inputDigest"`
 	PolicyDigest   string `json:"policyDigest,omitempty"`
@@ -172,6 +173,7 @@ func (SARIF) Render(w io.Writer, cert domain.ReversibilityCertificate) error {
 					Outcome:        string(cert.Outcome),
 					Coverage:       string(cert.Coverage),
 					Unanalyzed:     len(cert.UnanalyzedFiles),
+					PolicyIgnored:  len(cert.IgnoredByPolicy),
 					Applicable:     cert.Applicable,
 					InputDigest:    cert.InputDigest,
 					PolicyDigest:   cert.PolicyDigest,

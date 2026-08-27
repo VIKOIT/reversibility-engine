@@ -1,0 +1,7 @@
+{
+  "rule": "PG028",
+  "note": "OR REPLACE is only written when the view already exists, so the engine assumes it did. The previous definition is overwritten and recorded nowhere, which is COSTLY rather than reversible. The undo must never be a bare DROP VIEW: that would destroy an object which existed before the migration.",
+  "findings": [
+    {"ruleId":"PG028","file":"migrations/0001_replace_active_orders.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

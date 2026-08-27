@@ -1,11 +1,12 @@
 {
-  "schemaVersion": "1.6.0",
+  "schemaVersion": "1.7.0",
   "grade": "F",
   "outcome": "ANALYZED",
   "effectiveGrade": "F",
   "aiGateStatus": "FAIL",
   "coverage": "FULL",
   "unanalyzedFiles": [],
+  "ignoredByPolicy": [],
   "applicable": true,
   "inputDigest": "e83a6aad8b31bb8fb4ce922e1dddcccb1097283ce17935bf07dc58d96c807c17",
   "findings": [
@@ -38,6 +39,9 @@
   "blockers": [
     "K8S006 at crd.yaml: irreversible — Deleting CustomResourceDefinition widgets.acme.io cascades to every custom resource of that kind, which is among the largest blast radii in Kubernetes and is not undone by re-applying the manifest.",
     "K8S006 at namespace.yaml: irreversible — Deleting Namespace legacy cascades to every object inside it, which is among the largest blast radii in Kubernetes and is not undone by re-applying the manifest."
+  ],
+  "gradeCauses": [
+    "graded F by 2 blocking finding(s), listed above"
   ],
   "downMigrations": []
 }

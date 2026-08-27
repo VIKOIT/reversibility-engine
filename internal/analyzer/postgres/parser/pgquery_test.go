@@ -65,9 +65,29 @@ func TestParseKinds(t *testing.T) {
 		{"CREATE SEQUENCE s;", parser.KindCreateSequence},
 		{"CREATE EXTENSION pg_trgm;", parser.KindCreateExtension},
 
+		// The two halves of D1 and D2. CREATE OR REPLACE VIEW is not CREATE VIEW, and a
+		// materialized view is not a view: the parser is where both distinctions have to be
+		// made, because a classifier cannot recover a difference the parser discarded.
+		{"CREATE OR REPLACE VIEW v AS SELECT 1;", parser.KindReplaceView},
+		{"CREATE VIEW v AS SELECT 1;", parser.KindCreateView},
+		{"DROP MATERIALIZED VIEW m;", parser.KindDropMatView},
+		{"DROP VIEW v;", parser.KindDropView},
+
+		// The safe two-step patterns, whose second halves used to be UNRECOGNIZED.
+		{"ALTER TABLE t ADD CONSTRAINT c UNIQUE USING INDEX i;", parser.KindAddConstraintUsingIndex},
+		{"ALTER TABLE t VALIDATE CONSTRAINT c;", parser.KindValidateConstraint},
+
+		// One node covers both privilege directions; is_grant separates them.
+		{"GRANT SELECT ON orders TO reporting_ro;", parser.KindGrant},
+		{"REVOKE SELECT ON orders FROM reporting_ro;", parser.KindRevoke},
+		{"COMMENT ON TABLE orders IS 'x';", parser.KindComment},
+
 		// Parses cleanly, but the engine has no vocabulary for it. That is UNRECOGNIZED, and
 		// the caller must grade it UNKNOWN rather than assume it is harmless.
-		{"GRANT SELECT ON orders TO reporting_ro;", parser.KindUnrecognized},
+		//
+		// This group shrinks as the table grows, which is the point: when one of these gains a
+		// rule it fails here first, and the fix is to move it up rather than to delete it.
+		{"CLUSTER orders USING orders_pkey;", parser.KindUnrecognized},
 		{"VACUUM FULL orders;", parser.KindUnrecognized},
 		{"ALTER SEQUENCE s OWNED BY orders.id;", parser.KindUnrecognized},
 		{"SELECT 1;", parser.KindUnrecognized},

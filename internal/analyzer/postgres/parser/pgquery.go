@@ -156,7 +156,14 @@ func convert(node *pg.Node, text string, line int) []Statement {
 		return []Statement{base}
 
 	case *pg.Node_ViewStmt:
-		base.Kind = KindCreateView
+		// Replace is the whole of D1. Without reading it, CREATE OR REPLACE VIEW was
+		// indistinguishable from CREATE VIEW, graded REVERSIBLE, and had DROP VIEW printed as
+		// its undo — a step that destroys the view the statement had just overwritten.
+		if n.ViewStmt.GetReplace() {
+			base.Kind = KindReplaceView
+		} else {
+			base.Kind = KindCreateView
+		}
 		base.Relation = n.ViewStmt.GetView().GetRelname()
 		return []Statement{base}
 
@@ -196,6 +203,21 @@ func convert(node *pg.Node, text string, line int) []Statement {
 		base.Relation = n.CreateTrigStmt.GetRelation().GetRelname()
 		return []Statement{base}
 
+	case *pg.Node_GrantStmt:
+		// One node covers both directions; is_grant is what separates them.
+		if n.GrantStmt.GetIsGrant() {
+			base.Kind = KindGrant
+		} else {
+			base.Kind = KindRevoke
+		}
+		base.Object = grantTargetName(n.GrantStmt)
+		return []Statement{base}
+
+	case *pg.Node_CommentStmt:
+		base.Kind = KindComment
+		base.Object = commentTargetName(n.CommentStmt)
+		return []Statement{base}
+
 	default:
 		// Parsed cleanly, but the engine has no vocabulary for it. That is UNKNOWN, and
 		// UNKNOWN is not safe.
@@ -205,6 +227,36 @@ func convert(node *pg.Node, text string, line int) []Statement {
 
 // convertDrop maps the many things DROP can remove onto distinct kinds, because the rule table
 // grades DROP TABLE and DROP VIEW very differently.
+// grantTargetName names what a GRANT or REVOKE applies to, for the finding text.
+//
+// Best effort by design: the privilege target can be a list, a whole schema, or every table in
+// one, and the verdict does not depend on which. An empty result renders as a generic phrase
+// rather than as a wrong one.
+func grantTargetName(g *pg.GrantStmt) string {
+	for _, obj := range g.GetObjects() {
+		if r := obj.GetRangeVar(); r != nil && r.GetRelname() != "" {
+			return r.GetRelname()
+		}
+		if name := lastName([]*pg.Node{obj}); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// commentTargetName names the object a COMMENT ON applies to.
+func commentTargetName(c *pg.CommentStmt) string {
+	if obj := c.GetObject(); obj != nil {
+		if r := obj.GetRangeVar(); r != nil && r.GetRelname() != "" {
+			return r.GetRelname()
+		}
+		if name := lastName([]*pg.Node{obj}); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
 func convertDrop(d *pg.DropStmt, base Statement) Statement {
 	base.Cascade = d.GetBehavior() == pg.DropBehavior_DROP_CASCADE
 	base.Concurrent = d.GetConcurrent()
@@ -217,8 +269,12 @@ func convertDrop(d *pg.DropStmt, base Statement) Statement {
 		base.Kind = KindDropSchema
 	case pg.ObjectType_OBJECT_INDEX:
 		base.Kind = KindDropIndex
-	case pg.ObjectType_OBJECT_VIEW, pg.ObjectType_OBJECT_MATVIEW:
+	case pg.ObjectType_OBJECT_VIEW:
 		base.Kind = KindDropView
+	case pg.ObjectType_OBJECT_MATVIEW:
+		// Separate from OBJECT_VIEW: a materialized view holds rows, and grading it as a plain
+		// view told the reader it held none. See D2.
+		base.Kind = KindDropMatView
 	case pg.ObjectType_OBJECT_FUNCTION, pg.ObjectType_OBJECT_PROCEDURE, pg.ObjectType_OBJECT_ROUTINE:
 		base.Kind = KindDropFunction
 	case pg.ObjectType_OBJECT_TRIGGER:
@@ -298,7 +354,18 @@ func convertAlterTable(a *pg.AlterTableStmt, base Statement) []Statement {
 				s.Object = con.GetConname()
 				s.NotValid = con.GetSkipValidation()
 				s.ConstraintKind = constraintKindOf(con.GetContype())
+
+				// USING INDEX promotes an index that already exists, so there is no scan and no
+				// build — it is the second half of the safe two-step pattern, and grading it as
+				// a plain ADD CONSTRAINT charged it for work it does not do.
+				if con.GetIndexname() != "" {
+					s.Kind = KindAddConstraintUsingIndex
+					s.Index = con.GetIndexname()
+				}
 			}
+
+		case pg.AlterTableType_AT_ValidateConstraint:
+			s.Kind = KindValidateConstraint
 
 		default:
 			s.Kind = KindUnrecognized

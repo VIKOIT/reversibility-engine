@@ -1,0 +1,8 @@
+{
+  "rule": "PG032",
+  "note": "Privileges are not data and no object is touched, and the opposite statement restores them exactly -- which is why both directions are REVERSIBLE. The engine does not verify that the opposite statement is present, and every rationale says so.",
+  "findings": [
+    {"ruleId":"PG032","file":"migrations/0001_reporting_access.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true},
+    {"ruleId":"PG032","file":"migrations/0001_reporting_access.up.sql","line":2,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

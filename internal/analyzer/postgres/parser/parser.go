@@ -61,6 +61,12 @@ const (
 	KindDropFunction Kind = "DROP_FUNCTION"
 	KindDropTrigger  Kind = "DROP_TRIGGER"
 
+	// KindDropMatView is deliberately separate from KindDropView. A materialized view holds
+	// rows of its own — that is the entire distinction — so folding the two together produced a
+	// verdict that told the reader the object "holds no data of its own", which was false, and
+	// an undo naming the wrong object type.
+	KindDropMatView Kind = "DROP_MATERIALIZED_VIEW"
+
 	KindSetNotNull  Kind = "SET_NOT_NULL"
 	KindDropNotNull Kind = "DROP_NOT_NULL"
 	KindSetDefault  Kind = "SET_DEFAULT"
@@ -69,9 +75,32 @@ const (
 	KindAddColumn     Kind = "ADD_COLUMN"
 	KindAddConstraint Kind = "ADD_CONSTRAINT"
 
-	KindCreateIndex     Kind = "CREATE_INDEX"
-	KindCreateTable     Kind = "CREATE_TABLE"
-	KindCreateView      Kind = "CREATE_VIEW"
+	KindCreateIndex Kind = "CREATE_INDEX"
+	KindCreateTable Kind = "CREATE_TABLE"
+	KindCreateView  Kind = "CREATE_VIEW"
+
+	// KindReplaceView is CREATE OR REPLACE VIEW, and it is not KindCreateView.
+	//
+	// Under fail-closed the engine assumes the view already existed, because that is the only
+	// reason the statement is written this way. The previous definition is then overwritten and
+	// recorded nowhere, which makes the change COSTLY rather than reversible — and makes a bare
+	// DROP VIEW the one undo step that must never be printed for it.
+	KindReplaceView Kind = "REPLACE_VIEW"
+
+	// KindAddConstraintUsingIndex is ADD CONSTRAINT ... UNIQUE/PRIMARY KEY USING INDEX: the
+	// second half of the safe two-step pattern, promoting an index built CONCURRENTLY.
+	KindAddConstraintUsingIndex Kind = "ADD_CONSTRAINT_USING_INDEX"
+
+	// KindValidateConstraint is the second half of the other safe two-step pattern, validating
+	// a constraint added NOT VALID (PG022).
+	KindValidateConstraint Kind = "VALIDATE_CONSTRAINT"
+
+	// KindGrant and KindRevoke cover privilege changes, which touch no object and no row.
+	KindGrant  Kind = "GRANT"
+	KindRevoke Kind = "REVOKE"
+
+	// KindComment is COMMENT ON, which changes documentation and nothing else.
+	KindComment         Kind = "COMMENT"
 	KindCreateType      Kind = "CREATE_TYPE"
 	KindCreateSchema    Kind = "CREATE_SCHEMA"
 	KindCreateSequence  Kind = "CREATE_SEQUENCE"
@@ -185,6 +214,9 @@ type Statement struct {
 
 	// NotValid reports that a constraint was added with NOT VALID, skipping the table scan.
 	NotValid bool
+
+	// Index is the index a constraint is promoted from, for ADD CONSTRAINT ... USING INDEX.
+	Index string
 
 	// ColumnType is the type being added or converted to.
 	ColumnType *Type

@@ -1,0 +1,7 @@
+{
+  "rule": "PG030",
+  "note": "The second half of the safe two-step pattern: build the index CONCURRENTLY, then promote it. The index already exists, so there is no scan and no build. Grading this as a plain ADD CONSTRAINT charged it for work it does not do, and made the safe sequence grade worse than the unsafe one-step form.",
+  "findings": [
+    {"ruleId":"PG030","file":"migrations/0001_promote_unique_index.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"SHORT","wantUndoStep":true}
+  ]
+}

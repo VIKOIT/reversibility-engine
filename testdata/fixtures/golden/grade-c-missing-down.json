@@ -1,11 +1,12 @@
 {
-  "schemaVersion": "1.6.0",
+  "schemaVersion": "1.7.0",
   "grade": "C",
   "outcome": "ANALYZED",
   "effectiveGrade": "C",
   "aiGateStatus": "FAIL",
   "coverage": "FULL",
   "unanalyzedFiles": [],
+  "ignoredByPolicy": [],
   "applicable": true,
   "inputDigest": "900c272e7e264d22031f0b8b00deb44425ebe2f9290670f11c9067a69677ba12",
   "findings": [
@@ -25,6 +26,10 @@
     "ALTER TABLE orders DROP COLUMN notes;"
   ],
   "blockers": [],
+  "gradeCauses": [
+    "assigned A: every finding is REVERSIBLE",
+    "capped at C: no usable down migration for migrations/0001_add_notes.up.sql"
+  ],
   "downMigrations": [
     {
       "migration": "0001_add_notes",

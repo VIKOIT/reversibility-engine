@@ -166,6 +166,102 @@ func classify(s parser.Statement, sch *schema) classification {
 			undo:          domain.UndoStep(fmt.Sprintf("DROP TYPE %s;", s.Object)),
 		}
 
+	// PG028. The engine assumes the view already existed, because that is the only reason the
+	// statement is written with OR REPLACE. The previous definition is then overwritten and is
+	// recorded nowhere in the changeset.
+	//
+	// The undo is the point of this rule. A bare DROP VIEW would destroy an object that existed
+	// before the migration, so what is emitted instead is an instruction naming what has to be
+	// recovered and from where. An undo plan that destroys a pre-existing object is worse than
+	// no undo plan.
+	case parser.KindReplaceView:
+		view := or(s.Relation, "the view")
+		return classification{
+			ruleID:        "PG028",
+			reversibility: domain.ReversibilityCostly,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf(
+				"CREATE OR REPLACE VIEW overwrites the previous definition of %s, which this changeset does not record. "+
+					"Rolling back means restoring that definition from schema history, not dropping the view.", view),
+			undo: domain.UndoStep(fmt.Sprintf(
+				"-- Restore the previous definition of view %s from schema history.\n"+
+					"-- It is not in this changeset, so it cannot be written here. Do NOT run DROP VIEW %s:\n"+
+					"-- the view existed before this migration and dropping it would destroy it.", view, view)),
+		}
+
+	// PG029. Separate from PG016 because a materialized view holds rows of its own, which is the
+	// entire distinction, and grading it as a plain view asserted the opposite.
+	case parser.KindDropMatView:
+		view := or(s.Object, "the materialized view")
+		return classification{
+			ruleID:        "PG029",
+			reversibility: domain.ReversibilityCostly,
+			lock:          domain.LockExclusive,
+			rationale: fmt.Sprintf(
+				"Dropping materialized view %s destroys the rows it holds. They are derived, so a REFRESH can rebuild them — "+
+					"but the rebuild may be expensive, and it will not reproduce the old contents if the sources have changed since.", view),
+			undo: domain.UndoStep(fmt.Sprintf(
+				"-- Recreate materialized view %s from its definition in schema history, then:\n"+
+					"REFRESH MATERIALIZED VIEW %s;", view, view)),
+		}
+
+	// PG030. The second half of the safe two-step pattern: build the index CONCURRENTLY, then
+	// promote it. There is no scan and no build, so charging it for either would grade the safe
+	// sequence worse than the unsafe one-step form and teach people to stop using it.
+	case parser.KindAddConstraintUsingIndex:
+		return classification{
+			ruleID:        "PG030",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf(
+				"Constraint %s is promoted from index %s, which already exists, so no table scan and no index build happen here. "+
+					"Dropping the constraint returns the schema to its prior state.",
+				or(s.Object, "the constraint"), or(s.Index, "an existing index")),
+			undo: domain.UndoStep(fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", s.Relation, s.Object)),
+		}
+
+	// PG031. The second half of the other safe two-step pattern, completing PG022's NOT VALID.
+	// It scans, and it takes nothing away.
+	case parser.KindValidateConstraint:
+		return classification{
+			ruleID:        "PG031",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockFullScan,
+			rationale: fmt.Sprintf(
+				"Validating constraint %s scans every existing row without blocking writes, and removes nothing. "+
+					"It completes the NOT VALID pattern rather than adding risk to it.", or(s.Object, "the constraint")),
+			undo: domain.UndoStep(fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s;", s.Relation, s.Object)),
+		}
+
+	// PG032. Privileges are not data and no object is touched. The reverse statement is exact,
+	// which is what makes this REVERSIBLE rather than COSTLY — but the engine does not verify
+	// that the reverse is actually present in the down migration, and the rationale says so.
+	case parser.KindGrant, parser.KindRevoke:
+		return classification{
+			ruleID:        "PG032",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf(
+				"A privilege change on %s alters no object and no row, and the opposite statement restores it exactly. "+
+					"The engine does not verify that the opposite statement is present.", or(s.Object, "the target")),
+			undo: domain.UndoStep(reverseGrant(s)),
+		}
+
+	// PG033. Overwriting a comment loses the previous text, which the changeset does not record —
+	// but a comment is not an object and not data, so the overwrite principle that governs
+	// PG028 deliberately stops short of it.
+	case parser.KindComment:
+		return classification{
+			ruleID:        "PG033",
+			reversibility: domain.ReversibilityReversible,
+			lock:          domain.LockShort,
+			rationale: fmt.Sprintf(
+				"A comment on %s is documentation: no object, no row, and no constraint changes. "+
+					"Any previous comment is overwritten and is not recorded here.", or(s.Object, "the target")),
+			undo: domain.UndoStep(fmt.Sprintf(
+				"-- Restore the previous comment on %s, or remove it with COMMENT ON ... IS NULL.", or(s.Object, "the target"))),
+		}
+
 	case parser.KindDropNotNull:
 		return classification{
 			ruleID:        "PG026",
@@ -429,4 +525,17 @@ func or(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// reverseGrant names the statement that undoes a privilege change.
+//
+// It states the shape rather than reconstructing the exact SQL: the privilege list, the grantee
+// list, and WITH GRANT OPTION all affect what the reverse must say, and a plausible-looking
+// statement that is subtly wrong is worse here than an instruction that is plainly incomplete.
+func reverseGrant(s parser.Statement) string {
+	target := or(s.Object, "the target")
+	if s.Kind == parser.KindGrant {
+		return fmt.Sprintf("-- REVOKE the privileges this statement granted on %s, from the same grantees.", target)
+	}
+	return fmt.Sprintf("-- GRANT back the privileges this statement revoked on %s, to the same grantees.", target)
 }

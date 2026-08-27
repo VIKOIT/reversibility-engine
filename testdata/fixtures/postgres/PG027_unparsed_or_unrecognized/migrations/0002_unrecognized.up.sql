@@ -1,1 +1,1 @@
-GRANT SELECT ON orders TO reporting_ro;
+CLUSTER orders USING orders_pkey;

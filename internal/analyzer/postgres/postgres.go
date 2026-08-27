@@ -120,7 +120,7 @@ func (a *Analyzer) analyzeFile(ctx context.Context, f domain.ChangedFile, sch *s
 			Statement:     analyzer.NormalizeStatement(firstNonEmptyLine(sql)),
 			Reversibility: domain.ReversibilityUnknown,
 			LockHazard:    domain.LockExclusive,
-			Rationale:     fmt.Sprintf("This migration could not be parsed, so nothing in it can be classified: %v.", err),
+			Rationale:     parseFailureRationale(sql, err),
 		}}, nil
 	}
 
@@ -189,4 +189,31 @@ func extension(path string) string {
 		return ""
 	}
 	return path[dot:]
+}
+
+// templateMarkers are delimiters that no valid PostgreSQL statement begins with, and that every
+// mainstream templating language uses.
+//
+// They are consulted only after the file has already failed to parse, so the cost of a false
+// positive is a slightly wrong hint on a file that was failing anyway. A PostgreSQL array
+// literal does contain "{{", but inside quotes and inside a statement that parses.
+var templateMarkers = []string{"{{", "{%", "<%"}
+
+// parseFailureRationale explains why a file could not be parsed, in the reader's terms.
+//
+// The verdict is UNKNOWN either way and the grade is F either way — an unrendered template is
+// not safe, it is unexamined. What changes is what the reader is told to do about it. "Syntax
+// error at or near {" sends someone hunting for a typo in valid Go template syntax; naming the
+// template is a statement about this engine's coverage rather than about their SQL.
+func parseFailureRationale(sql string, err error) string {
+	for _, marker := range templateMarkers {
+		if strings.Contains(sql, marker) {
+			return fmt.Sprintf(
+				"This file appears to be a template rather than SQL — it contains %q — and this engine "+
+					"does not render templates. It was not analyzed, so nothing about its reversibility is known. "+
+					"Render it first and analyze the output. (Parser: %v.)", marker, err)
+		}
+	}
+
+	return fmt.Sprintf("This migration could not be parsed, so nothing in it can be classified: %v.", err)
 }

@@ -1,11 +1,12 @@
 {
-  "schemaVersion": "1.6.0",
+  "schemaVersion": "1.7.0",
   "grade": "F",
   "outcome": "ANALYZED",
   "effectiveGrade": "F",
   "aiGateStatus": "FAIL",
   "coverage": "FULL",
   "unanalyzedFiles": [],
+  "ignoredByPolicy": [],
   "applicable": true,
   "inputDigest": "7404433e87050328312a537aed5f48e2f8e5f8fef4d3c185ed21f03904be2169",
   "findings": [
@@ -27,6 +28,9 @@
   ],
   "blockers": [
     "PG001 at migrations/0001_drop_legacy_orders.up.sql:1: irreversible — Dropping table legacy_orders destroys every row it holds; recreating the table restores the shape but not the data."
+  ],
+  "gradeCauses": [
+    "graded F by 1 blocking finding(s), listed above"
   ],
   "downMigrations": [
     {

@@ -1,13 +1,14 @@
 {
-  "schemaVersion": "1.6.0",
+  "schemaVersion": "1.7.0",
   "grade": "F",
   "outcome": "ANALYZED",
   "effectiveGrade": "F",
   "aiGateStatus": "FAIL",
   "coverage": "FULL",
   "unanalyzedFiles": [],
+  "ignoredByPolicy": [],
   "applicable": true,
-  "inputDigest": "8f1b5f8e1fe0efd8c4ec1c3c3fba4e1fcd79b552facd55c88a93ff02b4b90ea6",
+  "inputDigest": "2e500afeb4e2e473bbb4bcd64396b042dfa2947f19579cba3212072106ccb007",
   "findings": [
     {
       "ruleId": "PG027",
@@ -22,7 +23,7 @@
       "ruleId": "PG027",
       "file": "migrations/0002_unrecognized.up.sql",
       "line": 1,
-      "statement": "GRANT SELECT ON orders TO reporting_ro",
+      "statement": "CLUSTER orders USING orders_pkey",
       "reversibility": "UNKNOWN",
       "lockHazard": "EXCLUSIVE",
       "rationale": "this statement matches no rule in the PostgreSQL classification table, and an unclassified change is treated as unsafe"
@@ -33,11 +34,14 @@
     "-- NO COMPLETE UNDO EXISTS. This changeset cannot be fully reversed.",
     "-- The following changes have no reverse:",
     "--   PG027 at migrations/0001_unparseable.up.sql:1: ALTER TABLE orders FLARBLE COLUMN quantity; — was not understood, so no undo can be written for it",
-    "--   PG027 at migrations/0002_unrecognized.up.sql:1: GRANT SELECT ON orders TO reporting_ro — was not understood, so no undo can be written for it"
+    "--   PG027 at migrations/0002_unrecognized.up.sql:1: CLUSTER orders USING orders_pkey — was not understood, so no undo can be written for it"
   ],
   "blockers": [
     "PG027 at migrations/0001_unparseable.up.sql:1: unknown — This migration could not be parsed, so nothing in it can be classified: parse: syntax error at or near \"FLARBLE\".",
     "PG027 at migrations/0002_unrecognized.up.sql:1: unknown — this statement matches no rule in the PostgreSQL classification table, and an unclassified change is treated as unsafe"
+  ],
+  "gradeCauses": [
+    "graded F by 2 blocking finding(s), listed above"
   ],
   "downMigrations": [
     {

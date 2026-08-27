@@ -261,24 +261,42 @@ func (c Coverage) Valid() bool { return c == CoverageFull || c == CoveragePartia
 // field is never the permissive one.
 func (c Coverage) Full() bool { return c == CoverageFull }
 
+// GateConditions are the facts beyond the grade that the merge gate depends on.
+//
+// They are passed as a value rather than read from somewhere else so that a caller who has not
+// thought about them cannot compile. Every field here has the same shape of justification: the
+// grade says what the evidence about the change is, and these say how much of the change the
+// evidence covers.
+type GateConditions struct {
+	// Coverage is how much of the changeset the engine could read. Anything short of FULL is a
+	// changeset that was only partly understood.
+	Coverage Coverage
+
+	// PolicyIgnored counts the candidate files a policy excluded from analysis.
+	//
+	// An ignore is a human decision, exactly like a waiver, and it is treated the same way: it
+	// may unblock a human's pipeline and it may never buy an agent a merge. Which mechanism the
+	// human used — a waiver, an ignore list — does not change who is allowed to inherit the
+	// risk. See docs/SPECIFICATION.md §16.8.
+	PolicyIgnored int
+}
+
 // Gate returns the merge-gate verdict, per docs/RULES.md §3.
 //
-// PASS requires grade A *and* full coverage. An autonomous agent gets no merge on a changeset
-// that was only partly understood: a human reading a PARTIAL certificate can see the list of
-// files nobody read and judge for themselves, and an agent cannot. Humans keep their exit code;
-// agents do not get the benefit of the doubt.
+// PASS requires grade A, full coverage, and no candidate excluded by policy. An autonomous
+// agent gets no merge on a changeset that was only partly understood or partly exempted: a
+// human can read the list of what was skipped and judge for themselves, and an agent cannot.
+// Humans keep their exit code; agents do not get the benefit of the doubt.
 //
 // This is the single definition of the gate. No caller may re-derive it, because a second
-// definition is a second chance to get it wrong in the permissive direction — and coverage is
-// a parameter rather than a field read elsewhere so that a caller who has not thought about
-// coverage cannot compile.
-func (g Grade) Gate(coverage Coverage) GateStatus {
+// definition is a second chance to get it wrong in the permissive direction.
+func (g Grade) Gate(c GateConditions) GateStatus {
 	switch {
 	case g == GradeNotApplicable:
 		// Nothing was assessed. That is neither a pass nor an accusation, whatever the coverage
 		// of the nothing turned out to be.
 		return GateNotApplicable
-	case g == GradeA && coverage.Full():
+	case g == GradeA && c.Coverage.Full() && c.PolicyIgnored == 0:
 		return GatePass
 	default:
 		return GateFail

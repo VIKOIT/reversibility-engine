@@ -219,7 +219,7 @@ func TestCertifyWithHostileInput(t *testing.T) {
 			if !cert.Grade.Valid() {
 				t.Errorf("Grade = %q is not valid", cert.Grade)
 			}
-			if cert.AIGateStatus != cert.Grade.Gate(cert.Coverage) {
+			if cert.AIGateStatus != cert.Grade.Gate(domain.GateConditions{Coverage: cert.Coverage, PolicyIgnored: len(cert.IgnoredByPolicy)}) {
 				t.Errorf("gate %q disagrees with grade %q", cert.AIGateStatus, cert.Grade)
 			}
 			if cert.Findings == nil || cert.UndoPlan == nil || cert.Blockers == nil || cert.DownMigrations == nil {

@@ -47,4 +47,10 @@ postgres/PG023_create_index                          grade=B   gate=FAIL        
 postgres/PG024_create_index_concurrently             grade=A   gate=PASS           outcome=ANALYZED            findings=1  undo=1  blockers=0  digest=e497c2c4438058df
 postgres/PG025_create_table_view_type                grade=A   gate=PASS           outcome=ANALYZED            findings=3  undo=3  blockers=0  digest=88650c5c76d56205
 postgres/PG026_alter_column_nullability_default      grade=A   gate=PASS           outcome=ANALYZED            findings=3  undo=3  blockers=0  digest=fca3734532df431c
-postgres/PG027_unparsed_or_unrecognized              grade=F   gate=FAIL           outcome=ANALYZED            findings=2  undo=4  blockers=2  digest=8f1b5f8e1fe0efd8
+postgres/PG027_unparsed_or_unrecognized              grade=F   gate=FAIL           outcome=ANALYZED            findings=2  undo=4  blockers=2  digest=2e500afeb4e2e473
+postgres/PG028_create_or_replace_view                grade=B   gate=FAIL           outcome=ANALYZED            findings=1  undo=1  blockers=0  digest=db2b26cdbccd0d25
+postgres/PG029_drop_materialized_view                grade=B   gate=FAIL           outcome=ANALYZED            findings=1  undo=1  blockers=0  digest=38f330703092b0d8
+postgres/PG030_add_constraint_using_index            grade=A   gate=PASS           outcome=ANALYZED            findings=1  undo=1  blockers=0  digest=689dddd1a4f63401
+postgres/PG031_validate_constraint                   grade=B   gate=FAIL           outcome=ANALYZED            findings=1  undo=1  blockers=0  digest=37b70a3b42dd0815
+postgres/PG032_grant_revoke                          grade=A   gate=PASS           outcome=ANALYZED            findings=2  undo=2  blockers=0  digest=ffea9642960da88d
+postgres/PG033_comment_on                            grade=A   gate=PASS           outcome=ANALYZED            findings=1  undo=1  blockers=0  digest=8e6b458d91c77a2e

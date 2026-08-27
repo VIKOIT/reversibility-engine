@@ -196,9 +196,16 @@ func TestScore(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, blockers := score(tt.in)
+			res := score(tt.in)
+			got, blockers := res.grade, res.blockers
 			if got != tt.want {
 				t.Errorf("score() = %q, want %q", got, tt.want)
+			}
+
+			// Every grade explains itself. An unexplained grade is one a reader has to
+			// re-derive from the rule tables, which is the work the engine already did.
+			if len(res.causes) == 0 {
+				t.Errorf("grade %q carries no causes", got)
 			}
 
 			// Blockers exist to explain an F. Any other grade must not carry them, and an F
@@ -239,15 +246,15 @@ func TestScoreGateAgreesWithGrade(t *testing.T) {
 	}
 
 	for _, in := range inputs {
-		grade, _ := score(in)
+		grade := score(in).grade
 
 		wantPass := grade == domain.GradeA
-		if got := grade.Gate(domain.CoverageFull) == domain.GatePass; got != wantPass {
-			t.Errorf("grade %q at full coverage gates %q", grade, grade.Gate(domain.CoverageFull))
+		if got := grade.Gate(domain.GateConditions{Coverage: domain.CoverageFull}) == domain.GatePass; got != wantPass {
+			t.Errorf("grade %q at full coverage gates %q", grade, grade.Gate(domain.GateConditions{Coverage: domain.CoverageFull}))
 		}
 
 		// Partial coverage can only ever remove a PASS, never create one.
-		if grade.Gate(domain.CoveragePartial) == domain.GatePass {
+		if grade.Gate(domain.GateConditions{Coverage: domain.CoveragePartial}) == domain.GatePass {
 			t.Errorf("grade %q gates PASS at partial coverage", grade)
 		}
 	}
@@ -258,18 +265,18 @@ func TestScoreGateAgreesWithGrade(t *testing.T) {
 func TestAnalyzerErrorAlwaysFails(t *testing.T) {
 	t.Parallel()
 
-	grade, blockers := score(scoreInput{
+	res := score(scoreInput{
 		findings:       repeat(finding(domain.ReversibilityReversible, domain.LockNone), 20),
 		downMigrations: []domain.DownMigrationStatus{downOK("1")},
 		analyzerErrors: []string{"sql parser unavailable"},
 		outcome:        domain.OutcomeAnalyzed,
 	})
 
-	if grade != domain.GradeF {
-		t.Fatalf("grade = %q, want F", grade)
+	if res.grade != domain.GradeF {
+		t.Fatalf("grade = %q, want F", res.grade)
 	}
-	if len(blockers) != 1 || !strings.Contains(blockers[0], "sql parser unavailable") {
-		t.Errorf("blockers = %v, want the analyzer error named", blockers)
+	if len(res.blockers) != 1 || !strings.Contains(res.blockers[0], "sql parser unavailable") {
+		t.Errorf("blockers = %v, want the analyzer error named", res.blockers)
 	}
 }
 
@@ -310,7 +317,7 @@ func TestBlockersAreSorted(t *testing.T) {
 		{RuleID: "PG002", File: "b.sql", Line: 1, Reversibility: domain.ReversibilityUnknown},
 	}
 
-	_, blockers := score(scoreInput{findings: findings, outcome: domain.OutcomeAnalyzed})
+	blockers := score(scoreInput{findings: findings, outcome: domain.OutcomeAnalyzed}).blockers
 	if len(blockers) != 3 {
 		t.Fatalf("got %d blockers, want 3", len(blockers))
 	}

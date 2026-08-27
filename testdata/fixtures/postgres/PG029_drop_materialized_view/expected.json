@@ -1,0 +1,7 @@
+{
+  "rule": "PG029",
+  "note": "Separate from PG016 because a materialized view holds rows of its own. The rows are derived, so a REFRESH can rebuild them -- but the rebuild may be expensive and will not reproduce the old contents if the sources have changed since. The undo names CREATE MATERIALIZED VIEW plus REFRESH, not CREATE VIEW.",
+  "findings": [
+    {"ruleId":"PG029","file":"migrations/0001_drop_order_totals.up.sql","line":1,"reversibility":"COSTLY","lockHazard":"EXCLUSIVE","wantUndoStep":true}
+  ]
+}

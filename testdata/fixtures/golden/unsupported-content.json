@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.6.0",
+  "schemaVersion": "1.7.0",
   "grade": "N/A",
   "outcome": "UNSUPPORTED_CONTENT",
   "effectiveGrade": "N/A",
@@ -19,6 +19,7 @@
       "reason": "no analyzer reads .py migrations"
     }
   ],
+  "ignoredByPolicy": [],
   "applicable": false,
   "inputDigest": "83afa88844d37b2c8f6b498136948560b925a9b1343756c3c2a9e2ce5cb72695",
   "findings": [],
@@ -26,6 +27,9 @@
   "undoPlan": [],
   "blockers": [
     "found 3 files in django/contrib/auth/migrations that no analyzer supports (.py migrations). Reversibility was not assessed."
+  ],
+  "gradeCauses": [
+    "not graded: no analyzer could read the files in this changeset"
   ],
   "downMigrations": []
 }

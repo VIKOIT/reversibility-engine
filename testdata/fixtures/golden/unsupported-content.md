@@ -11,6 +11,10 @@ _This change contains files that may be migrations, and no analyzer in this engi
 | **Coverage** | ⚠️ PARTIAL — 3 files not analyzed |
 | **Findings** | 0 |
 
+**Why this grade**
+
+- not graded: no analyzer could read the files in this changeset
+
 ### Not assessed
 
 The engine cannot read the following, so it has measured nothing. An autonomous agent must not merge this change.
@@ -31,4 +35,4 @@ An autonomous agent will not merge this change: the AI merge gate requires full 
 
 ---
 
-<sub>Reversibility Engine · schema 1.6.0 · input digest `83afa88844d37b2c8f6b498136948560b925a9b1343756c3c2a9e2ce5cb72695`</sub>
+<sub>Reversibility Engine · schema 1.7.0 · input digest `83afa88844d37b2c8f6b498136948560b925a9b1343756c3c2a9e2ce5cb72695`</sub>

@@ -483,8 +483,11 @@ func TestUndoPlanRefusesCompletenessOnUnknown(t *testing.T) {
 	cert := certify(t,
 		sql("migrations/0001_ok.up.sql", "CREATE TABLE t (id bigint);"),
 		sql("migrations/0001_ok.down.sql", "DROP TABLE t;"),
-		sql("migrations/0002_weird.up.sql", "GRANT SELECT ON orders TO reporting_ro;"),
-		sql("migrations/0002_weird.down.sql", "REVOKE SELECT ON orders FROM reporting_ro;"),
+		// Parses cleanly, matches no rule in the table. This held a GRANT until PG032
+		// classified it; when CLUSTER gains a rule, swap in another uncovered construct rather
+		// than dropping the case, because the path it exercises is the one that matters.
+		sql("migrations/0002_weird.up.sql", "CLUSTER orders USING orders_pkey;"),
+		sql("migrations/0002_weird.down.sql", "SELECT 1;"),
 	)
 
 	if cert.Grade != domain.GradeF {

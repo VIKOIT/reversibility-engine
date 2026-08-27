@@ -1,11 +1,12 @@
 {
-  "schemaVersion": "1.6.0",
+  "schemaVersion": "1.7.0",
   "grade": "B",
   "outcome": "ANALYZED",
   "effectiveGrade": "B",
   "aiGateStatus": "FAIL",
   "coverage": "FULL",
   "unanalyzedFiles": [],
+  "ignoredByPolicy": [],
   "applicable": true,
   "inputDigest": "160d9f861d205a505ad372b8134720cd1f81f3794078c9e6369981b81e1fd690",
   "findings": [
@@ -36,6 +37,9 @@
     "ALTER TABLE purchase_orders RENAME TO orders;"
   ],
   "blockers": [],
+  "gradeCauses": [
+    "assigned B: 2 finding(s) are COSTLY to reverse"
+  ],
   "downMigrations": [
     {
       "migration": "0001_rename_orders",

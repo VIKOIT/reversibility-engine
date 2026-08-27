@@ -5,7 +5,7 @@ package domain
 
 // SchemaVersion is the version of the certificate wire format. It follows semantic versioning
 // and is bumped on any breaking field change, because downstream merge gates parse this.
-const SchemaVersion = "1.6.0"
+const SchemaVersion = "1.7.0"
 
 // DownMigrationStatus records the outcome of down-migration validation for one migration pair,
 // at the three levels defined in docs/RULES.md §1.
@@ -109,6 +109,15 @@ type ReversibilityCertificate struct {
 	// reviewer's next question is always "which ones". Sorted by path.
 	UnanalyzedFiles []UnanalyzedFile `json:"unanalyzedFiles"`
 
+	// IgnoredByPolicy names every candidate file a policy excluded from analysis. Sorted by
+	// path, and empty when no policy applied or none matched.
+	//
+	// These do NOT count against Coverage. The engine was capable of reading them and was told
+	// not to, and coverage describes capability rather than permission. They do close the merge
+	// gate, because an ignore is a human decision and a human decision never buys an agent a
+	// merge — the same rule waivers already follow. See docs/SPECIFICATION.md §16.8.
+	IgnoredByPolicy []string `json:"ignoredByPolicy"`
+
 	// Applicable is true exactly when Outcome is ANALYZED. It is retained for consumers pinned
 	// to schema 1.4.0 and it is derived, never set independently — two fields that can disagree
 	// about the same fact are two chances to read the wrong one.
@@ -164,6 +173,16 @@ type ReversibilityCertificate struct {
 	//
 	// It is empty for A, B, and C, and for NO_CANDIDATES, where there is nothing to report.
 	Blockers []string `json:"blockers"`
+
+	// GradeCauses explains the grade: the assignment, then every cap that lowered it, in the
+	// order they applied. Never empty for a graded certificate — an A says that nothing capped
+	// it, because "nothing capped this" and "nobody checked" must not render the same.
+	//
+	// It exists because a capped grade used to be unexplainable from the rendered certificate.
+	// A changeset could arrive at C with every finding REVERSIBLE and nothing outside the JSON
+	// said which condition applied the ceiling, leaving the reader to re-derive it from the
+	// rule tables — which is the work the engine is supposed to have done for them.
+	GradeCauses []string `json:"gradeCauses"`
 
 	// DownMigrations records down-migration validation per migration pair.
 	DownMigrations []DownMigrationStatus `json:"downMigrations"`

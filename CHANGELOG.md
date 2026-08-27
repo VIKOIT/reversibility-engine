@@ -16,6 +16,93 @@ move:
 
 ## [Unreleased]
 
+### Fixed
+
+**Two constructs the engine classified wrongly, both in the permissive direction, both printing
+an undo an operator would run mid-incident.** Certificate schema bumped to `1.7.0`.
+
+**`CREATE OR REPLACE VIEW` graded A and its undo plan destroyed the view.** `ViewStmt.Replace`
+was never read, so the statement was indistinguishable from `CREATE VIEW`, matched PG025, and
+had `DROP VIEW x;` printed as its rollback. When the view already existed — the only reason
+anyone writes `OR REPLACE` — that undo destroys an object that predates the migration. New
+**PG028**, COSTLY, and the undo names what has to be recovered and warns explicitly against the
+drop. An undo plan that destroys a pre-existing object is worse than no undo plan.
+
+**`DROP MATERIALIZED VIEW` was graded as `DROP VIEW`, with a rationale asserting the opposite of
+the truth.** `convertDrop` folded `OBJECT_MATVIEW` into `KindDropView`, so PG016 reported that
+the object "holds no data of its own" — for a materialized view that is the entire distinction —
+and emitted `CREATE VIEW`, the wrong object type. New **PG029**, COSTLY / EXCLUSIVE, whose undo
+names `CREATE MATERIALIZED VIEW` plus `REFRESH`.
+
+**The structural hole underneath D2 is closed.** PG016 in `docs/RULES.md` never mentioned
+materialized views: the code was classifying a construct the authoritative table did not list,
+and every test passed. A fixture test cannot catch that — PG016 had a fixture, and it used a
+plain view. So there is now a second invariant beside it, with the same authority:
+
+> Every construct the code can classify must have a row in the authoritative table. A
+> classification with no table row does not exist.
+
+`TestEveryClassificationHasATableRow` enumerates the rule IDs the analyzer sources can emit
+against the rows in `docs/RULES.md` and fails on either mismatch. Verified by mutation in both
+directions: deleting PG029's row fails it, and adding a row nothing emits fails it.
+
+### Added
+
+**PG030 and PG031 — the safe two-step patterns no longer grade worse than the unsafe ones.**
+`ADD CONSTRAINT ... USING INDEX` promotes an index that already exists, so it neither scans nor
+builds (REVERSIBLE / SHORT), and `VALIDATE CONSTRAINT` completes the `NOT VALID` sequence PG022
+begins (REVERSIBLE / FULL_SCAN). Both reached PG027 and graded **F** before, which meant the
+engine actively pushed users toward the one-step forms that grade better. A safety tool that
+punishes the safe pattern teaches people to stop using it.
+
+**PG032 `GRANT` / `REVOKE` and PG033 `COMMENT ON`**, both REVERSIBLE per the owner's ruling.
+Privileges are not data and the opposite statement restores them exactly; the rationale says on
+every finding that the engine does not verify the opposite statement is present.
+
+**`IgnoredByPolicy` — a policy `ignore:` now closes the merge gate.** An ignore is a human
+decision, exactly like a waiver, so it follows the waiver pattern rather than the coverage one:
+coverage stays `FULL`, because the engine was capable of reading the file and was told not to,
+and coverage describes capability rather than permission. The certificate lists every candidate
+excluded and the markdown renders it above the findings. `AIGateStatus: PASS` now requires zero
+policy-ignored candidates.
+
+That completes one principle across all three mechanisms: **humans may accept risk with their
+names on it; agents may not inherit it.**
+
+**`GradeCauses` — every grade now carries its cause, in every rendered output.** A capped grade
+used to be unexplainable from the certificate a reviewer actually reads: a changeset with every
+finding REVERSIBLE could arrive at **C** and nothing outside the JSON said which condition
+applied the ceiling.
+
+```
+**Why this grade**
+
+- assigned A: every finding is REVERSIBLE
+- capped at C: no usable down migration for 0031_add_users.up.sql
+```
+
+Grade A states that nothing capped it, because *"nothing capped this"* and *"nobody wrote down
+why"* must not render identically. New spec invariant alongside the fail-closed ones:
+
+> Any field the engine computes that determines or constrains the verdict must appear in every
+> rendered output, not only in JSON. A reader must never have to open the JSON to learn why they
+> were blocked.
+
+`TestEveryCappedOrFailedGradeNamesItsCauseInMarkdown` holds it over every fixture. It checks each
+cause individually rather than the certificate as a whole — the first version checked the whole,
+and a mutation weakening a cap's reason to "a cap applied" walked straight through on the
+strength of a specific assignment line beside it. The vague line is the one the reader is stuck
+on, so it is the one that has to be specific.
+
+**The exit code and `aiGateStatus` now say so when they diverge.** A run that exits 0 with the
+merge gate closed prints one line naming the specific cause. Two signals in one certificate that
+quietly point opposite ways is the disease this project has now fixed three times.
+
+**An unrendered template says so.** A file containing `{{`, `{%` or `<%` that fails to parse is
+still UNKNOWN and still grades F — an unrendered template is unexamined, not safe — but the
+message now says it appears to be a template and was not rendered, rather than reporting a
+syntax error at a brace and sending someone hunting for a typo in valid Go template syntax.
+
 ### Added
 
 **Coverage: a second axis for the part of a changeset the engine could not

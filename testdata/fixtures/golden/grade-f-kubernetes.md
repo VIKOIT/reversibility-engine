@@ -8,6 +8,10 @@
 | **AI merge gate** | ❌ FAIL |
 | **Findings** | 2 |
 
+**Why this grade**
+
+- graded F by 2 blocking finding(s), listed above
+
 ### Blockers
 
 This change cannot be merged by an autonomous agent. Each item below is a reason on its own.
@@ -43,4 +47,4 @@ Steps are in the order they must be run, unwinding the change from the last step
 
 ---
 
-<sub>Reversibility Engine · schema 1.6.0 · input digest `e83a6aad8b31bb8fb4ce922e1dddcccb1097283ce17935bf07dc58d96c807c17`</sub>
+<sub>Reversibility Engine · schema 1.7.0 · input digest `e83a6aad8b31bb8fb4ce922e1dddcccb1097283ce17935bf07dc58d96c807c17`</sub>

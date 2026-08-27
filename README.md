@@ -59,7 +59,7 @@ never `0` — absence of output is never success. See [Fail-closed by
 construction](#fail-closed-by-construction).
 
 > **Status: v1.1.2.** Usable end to end, and packaged as a GitHub Action. Every
-> certificate carries its own `schemaVersion`, currently `1.6.0`, which bumps on
+> certificate carries its own `schemaVersion`, currently `1.7.0`, which bumps on
 > any breaking field change — so a consumer can pin against the schema rather than
 > against the tool. Every rule ID has a fixture pair in `testdata/`: a rule with no
 > fixture does not exist.
@@ -617,7 +617,7 @@ how you see what the gate says without it.
 
 | Domain | Coverage |
 | --- | --- |
-| PostgreSQL `.sql` migrations | 27 classified rules (PG001–PG027) over a real PostgreSQL AST — dropped tables and columns, truncation, `CASCADE`, narrowing type changes, unqualified `DELETE`/`UPDATE`, lock hazards, and down-migration presence |
+| PostgreSQL `.sql` migrations | 33 classified rules (PG001–PG033) over a real PostgreSQL AST — dropped tables and columns, truncation, `CASCADE`, narrowing type changes, unqualified `DELETE`/`UPDATE`, lock hazards, and down-migration presence |
 | Rendered Kubernetes `.yaml` | 15 classified rules (K8S001–K8S015) over a structural diff — volume claim templates, selector mutations, PVC and storage-class changes, digest-pinned vs. floating images, removed probes, and workload strategy changes |
 | Terraform `*.tfplan.json` | **9 active rules** (`TF001`–`TF010`, of which `TF003` is retired and never reused) over `terraform show -json`, backed by an embedded catalog of 92 AWS resource types. Only destruction is classified — a create or an in-place update has a reverse by construction. **State files are never read**: they hold credentials in plaintext. See [Terraform plans](#terraform-plans) |
 
@@ -706,7 +706,7 @@ to match it, and where the two disagree, the code is the bug.
 
 | Section | Covers |
 | --- | --- |
-| [§1 PostgreSQL](docs/RULES.md#1-postgresql--pg001-to-pg027) | PG001–PG027: what each statement does to reversibility and lock hazard, the AST parser directive, and the three levels of down-migration validation |
+| [§1 PostgreSQL](docs/RULES.md#1-postgresql--pg001-to-pg033) | PG001–PG033: what each statement does to reversibility and lock hazard, the AST parser directive, and the three levels of down-migration validation |
 | [§2 Kubernetes](docs/RULES.md#2-kubernetes--k8s001-to-k8s015) | K8S001–K8S015: volume claim templates, selector immutability, PVC and storage-class changes, digest pinning, dangling config references |
 | [§3 Scoring](docs/RULES.md#3-scoring) | how findings become A/B/C/F, how the undo plan is assembled, and the determinism requirement |
 | [§4 Owner rulings](docs/RULES.md#4-owner-rulings) | the decisions that resolved genuine ambiguities in the tables above |

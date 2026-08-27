@@ -9,6 +9,11 @@ Fully reversible. This change can be rolled back with no data loss.
 | **Coverage** | ⚠️ PARTIAL — 1 file not analyzed |
 | **Findings** | 1 |
 
+**Why this grade**
+
+- assigned A: every finding is REVERSIBLE
+- nothing capped this grade
+
 ### Not analyzed
 
 This engine could not read the following files. **They are not part of the grade above** — neither for it nor against it. The grade describes what was read; this list is what was not.
@@ -50,4 +55,4 @@ _Symmetry is a heuristic and is advisory only; it never affects the grade on its
 
 ---
 
-<sub>Reversibility Engine · schema 1.6.0 · input digest `d43eb2b67d6b3e10502f57e99a7c761c3011baad52059b135e1cf0f80e71f760`</sub>
+<sub>Reversibility Engine · schema 1.7.0 · input digest `d43eb2b67d6b3e10502f57e99a7c761c3011baad52059b135e1cf0f80e71f760`</sub>

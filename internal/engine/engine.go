@@ -32,6 +32,32 @@ type Engine struct {
 // Option configures an Engine.
 type Option func(*Engine)
 
+// RunOption carries a fact about one changeset into one Certify call.
+//
+// It is separate from Option because the Engine holds no mutable state and is safe to share:
+// anything that varies per changeset has to arrive with the changeset, not be stored on the
+// orchestrator between runs.
+type RunOption func(*runConfig)
+
+// runConfig is everything a single Certify call knows beyond the files themselves.
+type runConfig struct {
+	// ignoredByPolicy are candidate paths a policy excluded before the provider read them.
+	//
+	// The engine cannot discover these for itself. An ignored path is never read, which is the
+	// property that makes an ignore list meaningful, so the only place that knows one existed
+	// is the include predicate that rejected it.
+	ignoredByPolicy []string
+}
+
+// IgnoredByPolicy records the candidate files a policy excluded from this run.
+//
+// They never counted against coverage — the engine was capable of reading them and was told
+// not to — and they do close the merge gate, because an ignore is a human decision and a human
+// decision never buys an agent a merge.
+func IgnoredByPolicy(paths []string) RunOption {
+	return func(c *runConfig) { c.ignoredByPolicy = append(c.ignoredByPolicy, paths...) }
+}
+
 // WithPolicy sets the resolved policy. A nil policy means none, which is the default and must
 // behave exactly as it did before policies existed.
 func WithPolicy(p *policy.Policy) Option {
@@ -102,7 +128,16 @@ func New(analyzers []analyzer.Analyzer, opts ...Option) *Engine {
 //
 // This method owns the single recover boundary in the codebase. A panic anywhere beneath it
 // becomes grade F with RuleID ENGINE_PANIC — never a pass, never a silent success.
-func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert domain.ReversibilityCertificate, err error) {
+func (e *Engine) Certify(
+	ctx context.Context,
+	files []domain.ChangedFile,
+	opts ...RunOption,
+) (cert domain.ReversibilityCertificate, err error) {
+	var run runConfig
+	for _, opt := range opts {
+		opt(&run)
+	}
+	sort.Strings(run.ignoredByPolicy)
 	// The policy is an input to the verdict, so it is part of what the digest attributes the
 	// verdict to. It is mixed in only when a policy exists, which keeps every digest ever
 	// produced without one exactly as it was.
@@ -165,25 +200,26 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 	// Grade is computed from every finding, waived ones included. It states what the evidence
 	// says about the change, and no configuration may move it: a waiver accepts a risk, it does
 	// not make a DROP TABLE reversible.
-	grade, blockers := score(scoreInput{
+	scored := score(scoreInput{
 		findings:       decision.All,
 		downMigrations: downMigrations,
 		analyzerErrors: analyzerErrors,
 		outcome:        outcome,
 		unsupported:    unsupported,
 	})
+	grade, blockers := scored.grade, scored.blockers
 
 	// EffectiveGrade is the same scoring with waived findings set aside. It is what a CI
 	// threshold compares against, and it is deliberately NOT what AIGateStatus follows.
 	effective := grade
 	if len(decision.Waived) > 0 {
-		effective, _ = score(scoreInput{
+		effective = score(scoreInput{
 			findings:       decision.Findings,
 			downMigrations: downMigrations,
 			analyzerErrors: analyzerErrors,
 			outcome:        outcome,
 			unsupported:    unsupported,
-		})
+		}).grade
 	}
 
 	// Coverage is the second axis, and it is computed from the same candidate list the outcome
@@ -193,14 +229,23 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 		coverage = domain.CoveragePartial
 	}
 
+	// Policy-ignored candidates are deliberately NOT part of coverage. The engine could have
+	// read them; it was told not to, and coverage describes capability rather than permission.
+	// They reach the gate instead, through GateConditions.
+	conditions := domain.GateConditions{
+		Coverage:      coverage,
+		PolicyIgnored: len(run.ignoredByPolicy),
+	}
+
 	cert = domain.ReversibilityCertificate{
 		SchemaVersion:   domain.SchemaVersion,
 		Grade:           grade,
 		EffectiveGrade:  effective,
-		AIGateStatus:    grade.Gate(coverage),
+		AIGateStatus:    grade.Gate(conditions),
 		Outcome:         outcome,
 		Coverage:        coverage,
 		UnanalyzedFiles: nonNilUnanalyzed(unanalyzedFiles(unsupported)),
+		IgnoredByPolicy: nonNilStrings(run.ignoredByPolicy),
 		Applicable:      outcome.Certifies(),
 		InputDigest:     digest,
 		PolicyDigest:    e.policyDigest(),
@@ -209,6 +254,7 @@ func (e *Engine) Certify(ctx context.Context, files []domain.ChangedFile) (cert 
 		Waived:          nonNilWaived(decision.Waived),
 		UndoPlan:        nonNilPlan(buildUndoPlan(decision.All)),
 		Blockers:        nonNilStrings(blockers),
+		GradeCauses:     nonNilStrings(scored.causes),
 		ContextWarnings: e.contextWarnings(),
 		DownMigrations:  nonNilStatuses(downMigrations),
 	}
@@ -285,7 +331,7 @@ func panicCertificate(digest string, r any) domain.ReversibilityCertificate {
 		SchemaVersion:  domain.SchemaVersion,
 		Grade:          domain.GradeF,
 		EffectiveGrade: domain.GradeF,
-		AIGateStatus:   domain.GradeF.Gate(domain.CoverageFull),
+		AIGateStatus:   domain.GradeF.Gate(domain.GateConditions{Coverage: domain.CoverageFull}),
 
 		// ANALYZED, and Applicable stays true: the engine was asked for an opinion and failed to
 		// produce one, which is not the same as having nothing to say. Neither non-analyzed
@@ -304,6 +350,8 @@ func panicCertificate(digest string, r any) domain.ReversibilityCertificate {
 		Blockers:        []string{fmt.Sprintf("the engine panicked: %v", r)},
 		DownMigrations:  []domain.DownMigrationStatus{},
 		UnanalyzedFiles: []domain.UnanalyzedFile{},
+		IgnoredByPolicy: []string{},
+		GradeCauses:     []string{"graded F: the engine could not complete this run"},
 	}
 }
 
@@ -313,7 +361,7 @@ func failedCertificate(digest string, err error) domain.ReversibilityCertificate
 		SchemaVersion:  domain.SchemaVersion,
 		Grade:          domain.GradeF,
 		EffectiveGrade: domain.GradeF,
-		AIGateStatus:   domain.GradeF.Gate(domain.CoverageFull),
+		AIGateStatus:   domain.GradeF.Gate(domain.GateConditions{Coverage: domain.CoverageFull}),
 
 		// ANALYZED for the same reason as the panic certificate: the run engaged with a real
 		// changeset and could not finish. That is an F, not an absence of subject matter, and
@@ -327,6 +375,8 @@ func failedCertificate(digest string, err error) domain.ReversibilityCertificate
 		Blockers:        []string{fmt.Sprintf("analysis did not run: %v", err)},
 		DownMigrations:  []domain.DownMigrationStatus{},
 		UnanalyzedFiles: []domain.UnanalyzedFile{},
+		IgnoredByPolicy: []string{},
+		GradeCauses:     []string{"graded F: the engine could not complete this run"},
 	}
 }
 
@@ -347,7 +397,7 @@ func UnavailableCertificate(ruleID string, cause error) domain.ReversibilityCert
 		SchemaVersion:  domain.SchemaVersion,
 		Grade:          domain.GradeF,
 		EffectiveGrade: domain.GradeF,
-		AIGateStatus:   domain.GradeF.Gate(domain.CoverageFull),
+		AIGateStatus:   domain.GradeF.Gate(domain.GateConditions{Coverage: domain.CoverageFull}),
 
 		// Applicable stays true: the engine was asked for an opinion and could not form one,
 		// which is not the same as having nothing to say. NO_CANDIDATES would be the exact
@@ -372,6 +422,8 @@ func UnavailableCertificate(ruleID string, cause error) domain.ReversibilityCert
 		Blockers:        []string{rationale},
 		DownMigrations:  []domain.DownMigrationStatus{},
 		UnanalyzedFiles: []domain.UnanalyzedFile{},
+		IgnoredByPolicy: []string{},
+		GradeCauses:     []string{"graded F: the engine could not complete this run"},
 	}
 }
 

@@ -6,6 +6,7 @@ package engine
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
@@ -46,8 +47,26 @@ type scoreInput struct {
 	unsupported []string
 }
 
-// score computes the grade and, when the grade is F, the human-readable reasons for it.
-func score(in scoreInput) (domain.Grade, []string) {
+// scoreResult is the grade and everything a reader needs to know why it is that grade.
+//
+// Causes exists because a capped grade used to be unexplainable from the rendered certificate:
+// a changeset could arrive at C with every finding REVERSIBLE and nothing in the markdown said
+// which condition applied the ceiling. The reader's only recourse was to read the scoring rules
+// and re-derive it, which is exactly the work the engine is supposed to have done for them.
+type scoreResult struct {
+	grade domain.Grade
+
+	// blockers are the reasons the grade is F, or the reasons nothing could be assessed.
+	blockers []string
+
+	// causes explain the grade to a human, in the order they were applied: the assignment
+	// first, then every cap that lowered it. For grade A the single cause states that nothing
+	// capped it, because "no explanation" and "nothing to explain" must not look the same.
+	causes []string
+}
+
+// score computes the grade, the reasons for an F, and the causes of whatever grade results.
+func score(in scoreInput) scoreResult {
 	// An analysis that did not finish cannot certify anything. This is checked before the
 	// findings, because a partial finding list is not evidence of safety.
 	if len(in.analyzerErrors) > 0 {
@@ -56,11 +75,19 @@ func score(in scoreInput) (domain.Grade, []string) {
 			blockers = append(blockers, "analysis did not complete: "+e)
 		}
 		sort.Strings(blockers)
-		return domain.GradeF, blockers
+		return scoreResult{
+			grade:    domain.GradeF,
+			blockers: blockers,
+			causes:   []string{"graded F: the analysis did not complete, so nothing about this change could be established"},
+		}
 	}
 
 	if blockers := blockingFindings(in.findings); len(blockers) > 0 {
-		return domain.GradeF, blockers
+		return scoreResult{
+			grade:    domain.GradeF,
+			blockers: blockers,
+			causes:   []string{fmt.Sprintf("graded F by %d blocking finding(s), listed above", len(blockers))},
+		}
 	}
 
 	// What the run was able to do at all, per docs/RULES.md §3. This sits below the two checks
@@ -76,20 +103,31 @@ func score(in scoreInput) (domain.Grade, []string) {
 	case domain.OutcomeNoCandidates:
 		// Genuinely nothing to assess. That is a real answer and it is reported as one — it is
 		// simply not a passing one, and it carries no blockers because nothing is wrong.
-		return domain.GradeNotApplicable, nil
+		return scoreResult{
+			grade:  domain.GradeNotApplicable,
+			causes: []string{"not graded: the changeset held no file any analyzer could claim"},
+		}
 
 	case domain.OutcomeUnsupportedContent:
 		// The Django case. Files that plausibly are migrations, and nothing that could read
 		// them. The blockers name what was seen and what could not be done with it, because
 		// "not applicable" on its own reads as "nothing here".
-		return domain.GradeNotApplicable, unsupportedContentBlockers(in.unsupported)
+		return scoreResult{
+			grade:    domain.GradeNotApplicable,
+			blockers: unsupportedContentBlockers(in.unsupported),
+			causes:   []string{"not graded: no analyzer could read the files in this changeset"},
+		}
 
 	default:
 		// An outcome the domain does not recognise means the caller assembled a score input
 		// incorrectly — most likely by leaving the field at its zero value. Fail closed: the
 		// shape of the run is unknown, and unknown is unsafe.
-		return domain.GradeF, []string{
-			"the engine could not establish what this run analyzed, so nothing about it can be certified",
+		return scoreResult{
+			grade: domain.GradeF,
+			blockers: []string{
+				"the engine could not establish what this run analyzed, so nothing about it can be certified",
+			},
+			causes: []string{"graded F: the shape of this run could not be established"},
 		}
 	}
 
@@ -111,21 +149,38 @@ func score(in scoreInput) (domain.Grade, []string) {
 
 	downOK := downMigrationsAreSound(in.downMigrations)
 
-	// Assignment.
+	// Assignment. Every branch records why, because a grade a reader cannot account for is a
+	// grade they will argue with rather than act on.
+	var causes []string
 	grade := domain.GradeA
 	switch {
 	case costly >= 3:
 		grade = domain.GradeC
+		causes = append(causes, fmt.Sprintf("assigned C: %d findings are COSTLY to reverse", costly))
 	case costly >= 1:
 		grade = domain.GradeB
+		causes = append(causes, fmt.Sprintf("assigned B: %d finding(s) are COSTLY to reverse", costly))
+	default:
+		causes = append(causes, "assigned A: every finding is REVERSIBLE")
+	}
+
+	// applyCap lowers the grade and records the condition that lowered it. Recording happens
+	// only when the cap actually bites: listing a ceiling that changed nothing would bury the
+	// one that did.
+	applyCap := func(limit domain.Grade, reason string) {
+		capped := grade.Cap(limit)
+		if capped != grade {
+			causes = append(causes, fmt.Sprintf("capped at %s: %s", limit, reason))
+		}
+		grade = capped
 	}
 
 	// Caps, each applied unconditionally so that order cannot matter.
 	if !downOK {
-		grade = grade.Cap(domain.GradeC)
+		applyCap(domain.GradeC, "no usable down migration for "+strings.Join(unsoundDownMigrations(in.downMigrations), ", "))
 	}
 	if worstLock.AtLeast(domain.LockTableRewrite) {
-		grade = grade.Cap(domain.GradeB)
+		applyCap(domain.GradeB, fmt.Sprintf("a %s lock is held while the change is applied", worstLock))
 	}
 
 	// Production context, when there is any. A lock duration band lowers the ceiling and never
@@ -137,7 +192,8 @@ func score(in scoreInput) (domain.Grade, []string) {
 			continue
 		}
 		if cap := f.Context.LockDurationBand.Cap(); cap != "" {
-			grade = grade.Cap(cap)
+			applyCap(cap, fmt.Sprintf("%s at %s holds its lock for an estimated %s (%s)",
+				f.RuleID, location(f), f.Context.EstimatedLockDuration, f.Context.LockDurationBand))
 		}
 	}
 
@@ -146,10 +202,61 @@ func score(in scoreInput) (domain.Grade, []string) {
 	// with the table. It matters for FULL_SCAN, which fails the "lock <= SHORT" condition but
 	// does not reach the TABLE_REWRITE cap above.
 	if !allReversible || worstLock.AtLeast(domain.LockFullScan) || !downOK {
-		grade = grade.Cap(domain.GradeB)
+		applyCap(domain.GradeB, "grade A requires every finding REVERSIBLE, a lock no worse than SHORT, "+
+			"and a valid down migration; "+failedARowConditions(allReversible, worstLock, downOK))
 	}
 
-	return grade, nil
+	if grade == domain.GradeA {
+		// Said explicitly. "Nothing capped this" and "nobody checked" must not render the same,
+		// and an A with no explanation beside it is indistinguishable from an unexplained one.
+		causes = append(causes, "nothing capped this grade")
+	}
+
+	return scoreResult{grade: grade, causes: causes}
+}
+
+// failedARowConditions names which of grade A's three conditions this changeset missed.
+//
+// Naming the specific one matters: "did not meet the conditions for A" sends a reader back to
+// the rule table to work out which, which is the work the engine already did.
+func failedARowConditions(allReversible bool, worstLock domain.LockHazard, downOK bool) string {
+	var missed []string
+	if !allReversible {
+		missed = append(missed, "not every finding is REVERSIBLE")
+	}
+	if worstLock.AtLeast(domain.LockFullScan) {
+		missed = append(missed, "the worst lock is "+string(worstLock))
+	}
+	if !downOK {
+		missed = append(missed, "a down migration is missing or unparseable")
+	}
+	return strings.Join(missed, ", ")
+}
+
+// unsoundDownMigrations names the migrations whose down file is missing or unparseable.
+//
+// The owner's example of a good cause line is "capped at C: no down migration for
+// 0031_add_users.up.sql" — naming the file is the whole difference between a cause a reader can
+// act on and one they have to investigate.
+func unsoundDownMigrations(statuses []domain.DownMigrationStatus) []string {
+	var out []string
+	for _, s := range statuses {
+		if !s.Exists || !s.Parses {
+			out = append(out, or(s.UpFile, s.Migration))
+		}
+	}
+	if len(out) == 0 {
+		return []string{"a migration in this changeset"}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func or(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
 }
 
 // blockingFindings returns the reasons any finding forces grade F.

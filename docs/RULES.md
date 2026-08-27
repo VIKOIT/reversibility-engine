@@ -8,7 +8,7 @@ Engine emits:
 
 | | | Rules |
 | --- | --- | --- |
-| [§1 PostgreSQL](#1-postgresql--pg001-to-pg027) | over a real PostgreSQL AST | 27 |
+| [§1 PostgreSQL](#1-postgresql--pg001-to-pg033) | over a real PostgreSQL AST | 33 |
 | [§2 Kubernetes](#2-kubernetes--k8s001-to-k8s015) | over a structural manifest diff | 15 |
 | [§3 Scoring](#3-scoring) | how findings become a grade of A, B, C, or F | — |
 | [§4 Owner rulings](#4-owner-rulings) | decisions that resolve ambiguities in the above | — |
@@ -108,7 +108,7 @@ are in [`docs/SPECIFICATION.md`](SPECIFICATION.md) §16 — do not resolve one b
 
 ---
 
-## 1. PostgreSQL — PG001 to PG027
+## 1. PostgreSQL — PG001 to PG033
 
 **Do not infer, extend, or soften this table. Anything not listed is `UNKNOWN`.**
 
@@ -129,7 +129,7 @@ are in [`docs/SPECIFICATION.md`](SPECIFICATION.md) §16 — do not resolve one b
 | PG013 | `DROP CONSTRAINT` (any) | COSTLY | SHORT |
 | PG014 | `DROP INDEX` (non-concurrent) | COSTLY | EXCLUSIVE |
 | PG015 | `DROP INDEX CONCURRENTLY` | COSTLY | NONE |
-| PG016 | `DROP VIEW` / `DROP FUNCTION` / `DROP TRIGGER` | COSTLY | SHORT |
+| PG016 | `DROP VIEW` / `DROP FUNCTION` / `DROP TRIGGER` — **plain views only; a materialized view is PG029** | COSTLY | SHORT |
 | PG017 | `ALTER COLUMN SET NOT NULL` | COSTLY | FULL_SCAN |
 | PG018 | `ADD COLUMN NOT NULL` without `DEFAULT` | COSTLY | EXCLUSIVE |
 | PG019 | `ADD COLUMN` with volatile `DEFAULT` | REVERSIBLE | TABLE_REWRITE |
@@ -141,6 +141,38 @@ are in [`docs/SPECIFICATION.md`](SPECIFICATION.md) §16 — do not resolve one b
 | PG025 | `CREATE TABLE` / `CREATE VIEW` / `CREATE TYPE` | REVERSIBLE | NONE |
 | PG026 | `ALTER COLUMN DROP NOT NULL` / `SET DEFAULT` / `DROP DEFAULT` | REVERSIBLE | SHORT |
 | PG027 | unparsed or unrecognized statement | UNKNOWN | EXCLUSIVE |
+| PG028 | `CREATE OR REPLACE VIEW` | COSTLY | SHORT |
+| PG029 | `DROP MATERIALIZED VIEW` | COSTLY | EXCLUSIVE |
+| PG030 | `ADD CONSTRAINT ... USING INDEX` | REVERSIBLE | SHORT |
+| PG031 | `VALIDATE CONSTRAINT` | REVERSIBLE | FULL_SCAN |
+| PG032 | `GRANT` / `REVOKE` | REVERSIBLE | SHORT |
+| PG033 | `COMMENT ON` | REVERSIBLE | SHORT |
+
+**PG028 assumes the view already existed**, because that is the only reason the statement is
+written with `OR REPLACE`. The previous definition is overwritten and is recorded nowhere in the
+changeset, which makes the change COSTLY rather than reversible. **Its undo step is never a bare
+`DROP VIEW`** — that would destroy an object that existed before the migration, and an undo plan
+that destroys a pre-existing object is worse than no undo plan. What is emitted instead names
+what has to be recovered and warns against the drop.
+
+**PG029 is separate from PG016 because a materialized view holds rows of its own**, which is the
+entire distinction between the two objects. Folding them together produced a rationale stating
+that the object "holds no data of its own" — false — and an undo naming the wrong object type.
+The rows are derived, so a `REFRESH` can rebuild them, which is why this is COSTLY and not
+IRREVERSIBLE; the rebuild may be expensive and will not reproduce the old contents if the
+sources have changed since.
+
+**PG030 and PG031 are the second halves of the two safe patterns**, and before they existed the
+engine graded both worse than the unsafe one-step forms they replace: `ADD CONSTRAINT ... USING
+INDEX` promotes an index that already exists, so it neither scans nor builds, and `VALIDATE
+CONSTRAINT` completes the `NOT VALID` sequence PG022 begins. A safety tool that punishes the safe
+pattern teaches people to stop using it, which is worse than the coverage gap it sat inside.
+
+**PG032 is REVERSIBLE because privileges are not data** and the opposite statement restores them
+exactly. The engine does not verify that the opposite statement is present, and the rationale
+says so on every finding. **PG033 is REVERSIBLE for a narrower reason**: overwriting a comment
+loses the previous text, but a comment is not an object and not a row. The overwrite principle
+that governs PG028 deliberately stops short of it.
 
 **PG017 with a production snapshot.** When `pg_stats.null_frac > 0` for the column being
 constrained, `SET NOT NULL` validates every existing row, finds a violation, and aborts —
@@ -325,9 +357,43 @@ wherever they appear.**
 
 ```
 AIGateStatus = NOT_APPLICABLE  <=>  Grade == N/A
-AIGateStatus = PASS            <=>  Grade == A AND Coverage == FULL
+AIGateStatus = PASS            <=>  Grade == A
+                                    AND Coverage == FULL
+                                    AND no candidate was ignored by policy
 AIGateStatus = FAIL             otherwise
 ```
+
+### Every grade carries its cause
+
+**`GradeCauses` explains the grade and appears in every rendered output**, per the invariant in
+[`docs/SPECIFICATION.md` §2](SPECIFICATION.md#2-the-philosophy-fail-closed): the assignment
+first, then each cap that lowered it, naming the rule, file, or condition responsible.
+
+```
+- assigned A: every finding is REVERSIBLE
+- capped at C: no usable down migration for 0031_add_users.up.sql
+```
+
+Grade A states that nothing capped it. That is not filler: *"nothing capped this"* and *"nobody
+wrote down why"* must not render identically, and before this field existed a capped grade was
+unexplainable from the certificate a reviewer actually reads.
+
+### A policy `ignore:` closes the gate and does not touch coverage
+
+An ignore is a human decision, exactly like a waiver, and it follows the waiver rule:
+
+| | Effect on `Grade` | Effect on `Coverage` | Effect on `AIGateStatus` |
+| --- | --- | --- | --- |
+| A waiver | none | none | none — it moves `EffectiveGrade` and the exit code |
+| An unreadable file | none | `PARTIAL` | closes it |
+| A policy `ignore:` | none | **none — stays `FULL`** | **closes it** |
+
+Coverage describes **capability**, not permission: the engine could have read an ignored file
+and was told not to. `IgnoredByPolicy` lists every candidate excluded, and the markdown renders
+it above the findings so a reader never has to infer what was skipped.
+
+One principle spans all three: **humans may accept risk with their names on it; agents may not
+inherit it.**
 
 ### Coverage: how much of the changeset was read
 

@@ -22,6 +22,10 @@ type Markdown struct{}
 // Format implements Renderer.
 func (Markdown) Format() string { return FormatMarkdown }
 
+// policyFileName is the name of the policy file, repeated here rather than imported: the render
+// package must not depend on the policy package, and this is presentation text.
+const policyFileName = ".reversibility.yml"
+
 // gradeSummary is the one-line verdict for each grade, written for a reader who has not read
 // the documentation.
 var gradeSummary = map[domain.Grade]string{
@@ -74,6 +78,7 @@ func (Markdown) Render(w io.Writer, cert domain.ReversibilityCertificate) error 
 	// a list of what the engine *did* find, printed first, is exactly what makes an incomplete
 	// analysis look complete.
 	writeUnanalyzed(&b, cert)
+	writeIgnoredByPolicy(&b, cert)
 
 	writeFindings(&b, cert)
 	writeWaived(&b, cert)
@@ -139,12 +144,39 @@ func writeHeader(b *strings.Builder, cert domain.ReversibilityCertificate) {
 		fmt.Fprintf(b, "| **Coverage** | ⚠️ PARTIAL — %s not analyzed |\n", plural(len(cert.UnanalyzedFiles), "file"))
 	}
 
+	if n := len(cert.IgnoredByPolicy); n > 0 {
+		fmt.Fprintf(b, "| **Excluded by policy** | %s |\n", plural(n, "file"))
+	}
+
 	fmt.Fprintf(b, "| **Findings** | %d |\n", len(cert.Findings))
 
 	if len(cert.Waived) > 0 {
 		fmt.Fprintf(b, "| **Waived** | %d |\n", len(cert.Waived))
 	}
 
+	b.WriteString("\n")
+	writeGradeCauses(b, cert)
+}
+
+// writeGradeCauses states why the grade is the grade, directly under it.
+//
+// docs/SPECIFICATION.md §2: any field the engine computes that determines or constrains the
+// verdict must appear in every rendered output, not only in JSON. A reader must never have to
+// open the JSON to learn why they were blocked.
+//
+// Before this, a capped grade was unexplainable from the certificate: a changeset with every
+// finding REVERSIBLE could arrive at C and the only way to find out which condition applied the
+// ceiling was to read the scoring rules and re-derive it. That is the work the engine already
+// did, and withholding it is how a gate becomes something people route around.
+func writeGradeCauses(b *strings.Builder, cert domain.ReversibilityCertificate) {
+	if len(cert.GradeCauses) == 0 {
+		return
+	}
+
+	b.WriteString("**Why this grade**\n\n")
+	for _, cause := range cert.GradeCauses {
+		fmt.Fprintf(b, "- %s\n", mdEscape(cause))
+	}
 	b.WriteString("\n")
 }
 
@@ -230,6 +262,31 @@ func writeUnanalyzed(b *strings.Builder, cert domain.ReversibilityCertificate) {
 
 	b.WriteString("\nAn autonomous agent will not merge this change: the AI merge gate requires full coverage. " +
 		"A human reviewer can see exactly what was skipped and decide.\n\n")
+}
+
+// writeIgnoredByPolicy names every candidate the policy excluded.
+//
+// Above the findings, for the same reason writeUnanalyzed is: a reader must never have to infer
+// what was skipped. The difference from that section is who did the skipping, and the wording
+// says so — nothing here is a limitation of the engine, it is a decision somebody made and can
+// be asked about.
+func writeIgnoredByPolicy(b *strings.Builder, cert domain.ReversibilityCertificate) {
+	if len(cert.IgnoredByPolicy) == 0 {
+		return
+	}
+
+	b.WriteString("### Excluded by policy\n\n")
+	fmt.Fprintf(b, "The `%s` in this repository excludes the following from analysis. "+
+		"They may be migrations; the engine did not look.\n\n", policyFileName)
+	b.WriteString("| File |\n| --- |\n")
+
+	for _, p := range cert.IgnoredByPolicy {
+		fmt.Fprintf(b, "| `%s` |\n", mdCode(p))
+	}
+
+	b.WriteString("\nThis is a decision, not a limitation, so it does not count against coverage. " +
+		"It does close the AI merge gate: an ignore is a human accepting a risk with their name on it, " +
+		"and an agent does not inherit that.\n\n")
 }
 
 func writeFindings(b *strings.Builder, cert domain.ReversibilityCertificate) {

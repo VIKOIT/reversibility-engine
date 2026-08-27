@@ -8,6 +8,10 @@ Reversible at a cost. Rolling back is possible but slow, disruptive, or only saf
 | **AI merge gate** | ❌ FAIL |
 | **Findings** | 2 |
 
+**Why this grade**
+
+- assigned B: 2 finding(s) are COSTLY to reverse
+
 ### Findings
 
 | | Rule | Location | Reversibility | Lock | Change |
@@ -42,4 +46,4 @@ _Symmetry is a heuristic and is advisory only; it never affects the grade on its
 
 ---
 
-<sub>Reversibility Engine · schema 1.6.0 · input digest `160d9f861d205a505ad372b8134720cd1f81f3794078c9e6369981b81e1fd690`</sub>
+<sub>Reversibility Engine · schema 1.7.0 · input digest `160d9f861d205a505ad372b8134720cd1f81f3794078c9e6369981b81e1fd690`</sub>

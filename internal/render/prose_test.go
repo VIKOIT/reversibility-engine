@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/VIKOIT/reversibility-engine/internal/fixture"
+	"github.com/VIKOIT/reversibility-engine/internal/provider"
+
 	"github.com/VIKOIT/reversibility-engine/internal/analyzer"
 	"github.com/VIKOIT/reversibility-engine/internal/analyzer/kubernetes"
 	"github.com/VIKOIT/reversibility-engine/internal/analyzer/postgres"
@@ -197,4 +200,96 @@ func TestNoRendererReportsAPassForAnUnanalyzedChangeset(t *testing.T) {
 			}
 		})
 	}
+}
+
+// docs/SPECIFICATION.md §2: any field the engine computes that determines or constrains the
+// verdict must appear in every rendered output, not only in JSON. A reader must never have to
+// open the JSON to learn why they were blocked.
+//
+// This is the property that stops the next instance. Before it, a capped grade was
+// unexplainable from the certificate a reviewer actually reads: a changeset with every finding
+// REVERSIBLE could arrive at C, and the only way to discover which condition applied the
+// ceiling was to read the scoring rules and re-derive it — the work the engine had already
+// done and then discarded.
+func TestEveryCappedOrFailedGradeNamesItsCauseInMarkdown(t *testing.T) {
+	t.Parallel()
+
+	root, err := fixture.Root()
+	if err != nil {
+		t.Fatalf("locating fixture root: %v", err)
+	}
+
+	for _, group := range []string{"postgres", "kubernetes"} {
+		cases, err := fixture.Cases(root, group)
+		if err != nil {
+			t.Fatalf("loading %s fixtures: %v", group, err)
+		}
+
+		for _, tc := range cases {
+			t.Run(group+"/"+tc.Name, func(t *testing.T) {
+				t.Parallel()
+
+				files, err := provider.NewFake(root).ChangedFiles(context.Background(), tc.Ref)
+				if err != nil {
+					t.Fatalf("resolving %s: %v", tc.Ref, err)
+				}
+
+				eng := engine.New([]analyzer.Analyzer{postgres.New(), kubernetes.New()})
+				cert, _ := eng.Certify(context.Background(), files)
+
+				// Every graded certificate explains itself, A included. "Nothing capped this"
+				// and "nobody wrote down why" must not render identically.
+				if len(cert.GradeCauses) == 0 {
+					t.Fatalf("grade %s carries no causes at all", cert.Grade)
+				}
+
+				out := renderTo(t, render.FormatMarkdown, cert)
+
+				// The markdown carries every cause verbatim. Not a summary, not a count: the
+				// specific condition, in the output the reviewer is looking at.
+				for _, cause := range cert.GradeCauses {
+					if !strings.Contains(out, cause) {
+						t.Errorf("the markdown does not state why the grade is %s.\n"+
+							"missing cause: %q\n\n%s", cert.Grade, cause, out)
+					}
+				}
+
+				// Each cause must name something specific enough to act on, and the check is
+				// per cause rather than per certificate.
+				//
+				// Checking the certificate as a whole was the first version of this, and a
+				// mutation walked straight through it: weakening a cap's reason to "a cap
+				// applied" still passed, because the *assignment* cause beside it mentioned
+				// COSTLY. The vague line is exactly the one a reader is stuck on, so it is the
+				// one that has to be specific.
+				for _, cause := range cert.GradeCauses {
+					if !namesSomethingSpecific(cause) {
+						t.Errorf("grade %s carries a cause a reader cannot act on: %q\n"+
+							"a cause must name the rule, file, count, or condition responsible",
+							cert.Grade, cause)
+					}
+				}
+			})
+		}
+	}
+}
+
+// namesSomethingSpecific reports whether one cause names a rule ID, a file, a count, or a
+// concrete condition, rather than restating the grade.
+func namesSomethingSpecific(cause string) bool {
+	specific := []string{
+		".sql", ".yaml", ".yml", // a file
+		"PG0", "K8S0", "TF0", // a rule
+		"COSTLY", "REVERSIBLE", "UNKNOWN", "IRREVERSIBLE", "WILL_FAIL", // a verdict
+		"NONE", "SHORT", "FULL_SCAN", "TABLE_REWRITE", "EXCLUSIVE", // a lock
+		"down migration", "blocking finding", "nothing capped", "did not complete",
+		"no file any analyzer", "no analyzer could read", "shape of this run",
+	}
+
+	for _, marker := range specific {
+		if strings.Contains(cause, marker) {
+			return true
+		}
+	}
+	return false
 }

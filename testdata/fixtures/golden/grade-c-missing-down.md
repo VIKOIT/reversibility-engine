@@ -8,6 +8,11 @@ Reversible with significant caveats. Review the findings before merging.
 | **AI merge gate** | ❌ FAIL |
 | **Findings** | 1 |
 
+**Why this grade**
+
+- assigned A: every finding is REVERSIBLE
+- capped at C: no usable down migration for migrations/0001_add_notes.up.sql
+
 ### Findings
 
 | | Rule | Location | Reversibility | Lock | Change |
@@ -46,4 +51,4 @@ _Symmetry is a heuristic and is advisory only; it never affects the grade on its
 
 ---
 
-<sub>Reversibility Engine · schema 1.6.0 · input digest `900c272e7e264d22031f0b8b00deb44425ebe2f9290670f11c9067a69677ba12`</sub>
+<sub>Reversibility Engine · schema 1.7.0 · input digest `900c272e7e264d22031f0b8b00deb44425ebe2f9290670f11c9067a69677ba12`</sub>

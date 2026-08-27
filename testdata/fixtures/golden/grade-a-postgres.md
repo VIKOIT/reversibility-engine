@@ -8,6 +8,11 @@ Fully reversible. This change can be rolled back with no data loss.
 | **AI merge gate** | ✅ PASS |
 | **Findings** | 1 |
 
+**Why this grade**
+
+- assigned A: every finding is REVERSIBLE
+- nothing capped this grade
+
 ### Findings
 
 | | Rule | Location | Reversibility | Lock | Change |
@@ -39,4 +44,4 @@ _Symmetry is a heuristic and is advisory only; it never affects the grade on its
 
 ---
 
-<sub>Reversibility Engine · schema 1.6.0 · input digest `e497c2c4438058df95ab087614e62b35563e249aca35e841fe285dae85a8e561`</sub>
+<sub>Reversibility Engine · schema 1.7.0 · input digest `e497c2c4438058df95ab087614e62b35563e249aca35e841fe285dae85a8e561`</sub>

@@ -59,8 +59,8 @@ func TestZeroValuesAreNeverSafe(t *testing.T) {
 	if g.Rank() >= domain.GradeF.Rank() {
 		t.Errorf("zero Grade ranks %d, at or above F (%d)", g.Rank(), domain.GradeF.Rank())
 	}
-	if g.Gate(domain.CoverageFull) != domain.GateFail {
-		t.Errorf("zero Grade gate = %q, want FAIL", g.Gate(domain.CoverageFull))
+	if g.Gate(domain.GateConditions{Coverage: domain.CoverageFull}) != domain.GateFail {
+		t.Errorf("zero Grade gate = %q, want FAIL", g.Gate(domain.GateConditions{Coverage: domain.CoverageFull}))
 	}
 
 	// Coverage has a zero value too, and it must not be the permissive one. A certificate
@@ -72,7 +72,7 @@ func TestZeroValuesAreNeverSafe(t *testing.T) {
 	if c.Full() {
 		t.Error("zero Coverage reads as full; an unknown coverage is not a complete one")
 	}
-	if domain.GradeA.Gate(c) == domain.GatePass {
+	if domain.GradeA.Gate(domain.GateConditions{Coverage: c}) == domain.GatePass {
 		t.Error("grade A with an unset coverage gates PASS; an agent must not merge on a run whose coverage nobody recorded")
 	}
 	if g.Threshold() {
@@ -99,11 +99,11 @@ func TestNotApplicableIsNeverAPass(t *testing.T) {
 	na := domain.GradeNotApplicable
 
 	for _, coverage := range []domain.Coverage{domain.CoverageFull, domain.CoveragePartial, ""} {
-		if na.Gate(coverage) == domain.GatePass {
+		if na.Gate(domain.GateConditions{Coverage: coverage}) == domain.GatePass {
 			t.Errorf("N/A gates PASS at coverage %q; a changeset nobody analyzed must never authorise a merge", coverage)
 		}
-		if na.Gate(coverage) != domain.GateNotApplicable {
-			t.Errorf("N/A gate = %q at coverage %q, want NOT_APPLICABLE", na.Gate(coverage), coverage)
+		if na.Gate(domain.GateConditions{Coverage: coverage}) != domain.GateNotApplicable {
+			t.Errorf("N/A gate = %q at coverage %q, want NOT_APPLICABLE", na.Gate(domain.GateConditions{Coverage: coverage}), coverage)
 		}
 	}
 	if na.Rank() >= domain.GradeF.Rank() {
@@ -242,7 +242,7 @@ func TestGradeGate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.grade), func(t *testing.T) {
 			t.Parallel()
-			if got := tt.grade.Gate(domain.CoverageFull); got != tt.want {
+			if got := tt.grade.Gate(domain.GateConditions{Coverage: domain.CoverageFull}); got != tt.want {
 				t.Errorf("Grade(%q).Gate(FULL) = %q, want %q", tt.grade, got, tt.want)
 			}
 		})
@@ -264,7 +264,7 @@ func TestGateRequiresFullCoverageToPass(t *testing.T) {
 
 	for _, g := range grades {
 		for _, c := range coverages {
-			got := g.Gate(c)
+			got := g.Gate(domain.GateConditions{Coverage: c})
 
 			wantPass := g == domain.GradeA && c == domain.CoverageFull
 			if (got == domain.GatePass) != wantPass {
@@ -376,8 +376,8 @@ func TestSchemaVersionIsPinned(t *testing.T) {
 	// A *and* full coverage. That is a semantic change and not only an additive one — a
 	// partially covered changeset that used to gate PASS now gates FAIL — which is why it took
 	// a version of its own rather than folding into the unreleased 1.5.0.
-	if domain.SchemaVersion != "1.6.0" {
-		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.6.0")
+	if domain.SchemaVersion != "1.7.0" {
+		t.Errorf("SchemaVersion = %q, want %q", domain.SchemaVersion, "1.7.0")
 	}
 }
 
@@ -390,7 +390,7 @@ func TestGateFollowsGradeNotEffectiveGrade(t *testing.T) {
 		Grade:          domain.GradeF,
 		EffectiveGrade: domain.GradeA,
 		Coverage:       domain.CoverageFull,
-		AIGateStatus:   domain.GradeF.Gate(domain.CoverageFull),
+		AIGateStatus:   domain.GradeF.Gate(domain.GateConditions{Coverage: domain.CoverageFull}),
 	}
 
 	if cert.AIGateStatus != domain.GateFail {

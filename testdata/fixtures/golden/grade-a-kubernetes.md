@@ -8,6 +8,11 @@ Fully reversible. This change can be rolled back with no data loss.
 | **AI merge gate** | ✅ PASS |
 | **Findings** | 1 |
 
+**Why this grade**
+
+- assigned A: every finding is REVERSIBLE
+- nothing capped this grade
+
 ### Findings
 
 | | Rule | Location | Reversibility | Lock | Change |
@@ -31,4 +36,4 @@ kubectl set image Deployment/api api=ghcr.io/acme/api@sha256:3f79bb7b435b0532165
 
 ---
 
-<sub>Reversibility Engine · schema 1.6.0 · input digest `b10cfa10960f1f66198e1ea86f4a7555ae112d13269f365cbf63ca311e4eeb96`</sub>
+<sub>Reversibility Engine · schema 1.7.0 · input digest `b10cfa10960f1f66198e1ea86f4a7555ae112d13269f365cbf63ca311e4eeb96`</sub>

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.6.0",
+  "schemaVersion": "1.7.0",
   "grade": "A",
   "outcome": "ANALYZED",
   "effectiveGrade": "A",
@@ -11,6 +11,7 @@
       "reason": "no analyzer reads .rb migrations"
     }
   ],
+  "ignoredByPolicy": [],
   "applicable": true,
   "inputDigest": "d43eb2b67d6b3e10502f57e99a7c761c3011baad52059b135e1cf0f80e71f760",
   "findings": [
@@ -30,6 +31,10 @@
     "DROP INDEX CONCURRENTLY idx;"
   ],
   "blockers": [],
+  "gradeCauses": [
+    "assigned A: every finding is REVERSIBLE",
+    "nothing capped this grade"
+  ],
   "downMigrations": [
     {
       "migration": "0001_add_index",

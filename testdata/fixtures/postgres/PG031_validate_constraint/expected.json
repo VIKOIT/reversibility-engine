@@ -1,0 +1,7 @@
+{
+  "rule": "PG031",
+  "note": "Completes the NOT VALID pattern PG022 begins. It scans every existing row without blocking writes and removes nothing, so the lock hazard is FULL_SCAN and the verdict is REVERSIBLE.",
+  "findings": [
+    {"ruleId":"PG031","file":"migrations/0001_validate_status_check.up.sql","line":1,"reversibility":"REVERSIBLE","lockHazard":"FULL_SCAN","wantUndoStep":true}
+  ]
+}

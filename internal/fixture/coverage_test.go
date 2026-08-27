@@ -49,7 +49,7 @@ func TestEveryRuleHasAFixture(t *testing.T) {
 		// an oversight.
 		retired map[string]bool
 	}{
-		{group: "postgres", prefix: "PG", count: 27},
+		{group: "postgres", prefix: "PG", count: 33},
 		{group: "kubernetes", prefix: "K8S", count: 15},
 		{group: "terraform", prefix: "TF", count: 10, retired: map[string]bool{"TF003": true}},
 	}
