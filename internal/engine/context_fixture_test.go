@@ -55,7 +55,7 @@ func TestContextFixtures(t *testing.T) {
 				t.Fatalf("loading the fixture's snapshot: %v", err)
 			}
 
-			changed, err := files.ChangedFiles(context.Background(), tc.Ref)
+			changed, err := provider.All(context.Background(), files, tc.Ref)
 			if err != nil {
 				t.Fatalf("reading the fixture: %v", err)
 			}

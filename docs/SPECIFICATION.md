@@ -87,6 +87,42 @@ The general form, which is the part a future session should apply to a case not 
 > missing a value — and adding a branch to the permissive answer will not fix it, because the
 > next path to that verdict will not have the branch.
 
+### Enumeration and retrieval are separate concerns
+
+> **A provider must be able to report what exists without fetching it.** Any check that describes
+> the **shape** of a changeset depends on enumeration; any check that describes **content**
+> depends on retrieval. Conflating them makes the first check unable to see what it is measuring.
+
+`FileProvider` had one method, `ChangedFiles(ctx, ref)`, and took a `func(path string) bool` that
+decided what to read. A path the predicate rejected was never read and left **no trace anywhere**
+— so every question of the form *"what was in this changeset that we did not analyze"* was
+unanswerable by construction. Three defects came out of that, each found and fixed separately
+before the pattern was visible:
+
+1. **The Django P0.** A docs-only pull request and thirteen unreadable `.py` migrations arrived
+   at the engine as the same empty file list, because the predicate admitted neither. The engine
+   graded both **A**.
+2. **The coverage denominator.** Coverage counted only the files an analyzer wanted, which made
+   its numerator and its denominator the same number and the check vacuous.
+3. **The rename bypass.** Renaming `migrations/` to `db/sql/` turned strict coverage off, because
+   *"read this README because a sibling is a `.sql`"* is not a decision a per-path predicate can
+   express. One command, no trace on the certificate.
+
+The interface is now two methods, `List` then `Read`, and **nothing new is computed**: the
+filesystem walk already visited paths without reading them, `git diff --name-status` already
+returned names before blobs, the GitHub comparison API already returned the listing in the same
+response, and the fake always had the fixture directory. The old contract simply refused to
+expose what all four already knew.
+
+The choice of what to read moved from a per-path predicate to a `Select` that receives the
+**complete listing**, which is what makes the second clause of "is this a migration directory"
+enforceable at all.
+
+**The cheap alternative was rejected, not overlooked.** Admitting every file and filtering inside
+the engine would make `revctl check .` read the whole repository and the GitHub App fetch every
+file in every touched directory. That is an API-quota decision, and it is not one to make as a
+side effect of a coverage fix.
+
 ### Classification is by effect, never by statement type
 
 > **Classification is by effect, never by statement type. A construct is classified by what it
@@ -136,6 +172,7 @@ rather than the principles living only where they were first needed.
 | The grade describes the evidence; the gate decides what to do about it | §2 below | Waivers, coverage, policy ignores |
 | Any field that constrains the verdict appears in every rendered output | §2 above | `GradeCauses`, and what a certificate owes a reader |
 | Every classification has a table row | §13 | The D2 shape: code claiming a construct the table omits |
+| Enumeration and retrieval are separate concerns | §2 above | The Django P0, the coverage denominator, and the rename bypass — one root cause |
 | The overwrite principle | [`RULES.md` §1](RULES.md#the-overwrite-principle) | PG012, PG013, PG028, PG043, PG050, PG054, PG057 |
 | `CONCURRENTLY` changes the lock, never the verdict | [`RULES.md` §1](RULES.md#concurrently-changes-the-lock-and-never-the-verdict) | Four rule pairs, and which encoding to use next |
 | Creation and destruction are not mirrors | [`RULES.md` §1](RULES.md#creation-and-destruction-are-not-mirrors) | Five pairs where symmetry reads as safety |
@@ -1237,8 +1274,45 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
 
    The help text for `--gate` used to call it "the setting autonomous agents must use". That was
    already loose and is now wrong: an agent reads the certificate, never an exit status.
-9. **Strict coverage is complete for migration-named directories and not for the others.**
-   **RULED, not yet implemented.** Known rather than discovered — the property test encodes the boundary deliberately.
+9. ~~**Strict coverage is complete for migration-named directories and not for the others.**~~
+   **RESOLVED. The two-phase `FileProvider` contract shipped.**
+
+   The principle graduated to §2 above, where it belongs now that the code satisfies it. What
+   follows is the record of the change, kept because the sequencing is the part worth repeating.
+
+   `List(ctx, ref) ([]Path, error)` and `Read(ctx, ref, paths) ([]ChangedFile, error)`. All four
+   implementations, the CLI, and the GitHub App moved together. `Include` is gone; `Select`
+   receives the complete listing.
+
+   **`Read` takes the ref as well, and the GitHub provider is why.** Its comparison ref is
+   per-call, where the filesystem and git providers get their revisions at construction. Storing
+   it between phases would have made `Read` depend on `List` having run first, on the same value,
+   in the same goroutine — state where the old contract at least had none.
+
+   **The gate held.** `verdicts.txt` did not move: every grade, gate status, finding count, undo
+   plan, blocker count, and input digest is byte-identical across the change, and so is every
+   golden file. That was the point of sequencing the plumbing first.
+
+   **Two defects surfaced immediately** when the enumeration widened, both in the CLI rather than
+   in the providers, and both invisible under the old contract:
+
+   - The **policy file itself** was counted against coverage. Every repository with a
+     `.reversibility.yml` would have failed.
+   - **Policy-ignored paths** were counted, which contradicts §16.8 directly: an ignore is a
+     human decision, reported under `IgnoredByPolicy`, and not a coverage gap.
+
+   Both now leave the enumeration before it reaches the engine. Neither could have been found
+   before, because neither path was ever enumerated.
+
+   **A third came from the providers agreeing.** `git`'s listing collapsed a rename into one
+   entry while its reader emitted a delete plus an add, so `Read` was handed a path `List` had
+   not produced. The two halves of one provider have to agree about the shape of a rename, which
+   is the same class of requirement §16.4 places on the four providers agreeing with each other.
+
+   **The rename bypass is closed.** `db/sql/notes.txt` beside a `.sql` file now enumerates,
+   counts, and fails, exactly as `db/migrate/notes.txt` does. The harness catalogue entry in
+   [`proposals/bypass-rename-migration-dir.md`](proposals/bypass-rename-migration-dir.md) stays
+   filed — a catalogue that lists only open bypasses cannot show that one was closed.
 
    A directory is a migration directory two ways: it is **named** for one, or it **holds a file
    an analyzer claimed**. The second clause exists so a rename cannot defeat the check. Coverage

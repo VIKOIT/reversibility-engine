@@ -150,18 +150,14 @@ func inMigrationDir(rel string) bool {
 // "candidates only" passed all 672 cases — the properties all still held, and the check the
 // ruling exists to enforce had quietly stopped enforcing anything.
 //
-// It checks the half of the denominator the engine can actually see, and the boundary is real
-// rather than a simplification for the test's convenience.
+// It checks the whole denominator. It did not always: until the two-phase FileProvider landed,
+// a directory identified only by holding an analyzable file had its unconventional siblings
+// counted only if they were migration-shaped, because the provider decided what to read from
+// each path alone and never fetched them.
 //
-// A provider decides whether to READ a file from its path alone, before it has seen the rest of
-// the changeset. "This directory holds a .sql file, so fetch its README too" is not a decision a
-// per-path predicate can make. So a directory NAMED for migrations has every file fetched and
-// every file counted; a directory identified only by holding an analyzable file has its
-// unconventional siblings counted only if they are migration-shaped.
-//
-// docs/SPECIFICATION.md §16.9 records this as a known limitation with the fix that closes it.
-// The oracle encodes the boundary rather than the aspiration, because a property test that
-// asserts what the engine cannot do is a failing test, not a stricter one.
+// That boundary is gone. List enumerates the changeset before anything is read, so
+// "db/schema/notes.txt beside a .sql file" is now visible and now counts — which is what closed
+// the rename bypass. The oracle asserts the rule rather than the old limitation.
 func oracleSeesUnanalyzedInMigrationDir(t *testing.T, c combination) bool {
 	t.Helper()
 
@@ -169,6 +165,15 @@ func oracleSeesUnanalyzedInMigrationDir(t *testing.T, c combination) bool {
 		return analyzedExtensions[strings.ToLower(filepath.Ext(name))] ||
 			strings.HasSuffix(strings.ToLower(name), ".tfplan.json")
 	}
+
+	// First pass: which directories are migration directories. Both clauses, because the
+	// enumeration now reaches both.
+	dirs := map[string]bool{}
+	oracleWalk(c, func(rel string, name string) {
+		if analyzable(name) || inMigrationDir(rel) {
+			dirs[path.Dir(rel)] = true
+		}
+	})
 
 	found := false
 	oracleWalk(c, func(rel string, name string) {
@@ -178,6 +183,13 @@ func oracleSeesUnanalyzedInMigrationDir(t *testing.T, c combination) bool {
 
 		// Everything in a migration-named directory counts, whatever it is.
 		if inMigrationDir(rel) {
+			found = true
+			return
+		}
+
+		// Inside a directory that holds an analyzable file, everything counts too — the second
+		// clause of "what is a migration directory", and the one a rename used to defeat.
+		if dirs[path.Dir(rel)] {
 			found = true
 			return
 		}

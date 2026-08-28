@@ -68,12 +68,23 @@ type GitOptions struct {
 // a merge base, and a rename is the definition of what those words mean here, and a second
 // implementation of them would be a second thing that can disagree with the pull request.
 type Git struct {
-	bin     string
-	dir     string
-	base    string
-	head    string
-	paths   []string
-	include Include
+	bin   string
+	dir   string
+	base  string
+	head  string
+	paths []string
+}
+
+// gitPlan is what both phases need: the revisions to read blobs at, and the diff entries. It is
+// derived from scratch in each phase rather than cached on the Git value, so the provider holds
+// no state and Read does not depend on List having run first.
+//
+// The cost of deriving it twice is two rev-parse calls and one `diff --name-status`, all of
+// which read names and never blobs. That is the cheap half by construction.
+type gitPlan struct {
+	previousRev string
+	currentRev  string
+	changes     []gitChange
 }
 
 // DefaultHead is the ref used when none is given.
@@ -81,9 +92,9 @@ const DefaultHead = "HEAD"
 
 // NewGit returns a git provider, or an error if git is not usable.
 //
-// include decides which paths are worth reading; it comes from the engine so that the list of
-// interesting extensions lives in one place. A nil include reads every changed file.
-func NewGit(opts GitOptions, include Include) (*Git, error) {
+// It no longer takes a predicate: choosing what to read is the caller's decision, made against
+// the complete listing. See Select.
+func NewGit(opts GitOptions) (*Git, error) {
 	if strings.TrimSpace(opts.Base) == "" {
 		return nil, fmt.Errorf("git provider: no base ref given: %w", domain.ErrProviderFailed)
 	}
@@ -100,37 +111,31 @@ func NewGit(opts GitOptions, include Include) (*Git, error) {
 	}
 
 	return &Git{
-		bin:     bin,
-		dir:     opts.Dir,
-		base:    strings.TrimSpace(opts.Base),
-		head:    head,
-		paths:   append([]string(nil), opts.Paths...),
-		include: include,
+		bin:   bin,
+		dir:   opts.Dir,
+		base:  strings.TrimSpace(opts.Base),
+		head:  head,
+		paths: append([]string(nil), opts.Paths...),
 	}, nil
 }
 
-// ChangedFiles implements FileProvider.
-//
-// The ref argument is ignored: the refs to compare were given at construction, because they are
-// command-line input rather than something an event carries. The parameter stays because the
-// interface is shared with the GitHub provider, where a ref is the only thing identifying the
-// change.
-func (g *Git) ChangedFiles(ctx context.Context, _ domain.ChangeRef) ([]domain.ChangedFile, error) {
+// plan resolves the revisions and the diff. Names only: no blob is read here.
+func (g *Git) plan(ctx context.Context) (gitPlan, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("git provider: %w", err)
+		return gitPlan{}, fmt.Errorf("git provider: %w", err)
 	}
 
 	if err := g.ensureRepository(ctx); err != nil {
-		return nil, err
+		return gitPlan{}, err
 	}
 
 	baseSHA, err := g.resolve(ctx, g.base)
 	if err != nil {
-		return nil, err
+		return gitPlan{}, err
 	}
 	headSHA, err := g.resolve(ctx, g.head)
 	if err != nil {
-		return nil, err
+		return gitPlan{}, err
 	}
 
 	// The three-dot form compares head against the merge base, which is what a pull request
@@ -139,27 +144,125 @@ func (g *Git) ChangedFiles(ctx context.Context, _ domain.ChangeRef) ([]domain.Ch
 	// transition nobody is proposing.
 	mergeBase, err := g.mergeBase(ctx, baseSHA, headSHA)
 	if err != nil {
-		return nil, err
+		return gitPlan{}, err
 	}
 
 	changes, err := g.diff(ctx, baseSHA, headSHA)
 	if err != nil {
-		return nil, err
+		return gitPlan{}, err
 	}
 
-	files, err := g.readChanges(ctx, changes, mergeBase, headSHA)
+	return gitPlan{previousRev: mergeBase, currentRev: headSHA, changes: changes}, nil
+}
+
+// List implements FileProvider.
+//
+// The ref argument is ignored: the refs to compare were given at construction, because they are
+// command-line input rather than something an event carries. The parameter stays because the
+// interface is shared with the GitHub provider, where a ref is the only thing identifying the
+// change.
+//
+// `git diff --name-status` and `git ls-tree` both return names without blobs, so this is the
+// cheap half by construction rather than by discipline.
+func (g *Git) List(ctx context.Context, _ domain.ChangeRef) ([]Path, error) {
+	plan, err := g.plan(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	contextFiles, err := g.readContext(ctx, files, headSHA)
+	out := changedPaths(plan.changes)
+
+	siblings, err := g.listContext(ctx, out, plan.currentRev)
 	if err != nil {
 		return nil, err
 	}
-	files = append(files, contextFiles...)
+	out = append(out, siblings...)
+
+	SortPaths(out)
+	return out, nil
+}
+
+// Read implements FileProvider. It fetches blobs for exactly the paths given.
+func (g *Git) Read(ctx context.Context, _ domain.ChangeRef, paths []Path) ([]domain.ChangedFile, error) {
+	plan, err := g.plan(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	wanted := map[string]bool{}
+	for _, p := range paths {
+		wanted[p.Path] = true
+	}
+
+	files, err := g.readChanges(ctx, plan.changes, plan.previousRev, plan.currentRev, wanted)
+	if err != nil {
+		return nil, err
+	}
+
+	// Context siblings are whatever was asked for that the diff did not mention. Recomputing
+	// which paths qualify would be a second definition of the sibling rule; taking the caller's
+	// list means List owns that rule alone.
+	changed := map[string]bool{}
+	for _, f := range files {
+		changed[f.Path] = true
+	}
+
+	for _, p := range paths {
+		if changed[p.Path] {
+			continue
+		}
+
+		content, err := g.readBlob(ctx, plan.currentRev, p.Path)
+		if err != nil {
+			return nil, err
+		}
+
+		// Reported as MODIFIED with identical sides, matching the fake, filesystem, and
+		// GitHub providers. The analyzers treat a file whose content did not change as
+		// context and generate no findings for it.
+		files = append(files, domain.ChangedFile{
+			Path:     p.Path,
+			Status:   domain.StatusModified,
+			Previous: content,
+			Current:  content,
+		})
+	}
 
 	sortByPath(files)
 	return files, nil
+}
+
+// changedPaths turns diff entries into a listing.
+func changedPaths(changes []gitChange) []Path {
+	out := make([]Path, 0, len(changes))
+
+	for _, c := range changes {
+		switch c.status {
+		case 'A':
+			out = append(out, Path{Path: c.dst, Status: domain.StatusAdded})
+		case 'D':
+			out = append(out, Path{Path: c.src, Status: domain.StatusRemoved})
+		case 'M', 'T':
+			out = append(out, Path{Path: c.dst, Status: domain.StatusModified})
+		case 'R':
+			// A rename is listed as a delete plus an add, exactly as readChanges reads it, and
+			// deliberately not as StatusRenamed. The Kubernetes rules compare whole objects:
+			// moving a manifest removes an object from one path and introduces it at another,
+			// and K8S003 and K8S009 need to see the removal to ask what still depends on it.
+			//
+			// The two halves must agree. A listing that collapsed the rename would hand Read a
+			// path it does not produce, and the file would vanish from the changeset — which is
+			// the class of bug this whole contract change exists to prevent.
+			out = append(out,
+				Path{Path: c.src, Status: domain.StatusRemoved},
+				Path{Path: c.dst, Status: domain.StatusAdded})
+
+		case 'C':
+			// A copy leaves the source in place, so only the new path is a change.
+			out = append(out, Path{Path: c.dst, Status: domain.StatusAdded})
+		}
+	}
+	return out
 }
 
 // gitChange is one entry of `git diff --name-status`.
@@ -310,11 +413,16 @@ func truncatedDiff(field string) error {
 }
 
 // readChanges turns diff entries into changed files with both sides populated.
-func (g *Git) readChanges(ctx context.Context, changes []gitChange, previousRev, currentRev string) ([]domain.ChangedFile, error) {
+func (g *Git) readChanges(
+	ctx context.Context,
+	changes []gitChange,
+	previousRev, currentRev string,
+	wanted map[string]bool,
+) ([]domain.ChangedFile, error) {
 	var out []domain.ChangedFile
 
 	appendAdded := func(p string) error {
-		if !g.included(p) {
+		if !wanted[p] {
 			return nil
 		}
 		content, err := g.readBlob(ctx, currentRev, p)
@@ -326,7 +434,7 @@ func (g *Git) readChanges(ctx context.Context, changes []gitChange, previousRev,
 	}
 
 	appendRemoved := func(p string) error {
-		if !g.included(p) {
+		if !wanted[p] {
 			return nil
 		}
 		content, err := g.readBlob(ctx, previousRev, p)
@@ -350,7 +458,7 @@ func (g *Git) readChanges(ctx context.Context, changes []gitChange, previousRev,
 			}
 
 		case 'M', 'T':
-			if !g.included(c.dst) {
+			if !wanted[c.dst] {
 				continue
 			}
 			previous, err := g.readBlob(ctx, previousRev, c.src)
@@ -403,7 +511,7 @@ func (g *Git) readChanges(ctx context.Context, changes []gitChange, previousRev,
 //
 // The search is bounded to the directories the change already touches. A rule whose context lies
 // outside that scope still sees nothing and must return UNKNOWN rather than assume safety.
-func (g *Git) readContext(ctx context.Context, changed []domain.ChangedFile, rev string) ([]domain.ChangedFile, error) {
+func (g *Git) listContext(ctx context.Context, changed []Path, rev string) ([]Path, error) {
 	known := make(map[string]bool, len(changed))
 	dirs := map[string]bool{}
 
@@ -421,27 +529,20 @@ func (g *Git) readContext(ctx context.Context, changed []domain.ChangedFile, rev
 		return nil, err
 	}
 
-	var out []domain.ChangedFile
+	var out []Path
 
 	for _, candidate := range candidates {
-		if known[candidate] || !dirs[path.Dir(candidate)] || !g.included(candidate) {
+		if known[candidate] || !dirs[path.Dir(candidate)] {
 			continue
 		}
 		known[candidate] = true
 
-		content, err := g.readBlob(ctx, rev, candidate)
-		if err != nil {
-			return nil, err
-		}
-
-		// Reported as MODIFIED with identical sides, matching the fake, filesystem, and
-		// GitHub providers. The analyzers treat a file whose content did not change as
+		// Reported as MODIFIED with identical sides once read, matching the fake, filesystem,
+		// and GitHub providers. The analyzers treat a file whose content did not change as
 		// context and generate no findings for it.
-		out = append(out, domain.ChangedFile{
-			Path:     candidate,
-			Status:   domain.StatusModified,
-			Previous: content,
-			Current:  content,
+		out = append(out, Path{
+			Path:   candidate,
+			Status: domain.StatusModified,
 		})
 
 		if len(out) > maxContextFiles {
@@ -556,13 +657,6 @@ func (g *Git) run(ctx context.Context, args ...string) ([]byte, string, error) {
 
 	err := cmd.Run()
 	return stdout.Bytes(), strings.TrimSpace(stderr.String()), err
-}
-
-func (g *Git) included(p string) bool {
-	if g.include == nil {
-		return true
-	}
-	return g.include(p)
 }
 
 // where names the directory git was run in, for an error a user can act on.

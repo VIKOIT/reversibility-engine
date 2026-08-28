@@ -41,6 +41,14 @@ type RunOption func(*runConfig)
 
 // runConfig is everything a single Certify call knows beyond the files themselves.
 type runConfig struct {
+	// enumerated is every path the provider found in the changeset, whether or not its content
+	// was read.
+	//
+	// Coverage is a statement about what exists, so it is measured against this rather than
+	// against the files. When it is absent the engine falls back to the paths of the files it
+	// was given, which is the old behaviour and is strictly weaker: a file nobody read leaves no
+	// trace in that list, which is how renaming a migration directory turned the check off.
+	enumerated []string
 	// ignoredByPolicy are candidate paths a policy excluded before the provider read them.
 	//
 	// The engine cannot discover these for itself. An ignored path is never read, which is the
@@ -56,6 +64,15 @@ type runConfig struct {
 // decision never buys an agent a merge.
 func IgnoredByPolicy(paths []string) RunOption {
 	return func(c *runConfig) { c.ignoredByPolicy = append(c.ignoredByPolicy, paths...) }
+}
+
+// Enumerated records every path the provider found, read or not.
+//
+// This is the input coverage is measured against, and supplying it is what makes strict coverage
+// strict. Without it the engine can only see the files it was handed, and a file that exists and
+// was never read is invisible — see docs/SPECIFICATION.md §16.9.
+func Enumerated(paths []string) RunOption {
+	return func(c *runConfig) { c.enumerated = append(c.enumerated, paths...) }
 }
 
 // WithPolicy sets the resolved policy. A nil policy means none, which is the default and must
@@ -195,7 +212,16 @@ func (e *Engine) Certify(
 
 	// What the run was able to do at all, decided before anything is graded. A grade is a
 	// statement about files that were read, so the question of whether any were comes first.
-	outcome, unsupported := e.outcome(files)
+	//
+	// The enumeration is what coverage is measured against. Falling back to the files' own paths
+	// keeps every caller that has not been updated working, and is honestly weaker: a file that
+	// exists and was not read cannot appear in that list at all.
+	enumerated := run.enumerated
+	if len(enumerated) == 0 {
+		enumerated = pathsOf(files)
+	}
+
+	outcome, unsupported := e.outcome(files, enumerated)
 
 	// Grade is computed from every finding, waived ones included. It states what the evidence
 	// says about the change, and no configuration may move it: a waiver accepts a risk, it does
@@ -475,6 +501,15 @@ func nonNilStatuses(in []domain.DownMigrationStatus) []domain.DownMigrationStatu
 		return []domain.DownMigrationStatus{}
 	}
 	return in
+}
+
+// pathsOf is the fallback enumeration: the paths of the files that were actually read.
+func pathsOf(files []domain.ChangedFile) []string {
+	out := make([]string, 0, len(files))
+	for _, f := range files {
+		out = append(out, f.Path)
+	}
+	return out
 }
 
 func nonNilUnanalyzed(in []domain.UnanalyzedFile) []domain.UnanalyzedFile {

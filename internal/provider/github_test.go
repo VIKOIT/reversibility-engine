@@ -91,8 +91,22 @@ func changedFile(name, status string) map[string]any {
 // contentsPath is the API path for a file, which the provider hits once per commit.
 func contentsPath(name string) string { return "/repos/acme/widgets/contents/" + name }
 
-func sqlInclude(path string) bool {
-	return strings.HasSuffix(path, ".sql") || strings.HasSuffix(path, ".yaml")
+func sqlInclude(listed []provider.Path) []provider.Path {
+	out := make([]provider.Path, 0, len(listed))
+	for _, p := range listed {
+		if strings.HasSuffix(p.Path, ".sql") || strings.HasSuffix(p.Path, ".yaml") {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// resolveGitHub runs both phases against a GitHub provider.
+func resolveGitHub(t *testing.T, c *github.Client, ref domain.ChangeRef, choose provider.Select) ([]domain.ChangedFile, error) {
+	t.Helper()
+
+	_, files, err := provider.Resolve(context.Background(), provider.NewGitHub(c), ref, choose)
+	return files, err
 }
 
 func TestGitHubFetchesBothSidesOfAChange(t *testing.T) {
@@ -117,8 +131,7 @@ func TestGitHubFetchesBothSidesOfAChange(t *testing.T) {
 	api.json(contentsPath("migrations/0003.up.sql"), contentsResponse("migrations/0003.up.sql", "-- removed\n"))
 	api.json("/repos/acme/widgets/contents/migrations", []any{})
 
-	got, err := provider.NewGitHub(api.client(t), sqlInclude).
-		ChangedFiles(context.Background(), provider.Ref("acme", "widgets", "base", "head"))
+	got, err := resolveGitHub(t, api.client(t), provider.Ref("acme", "widgets", "base", "head"), sqlInclude)
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -178,8 +191,7 @@ func TestGitHubFetchesUnchangedContextFiles(t *testing.T) {
 	api.json(contentsPath("k8s/storageclass.yaml"),
 		contentsResponse("k8s/storageclass.yaml", "kind: StorageClass\nreclaimPolicy: Delete\n"))
 
-	got, err := provider.NewGitHub(api.client(t), sqlInclude).
-		ChangedFiles(context.Background(), provider.Ref("acme", "widgets", "base", "head"))
+	got, err := resolveGitHub(t, api.client(t), provider.Ref("acme", "widgets", "base", "head"), sqlInclude)
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -282,8 +294,7 @@ func TestGitHubFailsClosedOnAPIErrors(t *testing.T) {
 			api := newFakeAPI(t)
 			tt.setup(api)
 
-			got, err := provider.NewGitHub(api.client(t), sqlInclude).
-				ChangedFiles(context.Background(), provider.Ref("acme", "widgets", "base", "head"))
+			got, err := resolveGitHub(t, api.client(t), provider.Ref("acme", "widgets", "base", "head"), sqlInclude)
 
 			if err == nil {
 				t.Fatalf("no error; the provider returned %d files from a failed fetch", len(got))
@@ -310,8 +321,7 @@ func TestGitHubToleratesAMissingBaseDirectory(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message":"Not Found"}`))
 	})
 
-	got, err := provider.NewGitHub(api.client(t), sqlInclude).
-		ChangedFiles(context.Background(), provider.Ref("acme", "widgets", "base", "head"))
+	got, err := resolveGitHub(t, api.client(t), provider.Ref("acme", "widgets", "base", "head"), sqlInclude)
 	if err != nil {
 		t.Fatalf("a directory absent at base was treated as a failure: %v", err)
 	}
@@ -333,8 +343,7 @@ func TestGitHubRefusesAnOversizedChangeset(t *testing.T) {
 	api := newFakeAPI(t)
 	api.json("/repos/acme/widgets/compare/base...head", comparison(files...))
 
-	_, err := provider.NewGitHub(api.client(t), sqlInclude).
-		ChangedFiles(context.Background(), provider.Ref("acme", "widgets", "base", "head"))
+	_, err := resolveGitHub(t, api.client(t), provider.Ref("acme", "widgets", "base", "head"), sqlInclude)
 
 	if err == nil {
 		t.Fatal("an oversized changeset was accepted")
@@ -348,14 +357,20 @@ func TestGitHubRejectsMalformedRefs(t *testing.T) {
 	t.Parallel()
 
 	api := newFakeAPI(t)
-	p := provider.NewGitHub(api.client(t), sqlInclude)
+	p := provider.NewGitHub(api.client(t))
 
 	for _, ref := range []domain.ChangeRef{
 		"", "acme/widgets", "acme/widgets@base", "acme@base...head",
 		"acme/widgets@...head", "acme/widgets@base...", "/widgets@base...head",
 	} {
-		if _, err := p.ChangedFiles(context.Background(), ref); err == nil {
-			t.Errorf("ref %q was accepted", ref)
+		if _, err := p.List(context.Background(), ref); err == nil {
+			t.Errorf("ref %q was accepted by List", ref)
+		}
+
+		// Read parses the ref too, and must reject the same set. It takes the ref rather than
+		// remembering one from List, so it validates independently and has to agree.
+		if _, err := p.Read(context.Background(), ref, []provider.Path{{Path: "a.sql"}}); err == nil {
+			t.Errorf("ref %q was accepted by Read", ref)
 		}
 	}
 }
@@ -363,7 +378,7 @@ func TestGitHubRejectsMalformedRefs(t *testing.T) {
 func TestGitHubRequiresAClient(t *testing.T) {
 	t.Parallel()
 
-	if _, err := provider.NewGitHub(nil, nil).ChangedFiles(context.Background(), "a/b@c...d"); err == nil {
+	if _, err := resolveGitHub(t, nil, "a/b@c...d", nil); err == nil {
 		t.Error("a provider with no client returned no error")
 	}
 }
@@ -375,8 +390,8 @@ func TestGitHubRespectsCancellation(t *testing.T) {
 	cancel()
 
 	api := newFakeAPI(t)
-	if _, err := provider.NewGitHub(api.client(t), sqlInclude).
-		ChangedFiles(ctx, provider.Ref("acme", "widgets", "base", "head")); err == nil {
+	if _, err := provider.NewGitHub(api.client(t)).
+		List(ctx, provider.Ref("acme", "widgets", "base", "head")); err == nil {
 		t.Error("a cancelled context returned no error")
 	}
 }
@@ -396,8 +411,7 @@ func TestGitHubOutputIsSorted(t *testing.T) {
 	}
 	api.json("/repos/acme/widgets/contents/", []any{})
 
-	got, err := provider.NewGitHub(api.client(t), sqlInclude).
-		ChangedFiles(context.Background(), provider.Ref("acme", "widgets", "base", "head"))
+	got, err := resolveGitHub(t, api.client(t), provider.Ref("acme", "widgets", "base", "head"), sqlInclude)
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}

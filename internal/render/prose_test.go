@@ -229,7 +229,7 @@ func TestEveryCappedOrFailedGradeNamesItsCauseInMarkdown(t *testing.T) {
 			t.Run(group+"/"+tc.Name, func(t *testing.T) {
 				t.Parallel()
 
-				files, err := provider.NewFake(root).ChangedFiles(context.Background(), tc.Ref)
+				files, err := provider.All(context.Background(), provider.NewFake(root), tc.Ref)
 				if err != nil {
 					t.Fatalf("resolving %s: %v", tc.Ref, err)
 				}

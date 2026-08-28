@@ -143,13 +143,12 @@ func InMigrationDir(p string) bool {
 //   - the directory holds at least one file an analyzer claimed, whatever it is called. A
 //     directory of .sql files named db/schema/ is a migration directory by any honest reading,
 //     and requiring the conventional name would let a rename defeat the coverage check.
-func (e *Engine) migrationDirectories(files []domain.ChangedFile) map[string]bool {
+func (e *Engine) migrationDirectories(enumerated []string) map[string]bool {
 	dirs := map[string]bool{}
 
-	for _, f := range files {
-		dir := path.Dir(normalizePath(f.Path))
-		if e.Supports(f.Path) || InMigrationDir(f.Path) {
-			dirs[dir] = true
+	for _, p := range enumerated {
+		if e.Supports(p) || InMigrationDir(p) {
+			dirs[path.Dir(normalizePath(p))] = true
 		}
 	}
 	return dirs
@@ -166,25 +165,33 @@ func (e *Engine) migrationDirectories(files []domain.ChangedFile) map[string]boo
 //
 // The escape hatch is the policy, not a heuristic: ignore the file explicitly and the decision
 // is recorded, digested, and visible on the certificate.
-func (e *Engine) outcome(files []domain.ChangedFile) (domain.AnalysisOutcome, []string) {
-	var (
-		claimed     bool
-		unsupported []string
-	)
-
-	dirs := e.migrationDirectories(files)
+// It works from the **enumeration** rather than from the files, which is the §16.9 fix: a file
+// that exists and was never read is exactly what this has to report, and it cannot appear in a
+// list of files that were read.
+func (e *Engine) outcome(files []domain.ChangedFile, enumerated []string) (domain.AnalysisOutcome, []string) {
+	read := make(map[string]bool, len(files))
+	claimed := false
 
 	for _, f := range files {
+		read[f.Path] = true
 		if e.Supports(f.Path) {
 			claimed = true
+		}
+	}
+
+	dirs := e.migrationDirectories(enumerated)
+
+	var unsupported []string
+	for _, p := range enumerated {
+		if read[p] && e.Supports(p) {
 			continue
 		}
 
 		// Outside every migration directory, only a migration-shaped file counts: a .py at the
 		// repository root is a script, and holding a changeset hostage to it would be the
 		// severity-from-ignorance failure this engine is not allowed to commit.
-		if dirs[path.Dir(normalizePath(f.Path))] || Candidate(f.Path) {
-			unsupported = append(unsupported, f.Path)
+		if dirs[path.Dir(normalizePath(p))] || Candidate(p) {
+			unsupported = append(unsupported, p)
 		}
 	}
 

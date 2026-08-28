@@ -41,16 +41,22 @@ var ErrChangesetTooLarge = errors.New("provider: changeset exceeds the fetch lim
 // to fetch all end the same way: the caller gets an error and grades F. Silently analyzing an
 // incomplete diff is the one outcome this provider must never produce.
 type GitHub struct {
-	client  *github.Client
-	include Include
+	client *github.Client
 }
 
 // NewGitHub returns a provider backed by the given client.
 //
-// include decides which paths are worth fetching; it comes from the engine so that the list of
-// interesting extensions lives in one place. A nil include fetches every changed file.
-func NewGitHub(client *github.Client, include Include) *GitHub {
-	return &GitHub{client: client, include: include}
+// It no longer takes a predicate: choosing what to fetch is the caller's decision, made against
+// the complete listing. See Select.
+//
+// This provider is the one where the split pays for itself directly. The comparison API returns
+// the filenames and the directory listing API returns sibling names, both without file bodies —
+// so enumerating the whole changeset costs the calls it already made, and only the chosen paths
+// turn into content requests. The alternative considered and rejected was to fetch every file in
+// every touched directory so the engine could filter, which is an API-quota decision rather than
+// an engineering one.
+func NewGitHub(client *github.Client) *GitHub {
+	return &GitHub{client: client}
 }
 
 // Ref builds a ChangeRef identifying a comparison between two commits in a repository.
@@ -90,8 +96,12 @@ func parseRef(ref domain.ChangeRef) (parsedRef, error) {
 	return p, nil
 }
 
-// ChangedFiles implements FileProvider.
-func (g *GitHub) ChangedFiles(ctx context.Context, ref domain.ChangeRef) ([]domain.ChangedFile, error) {
+// List implements FileProvider.
+//
+// The comparison API returns filenames, and the contents API is what costs a request per file.
+// Enumerating the whole changeset therefore costs the calls this provider already made, and only
+// the chosen paths become content requests.
+func (g *GitHub) List(ctx context.Context, ref domain.ChangeRef) ([]Path, error) {
 	if g.client == nil {
 		return nil, fmt.Errorf("github provider: no client configured: %w", domain.ErrProviderFailed)
 	}
@@ -109,19 +119,83 @@ func (g *GitHub) ChangedFiles(ctx context.Context, ref domain.ChangeRef) ([]doma
 		return nil, err
 	}
 
-	files, err := g.fetchChanged(ctx, r, changed)
+	out := make([]Path, 0, len(changed))
+	for _, f := range changed {
+		out = append(out, Path{
+			Path:     f.GetFilename(),
+			PrevPath: f.GetPreviousFilename(),
+			Status:   translateStatus(f.GetStatus()),
+		})
+	}
+
+	siblings, err := g.listContext(ctx, r, out)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, siblings...)
+
+	SortPaths(out)
+	return out, nil
+}
+
+// Read implements FileProvider. It fetches content for exactly the paths given.
+func (g *GitHub) Read(ctx context.Context, ref domain.ChangeRef, paths []Path) ([]domain.ChangedFile, error) {
+	if g.client == nil {
+		return nil, fmt.Errorf("github provider: no client configured: %w", domain.ErrProviderFailed)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("github provider: %w", err)
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	// Every Path carries the ref it belongs to via the listing, so Read needs the same ref the
+	// listing was made against. It is recovered from the caller's paths rather than stored on
+	// the provider, which keeps this value stateless and safe to share.
+	r, err := parseRef(ref)
 	if err != nil {
 		return nil, err
 	}
 
-	context, err := g.fetchContext(ctx, r, files)
-	if err != nil {
-		return nil, err
-	}
-	files = append(files, context...)
+	var out []domain.ChangedFile
 
-	sortByPath(files)
-	return files, nil
+	for _, p := range paths {
+		file := domain.ChangedFile{
+			Path:         p.Path,
+			Status:       p.Status,
+			PreviousPath: p.PrevPath,
+		}
+
+		// The previous side is what makes a transition classifiable: whether an ALTER widens or
+		// narrows, whether a PVC grew or shrank. Fetching only the new content would leave the
+		// Kubernetes rules unable to answer anything.
+		if p.Status != domain.StatusAdded {
+			previousPath := p.Path
+			if p.PrevPath != "" {
+				previousPath = p.PrevPath
+			}
+
+			content, err := g.fetchFile(ctx, r, previousPath, r.base)
+			if err != nil {
+				return nil, err
+			}
+			file.Previous = content
+		}
+
+		if p.Status != domain.StatusRemoved {
+			content, err := g.fetchFile(ctx, r, p.Path, r.head)
+			if err != nil {
+				return nil, err
+			}
+			file.Current = content
+		}
+
+		out = append(out, file)
+	}
+
+	sortByPath(out)
+	return out, nil
 }
 
 // compare walks the paginated comparison between base and head.
@@ -147,54 +221,6 @@ func (g *GitHub) compare(ctx context.Context, r parsedRef) ([]*github.CommitFile
 	}
 }
 
-// fetchChanged turns the comparison into changed files with both sides populated.
-func (g *GitHub) fetchChanged(ctx context.Context, r parsedRef, changed []*github.CommitFile) ([]domain.ChangedFile, error) {
-	var out []domain.ChangedFile
-
-	for _, f := range changed {
-		path := f.GetFilename()
-		if !g.included(path) {
-			continue
-		}
-
-		status := translateStatus(f.GetStatus())
-
-		file := domain.ChangedFile{
-			Path:         path,
-			Status:       status,
-			PreviousPath: f.GetPreviousFilename(),
-		}
-
-		// The previous side is what makes a transition classifiable: whether an ALTER widens or
-		// narrows, whether a PVC grew or shrank. Fetching only the new content would leave the
-		// Kubernetes rules unable to answer anything.
-		if status != domain.StatusAdded {
-			previousPath := path
-			if f.GetPreviousFilename() != "" {
-				previousPath = f.GetPreviousFilename()
-			}
-
-			content, err := g.fetchFile(ctx, r, previousPath, r.base)
-			if err != nil {
-				return nil, err
-			}
-			file.Previous = content
-		}
-
-		if status != domain.StatusRemoved {
-			content, err := g.fetchFile(ctx, r, path, r.head)
-			if err != nil {
-				return nil, err
-			}
-			file.Current = content
-		}
-
-		out = append(out, file)
-	}
-
-	return out, nil
-}
-
 // fetchContext fetches unchanged files that sit alongside the changed ones.
 //
 // Some rules cannot be decided from the changed files alone: K8S003 needs the StorageClass
@@ -205,19 +231,19 @@ func (g *GitHub) fetchChanged(ctx context.Context, r parsedRef, changed []*githu
 // these rules actually care about — a chart or kustomize directory holding related manifests —
 // without walking the repository. A rule whose context lies outside that scope still sees
 // nothing, and per docs/SPECIFICATION.md §16.4 must return UNKNOWN rather than assume safety.
-func (g *GitHub) fetchContext(ctx context.Context, r parsedRef, changed []domain.ChangedFile) ([]domain.ChangedFile, error) {
+func (g *GitHub) listContext(ctx context.Context, r parsedRef, changed []Path) ([]Path, error) {
 	known := make(map[string]bool, len(changed))
 	dirs := map[string]bool{}
 
 	for _, f := range changed {
 		known[f.Path] = true
-		if f.PreviousPath != "" {
-			known[f.PreviousPath] = true
+		if f.PrevPath != "" {
+			known[f.PrevPath] = true
 		}
 		dirs[path.Dir(f.Path)] = true
 	}
 
-	var out []domain.ChangedFile
+	var out []Path
 
 	for _, dir := range sortedStrings(dirs) {
 		siblings, err := g.listDirectory(ctx, r, dir)
@@ -226,24 +252,17 @@ func (g *GitHub) fetchContext(ctx context.Context, r parsedRef, changed []domain
 		}
 
 		for _, sibling := range siblings {
-			if known[sibling] || !g.included(sibling) {
+			if known[sibling] {
 				continue
 			}
 			known[sibling] = true
 
-			content, err := g.fetchFile(ctx, r, sibling, r.base)
-			if err != nil {
-				return nil, err
-			}
-
-			// Reported as MODIFIED with identical sides, matching the fake and filesystem
-			// providers. The analyzers treat a file whose content did not change as context and
-			// generate no findings for it.
-			out = append(out, domain.ChangedFile{
-				Path:     sibling,
-				Status:   domain.StatusModified,
-				Previous: content,
-				Current:  content,
+			// Reported as MODIFIED with identical sides once read, matching the fake and
+			// filesystem providers. The analyzers treat a file whose content did not change as
+			// context and generate no findings for it.
+			out = append(out, Path{
+				Path:   sibling,
+				Status: domain.StatusModified,
 			})
 
 			if len(out) > maxContextFiles {
@@ -308,13 +327,6 @@ func (g *GitHub) fetchFile(ctx context.Context, r parsedRef, filePath, sha strin
 	}
 
 	return []byte(content), nil
-}
-
-func (g *GitHub) included(path string) bool {
-	if g.include == nil {
-		return true
-	}
-	return g.include(path)
 }
 
 // translateStatus maps GitHub's file status onto the change model.

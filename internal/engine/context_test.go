@@ -106,7 +106,7 @@ func TestContextNeverRaisesAGradeForAnyFixture(t *testing.T) {
 			t.Run(group+"/"+tc.Name, func(t *testing.T) {
 				t.Parallel()
 
-				changed, err := files.ChangedFiles(context.Background(), tc.Ref)
+				changed, err := provider.All(context.Background(), files, tc.Ref)
 				if err != nil {
 					t.Fatalf("reading the fixture: %v", err)
 				}
@@ -160,7 +160,7 @@ func TestContextIsHashedIntoTheInputDigest(t *testing.T) {
 		t.Fatalf("locating fixtures: %v", err)
 	}
 
-	changed, err := provider.NewFake(root).ChangedFiles(context.Background(),
+	changed, err := provider.All(context.Background(), provider.NewFake(root),
 		provider.FixtureRef("postgres", "PG006_alter_type_narrowing"))
 	if err != nil {
 		t.Fatalf("reading the fixture: %v", err)
@@ -192,7 +192,7 @@ func TestContextMakesAFindingConcrete(t *testing.T) {
 		t.Fatalf("locating fixtures: %v", err)
 	}
 
-	changed, err := provider.NewFake(root).ChangedFiles(context.Background(),
+	changed, err := provider.All(context.Background(), provider.NewFake(root),
 		provider.FixtureRef("postgres", "PG006_alter_type_narrowing"))
 	if err != nil {
 		t.Fatalf("reading the fixture: %v", err)
@@ -233,7 +233,7 @@ func TestStaleContextWarnsOnTheCertificate(t *testing.T) {
 		t.Fatalf("locating fixtures: %v", err)
 	}
 
-	changed, err := provider.NewFake(root).ChangedFiles(context.Background(),
+	changed, err := provider.All(context.Background(), provider.NewFake(root),
 		provider.FixtureRef("postgres", "PG006_alter_type_narrowing"))
 	if err != nil {
 		t.Fatalf("reading the fixture: %v", err)
@@ -327,7 +327,7 @@ func TestNoContextGradesIdenticallyToTheGoldenVerdicts(t *testing.T) {
 				continue
 			}
 
-			changed, err := files.ChangedFiles(context.Background(), tc.Ref)
+			changed, err := provider.All(context.Background(), files, tc.Ref)
 			if err != nil {
 				t.Fatalf("%s: reading the fixture: %v", tc.Ref, err)
 			}

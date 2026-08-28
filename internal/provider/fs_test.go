@@ -32,7 +32,26 @@ func writeFiles(t *testing.T, files map[string]string) string {
 	return root
 }
 
-func sqlOnly(path string) bool { return strings.HasSuffix(path, ".sql") }
+func sqlOnly(listed []provider.Path) []provider.Path {
+	out := make([]provider.Path, 0, len(listed))
+	for _, p := range listed {
+		if strings.HasSuffix(p.Path, ".sql") {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// resolveFS runs both phases against a filesystem provider.
+func resolveFS(ctx context.Context, before, after []string, choose provider.Select) ([]domain.ChangedFile, error) {
+	_, files, err := provider.Resolve(ctx, provider.NewFS(before, after), "", choose)
+	return files, err
+}
+
+// listFS enumerates without reading — the half that must not touch content.
+func listFS(ctx context.Context, before, after []string) ([]provider.Path, error) {
+	return provider.NewFS(before, after).List(ctx, "")
+}
 
 func TestFSTreatsASingleTreeAsAllAdded(t *testing.T) {
 	t.Parallel()
@@ -43,7 +62,7 @@ func TestFSTreatsASingleTreeAsAllAdded(t *testing.T) {
 		"nested/0002.up.sql": "SELECT 3;",
 	})
 
-	got, err := provider.NewFS(nil, []string{root}, sqlOnly).ChangedFiles(context.Background(), "")
+	got, err := resolveFS(context.Background(), nil, []string{root}, sqlOnly)
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -78,7 +97,7 @@ func TestFSIncludePredicateIsHonoured(t *testing.T) {
 		"main.go":     "package main",
 	})
 
-	got, err := provider.NewFS(nil, []string{root}, sqlOnly).ChangedFiles(context.Background(), "")
+	got, err := resolveFS(context.Background(), nil, []string{root}, sqlOnly)
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -100,7 +119,7 @@ func TestFSSkipsNoiseDirectories(t *testing.T) {
 		".hidden/secret.sql":   "SELECT 5;",
 	})
 
-	got, err := provider.NewFS(nil, []string{root}, sqlOnly).ChangedFiles(context.Background(), "")
+	got, err := resolveFS(context.Background(), nil, []string{root}, sqlOnly)
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -124,7 +143,7 @@ func TestFSDiffsTwoTrees(t *testing.T) {
 		"added.sql":   "SELECT 4;",
 	})
 
-	got, err := provider.NewFS([]string{before}, []string{after}, sqlOnly).ChangedFiles(context.Background(), "")
+	got, err := resolveFS(context.Background(), []string{before}, []string{after}, sqlOnly)
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -156,8 +175,7 @@ func TestFSAcceptsASingleFile(t *testing.T) {
 
 	root := writeFiles(t, map[string]string{"0001.up.sql": "SELECT 1;"})
 
-	got, err := provider.NewFS(nil, []string{filepath.Join(root, "0001.up.sql")}, sqlOnly).
-		ChangedFiles(context.Background(), "")
+	got, err := resolveFS(context.Background(), nil, []string{filepath.Join(root, "0001.up.sql")}, sqlOnly)
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -177,7 +195,7 @@ func TestFSOutputIsSorted(t *testing.T) {
 		"mmm/bbb.sql": "SELECT 3;",
 	})
 
-	got, err := provider.NewFS(nil, []string{root}, sqlOnly).ChangedFiles(context.Background(), "")
+	got, err := resolveFS(context.Background(), nil, []string{root}, sqlOnly)
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -194,7 +212,7 @@ func TestFSErrors(t *testing.T) {
 		t.Parallel()
 
 		missing := filepath.Join(t.TempDir(), "nope")
-		if _, err := provider.NewFS(nil, []string{missing}, nil).ChangedFiles(context.Background(), ""); err == nil {
+		if _, err := resolveFS(context.Background(), nil, []string{missing}, nil); err == nil {
 			t.Error("expected an error for a missing path")
 		}
 	})
@@ -202,7 +220,7 @@ func TestFSErrors(t *testing.T) {
 	t.Run("no paths at all", func(t *testing.T) {
 		t.Parallel()
 
-		if _, err := provider.NewFS(nil, nil, nil).ChangedFiles(context.Background(), ""); err == nil {
+		if _, err := resolveFS(context.Background(), nil, nil, nil); err == nil {
 			t.Error("expected an error when no paths are given")
 		}
 	})
@@ -214,8 +232,91 @@ func TestFSErrors(t *testing.T) {
 		cancel()
 
 		root := writeFiles(t, map[string]string{"a.sql": "SELECT 1;"})
-		if _, err := provider.NewFS(nil, []string{root}, nil).ChangedFiles(ctx, ""); err == nil {
+		if _, err := resolveFS(ctx, nil, []string{root}, nil); err == nil {
 			t.Error("expected an error for a cancelled context")
 		}
 	})
+}
+
+// The two phases must disagree about their contents, and that is the whole contract.
+//
+// docs/SPECIFICATION.md §2: enumeration and retrieval are separate concerns. List reports what
+// exists; Read fetches what was chosen. A provider whose List returned only what its Select
+// would have kept would satisfy every other test here and reintroduce the defect the split was
+// made to remove — coverage would once again be measured against the files that were read.
+func TestListEnumeratesMoreThanReadFetches(t *testing.T) {
+	t.Parallel()
+
+	root := writeFiles(t, map[string]string{
+		"db/migrate/0001.up.sql": "SELECT 1;",
+		"db/migrate/README.md":   "# notes",
+		"db/migrate/.gitkeep":    "",
+		"docs/guide.md":          "words",
+	})
+
+	listed, err := listFS(context.Background(), nil, []string{root})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	// Everything, including the files no analyzer would ever want. This is the denominator.
+	if len(listed) != 4 {
+		t.Fatalf("List returned %d paths, want all 4: %v", len(listed), listed)
+	}
+
+	var sawReadme bool
+	for _, p := range listed {
+		if p.Path == "db/migrate/README.md" {
+			sawReadme = true
+		}
+	}
+	if !sawReadme {
+		t.Error("List omitted a file no analyzer claims; coverage cannot report what was never enumerated")
+	}
+
+	// And Read fetches only what was chosen.
+	files, err := resolveFS(context.Background(), nil, []string{root}, sqlOnly)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "db/migrate/0001.up.sql" {
+		t.Fatalf("Read returned %v, want only the .sql", paths(files))
+	}
+
+	if len(listed) <= len(files) {
+		t.Errorf("List returned %d and Read returned %d; the phases are not separable",
+			len(listed), len(files))
+	}
+}
+
+// Read must fetch exactly what it was given, including files a Select would normally reject.
+// Anything else means Read is applying a filter of its own, which is the conflation again.
+func TestReadFetchesExactlyWhatItIsGiven(t *testing.T) {
+	t.Parallel()
+
+	root := writeFiles(t, map[string]string{
+		"db/migrate/0001.up.sql": "SELECT 1;",
+		"db/migrate/README.md":   "# notes",
+	})
+
+	files, err := resolveFS(context.Background(), nil, []string{root},
+		func(listed []provider.Path) []provider.Path {
+			out := make([]provider.Path, 0, len(listed))
+			for _, p := range listed {
+				if strings.HasSuffix(p.Path, ".md") {
+					out = append(out, p)
+				}
+			}
+			return out
+		})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if len(files) != 1 || files[0].Path != "db/migrate/README.md" {
+		t.Fatalf("Read returned %v, want only the README it was asked for", paths(files))
+	}
+	if string(files[0].Current) != "# notes" {
+		t.Errorf("Read returned %q, want the file's content", files[0].Current)
+	}
 }

@@ -41,8 +41,53 @@ const (
 	newDir        = "new"
 )
 
-// ChangedFiles implements FileProvider by reading the fixture directory named by ref.
-func (f *Fake) ChangedFiles(ctx context.Context, ref domain.ChangeRef) ([]domain.ChangedFile, error) {
+// List implements FileProvider by enumerating the fixture directory named by ref.
+//
+// The fake reads the fixture either way — the files are bytes on disk in a test tree, and
+// pretending the enumeration is cheaper than it is would be theatre. What matters is that it
+// reports the same listing the other three do, because §16.4 turns on all four agreeing.
+func (f *Fake) List(ctx context.Context, ref domain.ChangeRef) ([]Path, error) {
+	files, err := f.all(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]Path, 0, len(files))
+	for _, file := range files {
+		out = append(out, Path{
+			Path:     file.Path,
+			PrevPath: file.PreviousPath,
+			Status:   file.Status,
+		})
+	}
+
+	SortPaths(out)
+	return out, nil
+}
+
+// Read implements FileProvider, returning content for exactly the paths given.
+func (f *Fake) Read(ctx context.Context, ref domain.ChangeRef, paths []Path) ([]domain.ChangedFile, error) {
+	files, err := f.all(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+
+	wanted := map[string]bool{}
+	for _, p := range paths {
+		wanted[p.Path] = true
+	}
+
+	out := make([]domain.ChangedFile, 0, len(wanted))
+	for _, file := range files {
+		if wanted[file.Path] {
+			out = append(out, file)
+		}
+	}
+	return out, nil
+}
+
+// all reads the whole fixture directory named by ref.
+func (f *Fake) all(ctx context.Context, ref domain.ChangeRef) ([]domain.ChangedFile, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("fake provider: %w", err)
 	}

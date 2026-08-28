@@ -80,6 +80,55 @@ COSTLY, not REVERSIBLE.* PG028, PG043, PG050, PG054 and PG057 are the same shape
 
 ### Changed
 
+**`FileProvider` is two-phase: `List` then `Read`. Enumeration and retrieval are separate
+concerns.**
+
+The interface had one method and took a `func(path string) bool` deciding what to read. A path
+the predicate rejected was never read and **left no trace anywhere**, so every question of the
+form *"what was in this changeset that we did not analyze"* was unanswerable by construction.
+Three defects came out of that, each found and fixed separately before the pattern was visible:
+
+1. **The Django P0** — a docs-only pull request and thirteen unreadable `.py` migrations reached
+   the engine as the same empty file list. Both graded **A**.
+2. **The coverage denominator** — counting only the files an analyzer wanted made the numerator
+   and the denominator the same number.
+3. **The rename bypass** — renaming `migrations/` to `db/sql/` turned strict coverage off, with
+   no trace on the certificate. *"Read this README because a sibling is a `.sql`"* is not a
+   decision a per-path predicate can express.
+
+**Nothing new is computed.** The filesystem walk already visited paths without reading them,
+`git diff --name-status` already returned names before blobs, the GitHub comparison API already
+returned the listing in the same response, and the fake always had the fixture directory. The old
+contract simply refused to expose what all four already knew.
+
+`Include` is replaced by `Select`, which receives the **complete listing**. `Read` takes the ref
+as well as the paths — the GitHub provider forced that, since its comparison ref is per-call
+where the other two get revisions at construction, and storing it between phases would have made
+`Read` depend on `List` having run first on the same value.
+
+**The rename bypass is closed.** `db/sql/notes.txt` beside a `.sql` file now enumerates, counts,
+and fails, exactly as `db/migrate/notes.txt` does.
+
+**No verdict moved.** `verdicts.txt` and every golden file are byte-identical across the change —
+that was the point of sequencing the plumbing before the denominator.
+
+**Three defects surfaced while doing it**, none of which could have been found before, because
+none of the paths involved were ever enumerated:
+
+- The **policy file itself** was counted against coverage. Every repository with a
+  `.reversibility.yml` would have failed.
+- **Policy-ignored paths** were counted, contradicting the ignore ruling directly.
+- **`git`'s two halves disagreed about renames** — the listing collapsed one into a single entry
+  while the reader emitted a delete plus an add, so `Read` was handed a path `List` never
+  produced. Now pinned by a test, because the two halves of one provider have to agree for the
+  same reason the four providers have to agree with each other.
+
+Mutation results, over 768 property cases: partial coverage not failing the grade fails 126, the
+CLI not exiting 2 fails 126, reverting the denominator to candidates-only fails 126, and
+collapsing the enumeration back to the files that were read fails 294. The third of those caught
+**nothing** before this change and 84 after the oracle was given an independent denominator; it
+is 126 now that the oracle no longer has to concede a boundary the contract could not cross.
+
 **A partial pass is a bypass. Coverage now fails closed, and this reverses an earlier ruling in
 the same unreleased cycle.**
 

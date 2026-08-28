@@ -169,39 +169,68 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	//
 	// Recording happens here because here is the only place that knows. By the time the engine
 	// sees a changeset, an ignored file is indistinguishable from a file that was never there.
-	var ignoredCandidates []string
+	var (
+		ignoredCandidates []string
+		enumerated        []provider.Path
+	)
 
-	// The third clause is what makes strict coverage measurable. Coverage counts every file in
-	// a migration directory, so the engine has to be shown every file in one — including the
-	// README and the .gitkeep it will refuse to vouch for. Filtering them out here would make
-	// the denominator the numerator and the check vacuous.
-	include := func(path string) bool {
-		if policy.IsPolicyFile(path) {
-			return false
+	// choose runs once over the complete listing, which is what lets it answer questions a
+	// per-path predicate could not: "read this README because the directory it sits in also
+	// holds a .sql file" needs to see the directory.
+	//
+	// It records two things besides its answer. The paths a policy excluded, so the certificate
+	// can name them; and nothing else — the full listing goes to the engine separately, and it
+	// is the listing, not this selection, that coverage is measured against.
+	choose := func(listed []provider.Path) []provider.Path {
+		out := make([]provider.Path, 0, len(listed))
+
+		for _, p := range listed {
+			// The policy file is not part of the changeset's subject matter. It is
+			// configuration for the run, it is already accounted for in PolicyDigest, and
+			// counting it against coverage would make every repository that has one fail.
+			if policy.IsPolicyFile(p.Path) {
+				continue
+			}
+
+			// An ignored path is excluded from the enumeration as well as from the read, and
+			// that is the §16.8 ruling rather than an oversight: coverage describes what the
+			// engine could not read, and this is something a human decided it should not. It is
+			// reported separately, under IgnoredByPolicy, so nothing is hidden — and it closes
+			// the merge gate when it is a real migration.
+			if pol.Ignores(p.Path) {
+				ignoredCandidates = append(ignoredCandidates, p.Path)
+				continue
+			}
+
+			enumerated = append(enumerated, p)
+
+			if eng.Supports(p.Path) {
+				out = append(out, p)
+			}
 		}
-		if !eng.Supports(path) && !engine.Candidate(path) && !engine.InMigrationDir(path) {
-			return false
-		}
-		if pol.Ignores(path) {
-			ignoredCandidates = append(ignoredCandidates, path)
-			return false
-		}
-		return true
+		return out
 	}
 
-	source, err := resolveProvider(flags, paths, include)
+	source, err := resolveProvider(flags, paths)
 	if err != nil {
 		return err
 	}
 
-	files, err := source.ChangedFiles(cmd.Context(), "")
+	_, files, err := provider.Resolve(cmd.Context(), source, "", choose)
 	if err != nil {
 		return fmt.Errorf("reading the changeset: %w", err)
 	}
 
 	// A failing certificate is still a certificate, and it is the thing the user asked for. The
 	// analysis error is reported alongside it rather than replacing it.
-	cert, analysisErr := eng.Certify(cmd.Context(), files, engine.IgnoredByPolicy(ignoredCandidates))
+	//
+	// The enumeration goes in beside the files, and that is the whole of §16.9: coverage is a
+	// statement about what exists, so it is measured against what was listed rather than against
+	// what happened to be read. Handing over only the files is what let a renamed migration
+	// directory turn the check off.
+	cert, analysisErr := eng.Certify(cmd.Context(), files,
+		engine.Enumerated(enumeratedPaths(enumerated)),
+		engine.IgnoredByPolicy(ignoredCandidates))
 
 	out, closeOut, err := openOutput(opts.Stdout, flags.output)
 	if err != nil {
@@ -227,7 +256,16 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 // The modes are mutually exclusive by construction rather than by precedence. Silently
 // preferring one over another would let a user believe they had certified a comparison that
 // never ran, and the comparison they think they ran is the one they would have gated on.
-func resolveProvider(flags *checkFlags, paths []string, include provider.Include) (provider.FileProvider, error) {
+// enumeratedPaths reduces a listing to the paths the engine needs for coverage.
+func enumeratedPaths(listed []provider.Path) []string {
+	out := make([]string, 0, len(listed))
+	for _, p := range listed {
+		out = append(out, p.Path)
+	}
+	return out
+}
+
+func resolveProvider(flags *checkFlags, paths []string) (provider.FileProvider, error) {
 	switch {
 	case flags.base != "" && len(flags.before) > 0:
 		return nil, errors.New("--base and --before are different comparisons: --base names git refs, --before names directories; pass one, not both")
@@ -238,7 +276,7 @@ func resolveProvider(flags *checkFlags, paths []string, include provider.Include
 			Base:  flags.base,
 			Head:  flags.head,
 			Paths: paths,
-		}, include)
+		})
 		if err != nil {
 			return nil, fmt.Errorf("resolving the git refs: %w", err)
 		}
@@ -251,7 +289,7 @@ func resolveProvider(flags *checkFlags, paths []string, include provider.Include
 		return nil, errors.New("no paths given: pass a directory to analyze, or --base to compare two git refs")
 
 	default:
-		return provider.NewFS(flags.before, paths, include), nil
+		return provider.NewFS(flags.before, paths), nil
 	}
 }
 

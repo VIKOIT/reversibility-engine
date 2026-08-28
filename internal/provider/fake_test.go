@@ -29,7 +29,7 @@ func TestChangedFilesMigrationShape(t *testing.T) {
 
 	files := provider.NewFake(fixtureRoot(t))
 
-	got, err := files.ChangedFiles(context.Background(), provider.FixtureRef("postgres", "PG001_drop_table"))
+	got, err := provider.All(context.Background(), files, provider.FixtureRef("postgres", "PG001_drop_table"))
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestChangedFilesTreePairShape(t *testing.T) {
 
 	files := provider.NewFake(fixtureRoot(t))
 
-	got, err := files.ChangedFiles(context.Background(), provider.FixtureRef("kubernetes", "K8S003_pvc_removed_reclaim_delete"))
+	got, err := provider.All(context.Background(), files, provider.FixtureRef("kubernetes", "K8S003_pvc_removed_reclaim_delete"))
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestChangedFilesDetectsAdditions(t *testing.T) {
 
 	files := provider.NewFake(fixtureRoot(t))
 
-	got, err := files.ChangedFiles(context.Background(), provider.FixtureRef("kubernetes", "K8S013_new_workload"))
+	got, err := provider.All(context.Background(), files, provider.FixtureRef("kubernetes", "K8S013_new_workload"))
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestChangedFilesSkipsBookkeeping(t *testing.T) {
 
 	files := provider.NewFake(fixtureRoot(t))
 
-	got, err := files.ChangedFiles(context.Background(), provider.FixtureRef("kubernetes", "K8S006_namespace_or_crd_removed"))
+	got, err := provider.All(context.Background(), files, provider.FixtureRef("kubernetes", "K8S006_namespace_or_crd_removed"))
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestChangedFilesIsSorted(t *testing.T) {
 		provider.FixtureRef("postgres", "PG016_drop_view_function_trigger"),
 		provider.FixtureRef("kubernetes", "K8S009_configmap_removed_still_referenced"),
 	} {
-		got, err := files.ChangedFiles(context.Background(), ref)
+		got, err := provider.All(context.Background(), files, ref)
 		if err != nil {
 			t.Fatalf("ChangedFiles(%q): %v", ref, err)
 		}
@@ -157,7 +157,7 @@ func TestChangedFilesDirectoryMigrationForm(t *testing.T) {
 
 	files := provider.NewFake(fixtureRoot(t))
 
-	got, err := files.ChangedFiles(context.Background(), provider.FixtureRef("postgres", "DOWN004_directory_form"))
+	got, err := provider.All(context.Background(), files, provider.FixtureRef("postgres", "DOWN004_directory_form"))
 	if err != nil {
 		t.Fatalf("ChangedFiles: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestChangedFilesMissingFixture(t *testing.T) {
 
 	files := provider.NewFake(fixtureRoot(t))
 
-	if _, err := files.ChangedFiles(context.Background(), "postgres/PG999_does_not_exist"); err == nil {
+	if _, err := provider.All(context.Background(), files, "postgres/PG999_does_not_exist"); err == nil {
 		t.Fatalf("expected an error for a missing fixture, got nil")
 	}
 }
@@ -182,7 +182,7 @@ func TestChangedFilesRespectsCancellation(t *testing.T) {
 	cancel()
 
 	files := provider.NewFake(fixtureRoot(t))
-	if _, err := files.ChangedFiles(ctx, provider.FixtureRef("postgres", "PG001_drop_table")); err == nil {
+	if _, err := provider.All(ctx, files, provider.FixtureRef("postgres", "PG001_drop_table")); err == nil {
 		t.Fatalf("expected an error for a cancelled context, got nil")
 	}
 }

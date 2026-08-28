@@ -53,7 +53,7 @@ func TestVerdictSnapshot(t *testing.T) {
 		}
 
 		for _, tc := range cases {
-			changed, err := files.ChangedFiles(context.Background(), tc.Ref)
+			changed, err := provider.All(context.Background(), files, tc.Ref)
 			if err != nil {
 				t.Fatalf("resolving %s: %v", tc.Ref, err)
 			}
@@ -116,7 +116,7 @@ func TestVerdictSnapshotIsStable(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		changed, err := files.ChangedFiles(context.Background(), tc.Ref)
+		changed, err := provider.All(context.Background(), files, tc.Ref)
 		if err != nil {
 			t.Fatalf("resolving %s: %v", tc.Ref, err)
 		}

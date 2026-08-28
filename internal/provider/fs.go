@@ -15,12 +15,6 @@ import (
 	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
-// Include decides whether a path belongs in the changeset.
-//
-// The provider is given this rather than deciding for itself, because knowing which extensions
-// matter is the analyzers' business. Passing nil includes every file.
-type Include func(path string) bool
-
 // FS resolves a changeset from the local filesystem.
 //
 // Two shapes are supported. With only After paths, every file is reported as ADDED — the shape
@@ -28,28 +22,34 @@ type Include func(path string) bool
 // the two trees are diffed by relative path, which is what the Kubernetes rules need in order to
 // compare old against new.
 type FS struct {
-	before  []string
-	after   []string
-	include Include
+	before []string
+	after  []string
 }
 
 // NewFS returns a filesystem provider.
 //
 // before may be empty, in which case every file in after is treated as newly added.
-func NewFS(before, after []string, include Include) *FS {
+//
+// It no longer takes a predicate. Choosing what to read is the caller's decision and is made
+// against the complete listing — see Select — because the provider cannot answer "is this file
+// worth reading" without knowing what else is in the changeset.
+func NewFS(before, after []string) *FS {
 	return &FS{
-		before:  append([]string(nil), before...),
-		after:   append([]string(nil), after...),
-		include: include,
+		before: append([]string(nil), before...),
+		after:  append([]string(nil), after...),
 	}
 }
 
-// ChangedFiles implements FileProvider.
+// List implements FileProvider.
 //
 // The ref is ignored: a local directory has no revision to resolve, so the paths given at
 // construction are the reference. The parameter stays because the interface is shared with the
 // GitHub provider, where a ref is the only thing that identifies the change.
-func (f *FS) ChangedFiles(ctx context.Context, _ domain.ChangeRef) ([]domain.ChangedFile, error) {
+//
+// The walk visits every entry and reads none of them. That was already true of the old walk —
+// it decided inclusion before calling os.ReadFile — so enumerating separately costs one extra
+// traversal of directory metadata and no file content at all.
+func (f *FS) List(ctx context.Context, _ domain.ChangeRef) ([]Path, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("fs provider: %w", err)
 	}
@@ -57,7 +57,44 @@ func (f *FS) ChangedFiles(ctx context.Context, _ domain.ChangeRef) ([]domain.Cha
 		return nil, fmt.Errorf("fs provider: no paths given: %w", domain.ErrProviderFailed)
 	}
 
-	after, err := f.readTrees(f.after)
+	after, err := f.listTrees(f.after)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(f.before) == 0 {
+		out := make([]Path, 0, len(after))
+		for p := range after {
+			out = append(out, Path{Path: p, Status: domain.StatusAdded})
+		}
+		SortPaths(out)
+		return out, nil
+	}
+
+	before, err := f.listTrees(f.before)
+	if err != nil {
+		return nil, err
+	}
+
+	return diffListings(before, after), nil
+}
+
+// Read implements FileProvider.
+//
+// It reads exactly the paths given. A path that vanished between List and Read — a concurrent
+// checkout, a temporary file — is reported rather than skipped: silently returning fewer files
+// than were asked for is how a coverage denominator loses entries.
+func (f *FS) Read(ctx context.Context, _ domain.ChangeRef, paths []Path) ([]domain.ChangedFile, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("fs provider: %w", err)
+	}
+
+	wanted := map[string]bool{}
+	for _, p := range paths {
+		wanted[p.Path] = true
+	}
+
+	after, err := f.readTrees(f.after, wanted)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +112,7 @@ func (f *FS) ChangedFiles(ctx context.Context, _ domain.ChangeRef) ([]domain.Cha
 		return out, nil
 	}
 
-	before, err := f.readTrees(f.before)
+	before, err := f.readTrees(f.before, wanted)
 	if err != nil {
 		return nil, err
 	}
@@ -83,10 +120,10 @@ func (f *FS) ChangedFiles(ctx context.Context, _ domain.ChangeRef) ([]domain.Cha
 	return diffTrees(before, after), nil
 }
 
-// readTrees reads every included file under the given roots, keyed by a path relative to its
-// root so that two trees rooted differently still compare.
-func (f *FS) readTrees(roots []string) (map[string][]byte, error) {
-	out := map[string][]byte{}
+// listTrees enumerates every file under the given roots, keyed by a path relative to its root so
+// that two trees rooted differently still compare. No content is read.
+func (f *FS) listTrees(roots []string) (map[string]bool, error) {
+	out := map[string]bool{}
 
 	for _, root := range roots {
 		info, err := os.Stat(root)
@@ -97,17 +134,11 @@ func (f *FS) readTrees(roots []string) (map[string][]byte, error) {
 		// A single file is addressed by its own name, so that "revctl check migrations/x.sql"
 		// reports the path the user typed.
 		if !info.IsDir() {
-			if f.included(filepath.ToSlash(filepath.Base(root))) {
-				content, err := os.ReadFile(root)
-				if err != nil {
-					return nil, fmt.Errorf("fs provider: reading %s: %w", root, err)
-				}
-				out[filepath.ToSlash(filepath.Base(root))] = content
-			}
+			out[filepath.ToSlash(filepath.Base(root))] = true
 			continue
 		}
 
-		if err := f.walk(root, out); err != nil {
+		if err := f.walkNames(root, out); err != nil {
 			return nil, err
 		}
 	}
@@ -115,7 +146,7 @@ func (f *FS) readTrees(roots []string) (map[string][]byte, error) {
 	return out, nil
 }
 
-func (f *FS) walk(root string, out map[string][]byte) error {
+func (f *FS) walkNames(root string, out map[string]bool) error {
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -123,7 +154,65 @@ func (f *FS) walk(root string, out map[string][]byte) error {
 
 		if d.IsDir() {
 			// Version-control and dependency directories contain nothing the engine analyzes
-			// and can be enormous.
+			// and can be enormous. Skipping them is an enumeration decision, not a filter on
+			// what is interesting: nothing in .git is a file of the changeset at all.
+			if skipDir(d.Name()) && p != root {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return fmt.Errorf("relativising %s: %w", p, err)
+		}
+
+		out[filepath.ToSlash(rel)] = true
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("fs provider: walking %s: %w", root, err)
+	}
+	return nil
+}
+
+// readTrees reads the content of the wanted paths under the given roots.
+func (f *FS) readTrees(roots []string, wanted map[string]bool) (map[string][]byte, error) {
+	out := map[string][]byte{}
+
+	for _, root := range roots {
+		info, err := os.Stat(root)
+		if err != nil {
+			return nil, fmt.Errorf("fs provider: %s: %w", root, err)
+		}
+
+		if !info.IsDir() {
+			rel := filepath.ToSlash(filepath.Base(root))
+			if wanted[rel] {
+				content, err := os.ReadFile(root)
+				if err != nil {
+					return nil, fmt.Errorf("fs provider: reading %s: %w", root, err)
+				}
+				out[rel] = content
+			}
+			continue
+		}
+
+		if err := f.walkContents(root, wanted, out); err != nil {
+			return nil, err
+		}
+	}
+
+	return out, nil
+}
+
+func (f *FS) walkContents(root string, wanted map[string]bool, out map[string][]byte) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
 			if skipDir(d.Name()) && p != root {
 				return filepath.SkipDir
 			}
@@ -136,11 +225,7 @@ func (f *FS) walk(root string, out map[string][]byte) error {
 		}
 		rel = filepath.ToSlash(rel)
 
-		// The predicate is given the path as it will appear in the changeset, not the path on
-		// this machine. A caller matching "legacy/**" means the directory in the repository,
-		// and testing that against an absolute temp-directory path would silently match
-		// nothing — which for an ignore rule means analyzing exactly what was excluded.
-		if !f.included(rel) {
+		if !wanted[rel] {
 			return nil
 		}
 
@@ -158,11 +243,40 @@ func (f *FS) walk(root string, out map[string][]byte) error {
 	return nil
 }
 
-func (f *FS) included(path string) bool {
-	if f.include == nil {
-		return true
+// diffListings classifies each enumerated path by which side it appears on.
+//
+// It mirrors diffTrees exactly, on names alone. A file present on both sides is MODIFIED even
+// when its bytes turn out to be identical — the listing cannot know that, and the rules that
+// need unchanged context files (K8S003, K8S009) want them either way.
+func diffListings(before, after map[string]bool) []Path {
+	seen := map[string]bool{}
+	out := make([]Path, 0, len(before)+len(after))
+
+	add := func(p string) {
+		if seen[p] {
+			return
+		}
+		seen[p] = true
+
+		status := domain.StatusModified
+		switch {
+		case !before[p]:
+			status = domain.StatusAdded
+		case !after[p]:
+			status = domain.StatusRemoved
+		}
+		out = append(out, Path{Path: p, Status: status})
 	}
-	return f.include(filepath.ToSlash(path))
+
+	for p := range before {
+		add(p)
+	}
+	for p := range after {
+		add(p)
+	}
+
+	SortPaths(out)
+	return out
 }
 
 // diffTrees classifies each path by which side it appears on.

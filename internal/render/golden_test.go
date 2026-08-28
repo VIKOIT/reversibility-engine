@@ -64,7 +64,7 @@ func certificateFor(t *testing.T, ref domain.ChangeRef) domain.ReversibilityCert
 		t.Fatalf("locating fixture root: %v", err)
 	}
 
-	files, err := provider.NewFake(root).ChangedFiles(context.Background(), ref)
+	files, err := provider.All(context.Background(), provider.NewFake(root), ref)
 	if err != nil {
 		t.Fatalf("resolving %s: %v", ref, err)
 	}

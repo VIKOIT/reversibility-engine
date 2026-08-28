@@ -101,18 +101,42 @@ func (r *repo) commit(message string) string {
 }
 
 // changedFiles resolves the changeset the provider reports for this repository.
-func (r *repo) changedFiles(t *testing.T, opts provider.GitOptions, include provider.Include) ([]domain.ChangedFile, error) {
+//
+// choose may be nil, which reads everything the listing contains.
+func (r *repo) changedFiles(t *testing.T, opts provider.GitOptions, choose provider.Select) ([]domain.ChangedFile, error) {
 	t.Helper()
 
 	opts.Dir = r.dir
-	p, err := provider.NewGit(opts, include)
+	p, err := provider.NewGit(opts)
 	if err != nil {
 		return nil, err
 	}
-	return p.ChangedFiles(context.Background(), "")
+
+	_, files, err := provider.Resolve(context.Background(), p, "", choose)
+	return files, err
 }
 
-func onlySQL(path string) bool { return strings.HasSuffix(path, ".sql") }
+// listed enumerates without reading, which is the half of the contract that has to stay cheap.
+func (r *repo) listed(t *testing.T, opts provider.GitOptions) ([]provider.Path, error) {
+	t.Helper()
+
+	opts.Dir = r.dir
+	p, err := provider.NewGit(opts)
+	if err != nil {
+		return nil, err
+	}
+	return p.List(context.Background(), "")
+}
+
+func onlySQL(listed []provider.Path) []provider.Path {
+	out := make([]provider.Path, 0, len(listed))
+	for _, p := range listed {
+		if strings.HasSuffix(p.Path, ".sql") {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 func TestGitResolvesAChangeset(t *testing.T) {
 	t.Parallel()
@@ -124,7 +148,7 @@ func TestGitResolvesAChangeset(t *testing.T) {
 		base    string
 		setup   func(r *repo)
 		paths   []string
-		include provider.Include
+		include provider.Select
 		want    []domain.ChangedFile
 	}{
 		{
@@ -491,12 +515,12 @@ func TestGitFailsLoudly(t *testing.T) {
 			dir, opts := tc.setup(t)
 			opts.Dir = dir
 
-			p, err := provider.NewGit(opts, nil)
+			p, err := provider.NewGit(opts)
 			if err != nil {
 				t.Fatalf("NewGit: %v", err)
 			}
 
-			files, err := p.ChangedFiles(context.Background(), "")
+			files, err := provider.All(context.Background(), p, "")
 			if err == nil {
 				t.Fatalf("ChangedFiles succeeded with %d files, want %v", len(files), tc.want)
 			}
@@ -530,7 +554,7 @@ func cloneShallow(t *testing.T, origin, dest string) {
 func TestNewGitRequiresABaseRef(t *testing.T) {
 	t.Parallel()
 
-	if _, err := provider.NewGit(provider.GitOptions{Base: "   "}, nil); !errors.Is(err, domain.ErrProviderFailed) {
+	if _, err := provider.NewGit(provider.GitOptions{Base: "   "}); !errors.Is(err, domain.ErrProviderFailed) {
 		t.Errorf("NewGit with a blank base = %v, want a provider failure", err)
 	}
 }
@@ -542,7 +566,7 @@ func TestGitHonoursContextCancellation(t *testing.T) {
 	r.write("a.sql", "SELECT 1;\n")
 	r.commit("base")
 
-	p, err := provider.NewGit(provider.GitOptions{Dir: r.dir, Base: "HEAD"}, nil)
+	p, err := provider.NewGit(provider.GitOptions{Dir: r.dir, Base: "HEAD"})
 	if err != nil {
 		t.Fatalf("NewGit: %v", err)
 	}
@@ -550,7 +574,7 @@ func TestGitHonoursContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := p.ChangedFiles(ctx, ""); !errors.Is(err, context.Canceled) {
+	if _, err := provider.All(ctx, p, ""); !errors.Is(err, context.Canceled) {
 		t.Errorf("ChangedFiles on a cancelled context = %v, want context.Canceled", err)
 	}
 }
@@ -597,6 +621,54 @@ func TestGitProducesWellFormedChangedFiles(t *testing.T) {
 			}
 		case domain.StatusRenamed:
 			t.Errorf("%s: a rename must be reported as a delete plus an add", f.Path)
+		}
+	}
+}
+
+// The git provider's two phases must agree about the shape of a rename.
+//
+// This is the bug the conversion actually produced: List collapsed a rename into one entry while
+// Read emitted a delete plus an add, so Read was handed a path List had never produced and the
+// file dropped out of the changeset. §16.4 requires the four providers to agree with each other;
+// this is the same requirement one level down, between the two halves of one provider.
+func TestGitListAndReadAgreeOnRenames(t *testing.T) {
+	t.Parallel()
+
+	r := newRepo(t)
+	r.write("k8s/old-name.yaml", "kind: ConfigMap\nmetadata:\n  name: settings\n")
+	r.commit("base")
+	r.run("mv", "k8s/old-name.yaml", "k8s/new-name.yaml")
+	r.commit("rename it")
+
+	opts := provider.GitOptions{Base: "HEAD~1"}
+
+	listed, err := r.listed(t, opts)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	files, err := r.changedFiles(t, opts, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	// Every path Read produced must have been listed. The reverse need not hold — a Select may
+	// legitimately drop paths — but Read inventing one means the listing is incomplete, and a
+	// listing that is incomplete is a coverage denominator that is wrong.
+	inListing := map[string]bool{}
+	for _, p := range listed {
+		inListing[p.Path] = true
+	}
+	for _, f := range files {
+		if !inListing[f.Path] {
+			t.Errorf("Read produced %q, which List never enumerated", f.Path)
+		}
+	}
+
+	// A rename is both halves, per readChanges: the Kubernetes rules need to see the removal.
+	for _, want := range []string{"k8s/old-name.yaml", "k8s/new-name.yaml"} {
+		if !inListing[want] {
+			t.Errorf("List omitted %q; a rename is a delete plus an add on both sides", want)
 		}
 	}
 }

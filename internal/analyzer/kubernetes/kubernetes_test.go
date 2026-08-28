@@ -41,7 +41,7 @@ func TestAnalyzeFixtures(t *testing.T) {
 
 			ctx := context.Background()
 
-			changed, err := files.ChangedFiles(ctx, tc.Ref)
+			changed, err := provider.All(ctx, files, tc.Ref)
 			if err != nil {
 				t.Fatalf("resolving changeset: %v", err)
 			}
