@@ -293,3 +293,104 @@ func namesSomethingSpecific(cause string) bool {
 	}
 	return false
 }
+
+// A coverage failure must never read as an accusation about the change.
+//
+// This is the first sentence most users of an unsupported migration format will ever read from
+// this tool: every Django, Rails, Alembic and Ecto repository sees it on the first run, because
+// strict coverage fails closed. Before this test the generic grade-F summary opened with
+// "Rolling this back would lose data" — printed over a changeset the engine had declined to
+// read, and the user is gone before they scroll to the cause.
+//
+// The distinction is worth a test rather than a careful sentence because it is one refactor away
+// from collapsing: the two messages differ only by a branch, and the branch is easy to lose.
+func TestCoverageFailureNeverReadsAsADataLossClaim(t *testing.T) {
+	t.Parallel()
+
+	// A perfectly reversible migration beside a file the engine cannot read. There is nothing
+	// wrong with this change; the engine simply could not see all of it.
+	eng := engine.New([]analyzer.Analyzer{postgres.New(), kubernetes.New()})
+	cert, _ := eng.Certify(context.Background(), []domain.ChangedFile{
+		{
+			Path:    "db/migrate/0001_idx.up.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("CREATE INDEX CONCURRENTLY idx ON orders (status);\n"),
+		},
+		{
+			Path:    "db/migrate/0001_idx.down.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("DROP INDEX CONCURRENTLY idx;\n"),
+		},
+		{
+			Path:    "db/migrate/0002_backfill.rb",
+			Status:  domain.StatusAdded,
+			Current: []byte("class Backfill < ActiveRecord::Migration\nend\n"),
+		},
+	})
+
+	if cert.Grade != domain.GradeF || cert.Coverage.Full() {
+		t.Fatalf("Grade = %q, Coverage = %q; want F and PARTIAL — the test is not exercising what it claims",
+			cert.Grade, cert.Coverage)
+	}
+
+	out := renderTo(t, render.FormatMarkdown, cert)
+
+	// Nothing anywhere in the document may claim this change destroys anything.
+	for _, accusation := range []string{
+		"would lose data",
+		"Not reversible",
+		"cannot be undone",
+		"irreversible",
+		"destroys",
+	} {
+		if strings.Contains(strings.ToLower(out), strings.ToLower(accusation)) {
+			t.Errorf("a coverage failure claims %q about a change the engine never read:\n\n%s", accusation, out)
+		}
+	}
+
+	// And it must say the true thing, in the first line.
+	if !strings.Contains(out, render.CoverageFailureSummary) {
+		t.Errorf("the coverage-failure summary is missing:\n\n%s", out)
+	}
+	if !strings.Contains(out, "Remove them or explicitly ignore them in the config") {
+		t.Errorf("the remedy is missing; a refusal a reader cannot act on is one they route around:\n\n%s", out)
+	}
+}
+
+// The converse, and the reason the branch cannot simply always print the gentler message: when a
+// changeset is BOTH destructive and partly unread, the data-loss claim is true and must survive.
+func TestADestructiveChangeStillSaysSoDespitePartialCoverage(t *testing.T) {
+	t.Parallel()
+
+	eng := engine.New([]analyzer.Analyzer{postgres.New(), kubernetes.New()})
+	cert, _ := eng.Certify(context.Background(), []domain.ChangedFile{
+		{
+			Path:    "db/migrate/0001_drop.up.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("DROP TABLE legacy_orders;\n"),
+		},
+		{
+			Path:    "db/migrate/0001_drop.down.sql",
+			Status:  domain.StatusAdded,
+			Current: []byte("CREATE TABLE legacy_orders (id bigint);\n"),
+		},
+		{
+			Path:    "db/migrate/0002_backfill.rb",
+			Status:  domain.StatusAdded,
+			Current: []byte("class Backfill < ActiveRecord::Migration\nend\n"),
+		},
+	})
+
+	if cert.Grade != domain.GradeF || cert.Coverage.Full() {
+		t.Fatalf("Grade = %q, Coverage = %q; want F and PARTIAL", cert.Grade, cert.Coverage)
+	}
+
+	out := renderTo(t, render.FormatMarkdown, cert)
+
+	if strings.Contains(out, render.CoverageFailureSummary) {
+		t.Errorf("a DROP TABLE was excused as a coverage failure:\n\n%s", out)
+	}
+	if !strings.Contains(out, "would lose data") {
+		t.Errorf("a DROP TABLE no longer says it would lose data:\n\n%s", out)
+	}
+}

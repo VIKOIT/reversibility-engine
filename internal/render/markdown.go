@@ -32,16 +32,55 @@ var gradeSummary = map[domain.Grade]string{
 	domain.GradeA: "Fully reversible. This change can be rolled back with no data loss.",
 	domain.GradeB: "Reversible at a cost. Rolling back is possible but slow, disruptive, or only safe within a window.",
 	domain.GradeC: "Reversible with significant caveats. Review the findings before merging.",
-	// F covers four different failures and the summary names all four. A reader whose migration
-	// will not even apply should not be told it would lose data on rollback, and a reader whose
-	// changeset merely contains a README the engine declined to read should not be told either.
-	// "Why this grade", directly below, says which one applies.
-	domain.GradeF: "**Cannot be certified as reversible.** Rolling this back would lose data, the engine could not determine what the change does, the change will not apply at all, or part of the changeset was never analyzed.",
+	// F covers several different failures. This is the wording for the ones that are about the
+	// change; a coverage failure gets CoverageFailureSummary instead, because it is not.
+	domain.GradeF: "**Not reversible.** Rolling this back would lose data, the engine could not determine what the change does, or the change will not apply at all.",
 
 	// N/A is not a verdict about the change; it is the absence of one. The summary has to say
 	// that in the first line, because the first line is all most readers see, and the line that
 	// used to appear here said "Fully reversible" about a changeset nobody had read.
 	domain.GradeNotApplicable: "**Not assessed.** The engine did not analyze this change, so it is making no claim about whether it can be rolled back.",
+}
+
+// CoverageFailureSummary replaces the grade-F summary when the F is a coverage failure.
+//
+// **This is the first sentence most users of an unsupported migration format will ever read from
+// this tool**, and the generic F summary opened with "Rolling this back would lose data" — an
+// accusation about their change, printed over a changeset the engine declined to read. Every
+// Django, Rails, Alembic and Ecto repository sees this on its first run. A first experience that
+// reads as an accusation gets the tool uninstalled before anyone scrolls to the cause.
+//
+// So it says the true thing instead: the engine could not tell. The remedy follows immediately,
+// in the blockers.
+const CoverageFailureSummary = "**Not assessed.** Part of this change was not analyzed, " +
+	"so its reversibility could not be measured. **This is not a finding about your change** — " +
+	"it is the engine saying it could not read all of it."
+
+// coverageDrivenF reports whether this F is a coverage failure rather than a verdict about the
+// change.
+//
+// Derived from the certificate's own shape rather than from the blocker text: a coverage F has
+// no finding that would fail on its own. When a changeset has both — a DROP TABLE *and* an
+// unread file — the data-loss summary is the correct one and this returns false, because the
+// data-loss claim is then true.
+func coverageDrivenF(cert domain.ReversibilityCertificate) bool {
+	if cert.Grade != domain.GradeF || cert.Coverage.Full() {
+		return false
+	}
+
+	for _, f := range cert.Findings {
+		switch f.Reversibility {
+		case domain.ReversibilityIrreversible, domain.ReversibilityUnknown, domain.ReversibilityWillFail:
+			return false
+		}
+	}
+	for _, w := range cert.Waived {
+		switch w.Finding.Reversibility {
+		case domain.ReversibilityIrreversible, domain.ReversibilityUnknown, domain.ReversibilityWillFail:
+			return false
+		}
+	}
+	return true
 }
 
 // The disclaiming sentences, named so that TestProseAndFieldsNeverDisagree can assert on them
@@ -111,8 +150,13 @@ func writeHeader(b *strings.Builder, cert domain.ReversibilityCertificate) {
 
 	fmt.Fprintf(b, "## Reversibility Certificate — Grade %s\n\n", cert.Grade)
 
-	if summary, ok := gradeSummary[cert.Grade]; ok {
-		fmt.Fprintf(b, "%s\n\n", summary)
+	switch {
+	case coverageDrivenF(cert):
+		fmt.Fprintf(b, "%s\n\n", CoverageFailureSummary)
+	default:
+		if summary, ok := gradeSummary[cert.Grade]; ok {
+			fmt.Fprintf(b, "%s\n\n", summary)
+		}
 	}
 
 	// Why there is no verdict, in the reader's terms. The two cases need different words: one
@@ -225,11 +269,21 @@ func writeBlockers(b *strings.Builder, cert domain.ReversibilityCertificate) {
 	// lines are not accusations against the change — they are a list of what the engine could
 	// not read, and calling them blockers would suggest the migrations were examined and found
 	// wanting.
-	if cert.Outcome == domain.OutcomeUnsupportedContent {
+	switch {
+	case cert.Outcome == domain.OutcomeUnsupportedContent:
 		b.WriteString("### Not assessed\n\n")
 		b.WriteString("The engine cannot read the following, so it has measured nothing. " +
 			"An autonomous agent must not merge this change.\n\n")
-	} else {
+
+	case coverageDrivenF(cert):
+		// "Blockers" reads as a list of things wrong with the change, and for a coverage
+		// failure nothing is. The heading has to match the summary above it, or the reader is
+		// told twice that this is not about them and once that it is.
+		b.WriteString("### Not assessed\n\n")
+		b.WriteString("The engine read part of this change and not the rest, so it cannot certify any of it. " +
+			"Nothing below is a defect in your change.\n\n")
+
+	default:
 		b.WriteString("### Blockers\n\n")
 		b.WriteString("This change cannot be merged by an autonomous agent. Each item below is a reason on its own.\n\n")
 	}

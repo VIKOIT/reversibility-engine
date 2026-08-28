@@ -1237,8 +1237,8 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
 
    The help text for `--gate` used to call it "the setting autonomous agents must use". That was
    already loose and is now wrong: an agent reads the certificate, never an exit status.
-9. **Strict coverage is complete for migration-named directories and not for the others.** OPEN,
-   and known rather than discovered — the property test encodes the boundary deliberately.
+9. **Strict coverage is complete for migration-named directories and not for the others.**
+   **RULED, not yet implemented.** Known rather than discovered — the property test encodes the boundary deliberately.
 
    A directory is a migration directory two ways: it is **named** for one, or it **holds a file
    an analyzer claimed**. The second clause exists so a rename cannot defeat the check. Coverage
@@ -1253,15 +1253,57 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
    that keeps migrations in an unconventionally named directory gets a weaker check than one that
    follows the convention, which is precisely backwards.
 
-   **What closes it: make the provider list before it reads.** The filesystem walk already visits
-   every path without reading it, and the git provider already has the full name-status list
-   before it fetches blobs. Both could decide the directory set first and then read. It was not
-   done in the same change as the ruling because it changes the `FileProvider` contract that all
-   four implementations share, and §16.4 records how much depends on those four agreeing.
+   **RULED: `FileProvider` becomes two-phase. Its own session, nothing else in it.** Not yet
+   implemented — this records the decision so it is not re-litigated.
 
-   The cheap alternative — admit every file and let the engine filter — was rejected: it makes
-   `revctl check .` read the whole repository, and it makes the GitHub app fetch every file in
-   every touched directory, which is an API-quota decision rather than an engineering one.
+   ```go
+   List(ctx, ref) ([]Path, error)     // enumerate — cheap, no content
+   Read(ctx, paths) ([]File, error)   // fetch only what is needed
+   ```
+
+   **Nothing new is being computed.** All four implementations already have the list before they
+   fetch: the filesystem walk visits every path without reading it, `git diff --name-status`
+   returns names before blobs, the GitHub files API returns the listing in the same response, and
+   the fake has the fixture directory. The contract is simply refusing to expose what the
+   providers already know.
+
+   The reason, which graduates to §2 when the contract lands — it is not written there yet
+   because the code does not satisfy it, and in this document the code is the bug where the two
+   disagree:
+
+   > **Enumeration and retrieval are separate concerns.** A provider must be able to report what
+   > exists without fetching it. Any check that describes the *shape* of a changeset depends on
+   > enumeration; any check that describes *content* depends on retrieval. Conflating them makes
+   > the first check unable to see what it is measuring.
+
+   **Three defects, one root cause**, which is what moved this from "expensive, probably not
+   worth it" to ruled:
+
+   1. The **Django P0** — a docs-only pull request and thirteen unreadable migrations arrived at
+      the engine as the same empty file list, because `Include` admitted neither.
+   2. The **coverage denominator** collapsing onto the numerator — counting only files an
+      analyzer wanted makes the check vacuous.
+   3. **This** — the denominator is correct and the provider never supplies it.
+
+   Each was found separately and fixed locally. The pattern was only visible on the third.
+
+   **Sequence for that session:**
+
+   1. The contract change and all four implementations, with `verdicts.txt` unchanged as the
+      gate — no verdict may move while the plumbing is replaced.
+   2. Then the coverage denominator moves onto the enumerated set.
+   3. Then re-run all three coverage mutations, **including the one that caught nothing** until
+      the property gained an independent oracle.
+
+   **The cheap alternative is rejected, not deferred.** Admitting every file and filtering in the
+   engine makes `revctl check .` read the whole repository and the GitHub App fetch every file in
+   every touched directory. That is an API-quota decision, and it is not one to make as a side
+   effect of a coverage fix.
+
+   **The live consequence is catalogued rather than left implicit.** Until this lands, renaming
+   `migrations/` to `db/sql/` turns strict coverage off with no trace on the certificate — see
+   [`proposals/bypass-rename-migration-dir.md`](proposals/bypass-rename-migration-dir.md), filed
+   for the harness Phase 5 bypass catalogue.
 8. ~~**Does a policy `ignore:` count against coverage?**~~ **RESOLVED by the owner: no, and it
    closes the gate instead.** Schema `1.5.0`.
 

@@ -126,10 +126,27 @@ no-ops — kept accepted so an upgrade does not turn a pipeline into an unknown-
 them. A repository using a migration format this engine cannot read should list those paths under
 `ignore:` once.
 
-**Known limitation, recorded rather than discovered:** coverage is complete for
+**A coverage failure never reads as an accusation.** Strict coverage means every Django, Rails,
+Alembic and Ecto repository fails on its first run, so the first sentence those users read from
+this tool matters more than any other line it prints. The generic grade-F summary opened with
+*"Rolling this back would lose data"* — over a changeset the engine had declined to read. It now
+says the true thing instead:
+
+> **Not assessed.** Part of this change was not analyzed, so its reversibility could not be
+> measured. **This is not a finding about your change** — it is the engine saying it could not
+> read all of it.
+
+The remedy follows immediately. A changeset that is *both* destructive and partly unread keeps
+the data-loss wording, because there the claim is true, and both directions are pinned by tests —
+the two messages differ by one branch, and a branch is one refactor from being lost.
+
+**Known limitation, ruled and scheduled rather than discovered:** coverage is complete for
 migration-*named* directories and not for directories identified only by holding an analyzable
-file, because a provider decides whether to read a file from its path alone. `docs/SPECIFICATION.md`
-§16.9 has the reason and the fix.
+file, because a provider decides whether to read a file from its path alone. Until the two-phase
+`FileProvider` contract lands (`docs/SPECIFICATION.md` §16.9), **renaming `migrations/` to
+`db/sql/` turns strict coverage off**, with no trace on the certificate. That evasion is filed
+for the harness bypass catalogue in
+`docs/proposals/bypass-rename-migration-dir.md`.
 
 ### Fixed
 

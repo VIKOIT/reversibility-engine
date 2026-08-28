@@ -1,6 +1,6 @@
 ## Reversibility Certificate — Grade F
 
-**Cannot be certified as reversible.** Rolling this back would lose data, the engine could not determine what the change does, the change will not apply at all, or part of the changeset was never analyzed.
+**Not assessed.** Part of this change was not analyzed, so its reversibility could not be measured. **This is not a finding about your change** — it is the engine saying it could not read all of it.
 
 | | |
 | --- | --- |
@@ -13,9 +13,9 @@
 
 - graded F: coverage is PARTIAL — 1 file(s) in migration directories were not analyzed
 
-### Blockers
+### Not assessed
 
-This change cannot be merged by an autonomous agent. Each item below is a reason on its own.
+The engine read part of this change and not the rest, so it cannot certify any of it. Nothing below is a defect in your change.
 
 - Cannot guarantee reversibility. Unanalyzed files found in migration directories. Remove them or explicitly ignore them in the config.
 - not analyzed: db/migrate/0002_backfill_status.rb
