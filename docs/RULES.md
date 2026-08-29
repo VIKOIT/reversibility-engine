@@ -559,7 +559,9 @@ root is a script, and failing a changeset over it would be severity invented fro
 
 Exit **2** rather than 1 because the grade was not too low; part of the changeset was never
 measured, and that is a run that did not complete. `--require-full-coverage` is a deprecated
-no-op, kept accepted so an upgrade does not turn a pipeline into an unknown-flag error.
+no-op, kept accepted so an upgrade does not turn a pipeline into an unknown-flag error — and the
+notice it prints goes to **stderr**, never to stdout, which is where the certificate goes in every
+format. See [`docs/SPECIFICATION.md` §16.11](SPECIFICATION.md).
 
 **The message names the remedy**, because a refusal a reader cannot act on is one they will route
 around:
@@ -568,6 +570,27 @@ around:
 Cannot guarantee reversibility. Unanalyzed files found in migration directories.
 Remove them or explicitly ignore them in the config.
 ```
+
+**And when the unread files are ORM-native migrations, it names the way forward too**, one line
+per format, appended to the blockers:
+
+```
+Render these migrations to SQL and point the engine at the output.
+Django: `python manage.py sqlmigrate <app> <name> > rendered/<name>.sql`.
+Alembic: `alembic upgrade <rev> --sql > rendered/<rev>.sql`.
+```
+
+`.rb` names Rails' `db/structure.sql`. `.js` and `.ts` get the first line and nothing else: there
+is no single convention among node-pg-migrate, Knex, TypeORM and Prisma, and **a command that does
+not exist is worse than no command.** Files that are not migration-shaped get no remedy at all —
+telling the author of a `README.md` to render it to SQL is advice that does not fit the problem,
+which is how a reader learns to stop reading the messages.
+
+This does **not** soften the verdict. The engine will never parse `.py` or `.rb`, so a repository
+whose migrations are ORM-native has most of its changeset un-gradeable and every graded run
+blocked. That is the honest answer; what the remedy adds is that the path around it is documented
+rather than discovered, because a gate with no path to green gets uninstalled. See
+[`docs/SPECIFICATION.md` §16.12](SPECIFICATION.md).
 
 **The escape hatch is the policy, and it works.** `ignore:` is explicit, mixed into
 `PolicyDigest`, and printed on the certificate — a recorded decision is not a bypass. Only
@@ -618,13 +641,41 @@ A file under `migrations/` with any other extension — a `README.md`, a `.gitke
 source file — is **not** a candidate. The directory name alone is not the signal; the directory
 name together with a language a migration is written in is.
 
+**The predicate is evaluated against the file's path in the repository, never against the path as
+the changeset happens to report it.**
+
+> **Candidate detection must not depend on how the analysis root was named.** `check ./migrations`
+> and `check .` from its parent must reach the same outcome for the same files.
+
+This is not a refinement, it is the second half of the rule: `revctl check
+django/contrib/auth/migrations` reports its files as `0001_initial.py`, having stripped exactly
+the segment this predicate keys on, and reached `NO_CANDIDATES` and exit 0 where
+`revctl check django/contrib/auth` reached `UNSUPPORTED_CONTENT` and exit 2 over the same
+thirteen files. The permissive answer was the one the documented invocation found. The mechanism
+and the choice of anchor are in [`docs/SPECIFICATION.md` §16.10](SPECIFICATION.md).
+
 **The message must name what it saw and what it could not do.** One line per directory, listing
 the count, the directory, and the extensions:
 
 ```
 found 13 files in django/contrib/auth/migrations that no analyzer supports
 (.py migrations). Reversibility was not assessed.
+Render these migrations to SQL and point the engine at the output.
+Django: `python manage.py sqlmigrate <app> <name> > rendered/<name>.sql`.
+Alembic: `alembic upgrade <rev> --sql > rendered/<rev>.sql`.
 ```
+
+The way-forward lines are appended once, after the per-directory lines: a team with migrations in
+six apps needs the command once, not six times. They are the same lines partial coverage prints,
+because it is the same limitation and a refusal phrased two ways teaches a reader that the wording
+does not matter.
+
+**The directory named is the one the caller named**, relative to the analysis root, and never a
+resolved absolute path. A blocker is on the certificate and a certificate must be byte-identical
+for identical input, so a path that varies with where the tree was unpacked is the same class of
+input as a timestamp. **Candidate detection resolves the path; the message does not** — see
+[`docs/SPECIFICATION.md` §16.10](SPECIFICATION.md), which is also why the two invocations at the
+top of that section now agree.
 
 **Partial coverage is the other half of this and is a separate axis.** A changeset holding one
 `.sql` file and thirteen Django `.py` migrations is `ANALYZED` — one analyzer did claim a file —

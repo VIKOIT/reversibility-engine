@@ -19,6 +19,8 @@ The engine read part of this change and not the rest, so it cannot certify any o
 
 - Cannot guarantee reversibility. Unanalyzed files found in migration directories. Remove them or explicitly ignore them in the config.
 - not analyzed: db/migrate/0002_backfill_status.rb
+- Render these migrations to SQL and point the engine at the output.
+- Rails: set `config.active_record.schema_format = :sql`, run `bin/rails db:migrate`, and point the engine at `db/structure.sql`.
 
 ### Not analyzed
 

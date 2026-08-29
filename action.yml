@@ -122,8 +122,11 @@ inputs:
     description: >-
       DEPRECATED and ignored. Partial coverage now always fails: if any file in a migration
       directory went unanalyzed the job exits 2, with no flag needed. Remove this input. If your
-      repository holds files this engine cannot read, list them under `ignore:` in
-      `.reversibility.yml` -- that is an explicit decision, recorded on the certificate.
+      repository holds ORM-native migrations this engine cannot parse -- Django `.py`, Rails
+      `.rb`, Alembic -- render them to SQL and point `path` at the output; that is the supported
+      path to a passing grade, and the README documents it with a worked example. An `ignore:`
+      entry in `.reversibility.yml` silences the coverage failure instead, and closes the AI
+      merge gate while it does: a human may accept a risk, an agent may not inherit it.
     required: false
     default: 'false'
     deprecationMessage: >-

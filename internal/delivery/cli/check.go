@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,10 +41,10 @@ type checkFlags struct {
 	context  []string
 	plans    []string
 
-	// requireFullCoverage turns partial coverage into a failed run for humans too. It is off by
-	// default because a partially covered changeset is still a real, useful measurement of the
-	// part that was read — but a team standardised on a migration format this engine does not
-	// support wants to hear about it every time, not once.
+	// requireFullCoverage is read nowhere and exists only so the flag still parses. Partial
+	// coverage fails closed unconditionally now, so the flag it was bound to is a no-op kept
+	// accepted for pipelines that still pass it — see the flag registration below, and §16.11
+	// for why the deprecation notice does not come from cobra.
 	requireFullCoverage bool
 }
 
@@ -100,10 +101,19 @@ func newCheckCommand(opts Options) *cobra.Command {
 	// accepted rather than removed so that a pipeline carrying it keeps running — removing it
 	// would turn an upgrade into an unknown-flag error, which is a worse failure than a warning
 	// on a line that no longer does anything.
+	//
+	// **The notice is written by runCheck, to stderr, and cobra's MarkDeprecated is deliberately
+	// not used.** pflag emits that warning from ParseFlags through cobra's *out* writer, which
+	// is stdout — so `revctl check --format json --require-full-coverage` printed a line of
+	// English ahead of the certificate and stdout stopped being parseable JSON. Keeping the flag
+	// accepted so an upgrade would not become an unknown-flag error had turned it into a parse
+	// error instead: the same failure wearing a different coat. MarkHidden does the half of
+	// MarkDeprecated that is wanted here — keeping a dead flag out of the help — and prints
+	// nothing anywhere. See §16.11, and TestNoFlagIsDeprecatedThroughCobra, which fails if
+	// anyone reaches for MarkDeprecated again.
 	cmd.Flags().BoolVar(&flags.requireFullCoverage, "require-full-coverage", false,
 		"DEPRECATED and ignored: partial coverage always fails now. Remove this flag.")
-	_ = cmd.Flags().MarkDeprecated("require-full-coverage",
-		"partial coverage now always fails; this flag is ignored and can be removed")
+	_ = cmd.Flags().MarkHidden("require-full-coverage")
 	cmd.Flags().StringArrayVar(&flags.plans, "terraform-plan", nil,
 		"analyze this file as a Terraform plan whatever it is called; repeatable. The default convention is *.tfplan.json, and this is the escape hatch for a plan named otherwise")
 
@@ -111,6 +121,8 @@ func newCheckCommand(opts Options) *cobra.Command {
 }
 
 func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []string) error {
+	warnAboutDeprecatedFlags(cmd, opts.Stderr)
+
 	renderer, err := render.For(flags.format)
 	if err != nil {
 		return fmt.Errorf("selecting output format: %w", err)
@@ -211,7 +223,7 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 		return out
 	}
 
-	source, err := resolveProvider(flags, paths)
+	source, root, err := resolveProvider(flags, paths)
 	if err != nil {
 		return err
 	}
@@ -228,8 +240,15 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	// statement about what exists, so it is measured against what was listed rather than against
 	// what happened to be read. Handing over only the files is what let a renamed migration
 	// directory turn the check off.
+	//
+	// The root goes in beside it, and that is §16.10: the enumeration says what exists, and the
+	// root says where it exists. `revctl check ./migrations` reports its files relative to
+	// ./migrations, stripping exactly the segment that identifies them as migrations, and
+	// without this the documented invocation reached NO_CANDIDATES and exit 0 over content that
+	// exited 2 when the same files were named one directory up.
 	cert, analysisErr := eng.Certify(cmd.Context(), files,
 		engine.Enumerated(enumeratedPaths(enumerated)),
+		engine.RootedAt(root),
 		engine.IgnoredByPolicy(ignoredCandidates))
 
 	out, closeOut, err := openOutput(opts.Stdout, flags.output)
@@ -251,11 +270,49 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	return applyGate(opts.Stderr, cert, minGrade)
 }
 
+// deprecatedFlags maps a flag that no longer does anything to what its user should do instead.
+//
+// It is a table rather than a line of code per flag so that adding one cannot accidentally add
+// it to the wrong stream: there is one writer for all of them and it is stderr.
+var deprecatedFlags = map[string]string{
+	"require-full-coverage": "partial coverage now always fails, so this flag is ignored; remove it",
+}
+
+// warnAboutDeprecatedFlags says on stderr that a flag no longer does anything.
+//
+// **Stdout carries the certificate and nothing else, in every format.** A diagnostic on stdout
+// is not a cosmetic problem: under --format json it makes the output unparseable, and the
+// pipeline that was going to read a grade out of it now reads a syntax error. Everything the
+// engine wants to tell a human — warnings, deprecations, gate reasons, policy notices — goes to
+// stderr, and that is why this is written here rather than left to cobra, which prints its own
+// deprecation warnings through the out writer. See §16.11.
+func warnAboutDeprecatedFlags(cmd *cobra.Command, stderr io.Writer) {
+	names := make([]string, 0, len(deprecatedFlags))
+	for name := range deprecatedFlags {
+		names = append(names, name)
+	}
+	// Sorted, because two deprecated flags on one command line must produce the same two lines
+	// in the same order every run.
+	sort.Strings(names)
+
+	for _, name := range names {
+		if !cmd.Flags().Changed(name) {
+			continue
+		}
+		_, _ = fmt.Fprintf(stderr, "revctl: --%s is deprecated: %s\n", name, deprecatedFlags[name])
+	}
+}
+
 // resolveProvider picks the source of the changeset from the flags.
 //
 // The modes are mutually exclusive by construction rather than by precedence. Silently
 // preferring one over another would let a user believe they had certified a comparison that
 // never ran, and the comparison they think they ran is the one they would have gated on.
+//
+// It returns the root prefix alongside the provider because the two are one decision: the
+// provider determines the namespace its paths are in, and the prefix is what puts them back into
+// the repository's. git and GitHub already report repository-relative paths and so contribute
+// nothing; only the filesystem provider reports relative to a directory somebody named.
 // enumeratedPaths reduces a listing to the paths the engine needs for coverage.
 func enumeratedPaths(listed []provider.Path) []string {
 	out := make([]string, 0, len(listed))
@@ -265,10 +322,10 @@ func enumeratedPaths(listed []provider.Path) []string {
 	return out
 }
 
-func resolveProvider(flags *checkFlags, paths []string) (provider.FileProvider, error) {
+func resolveProvider(flags *checkFlags, paths []string) (provider.FileProvider, string, error) {
 	switch {
 	case flags.base != "" && len(flags.before) > 0:
-		return nil, errors.New("--base and --before are different comparisons: --base names git refs, --before names directories; pass one, not both")
+		return nil, "", errors.New("--base and --before are different comparisons: --base names git refs, --before names directories; pass one, not both")
 
 	case flags.base != "":
 		// Path arguments become git pathspecs, scoping the comparison to a subtree.
@@ -278,18 +335,23 @@ func resolveProvider(flags *checkFlags, paths []string) (provider.FileProvider, 
 			Paths: paths,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("resolving the git refs: %w", err)
+			return nil, "", fmt.Errorf("resolving the git refs: %w", err)
 		}
-		return source, nil
+		// git reports repository-relative paths whatever pathspec narrowed the comparison, so
+		// there is nothing stripped to restore.
+		return source, "", nil
 
 	case flags.head != "":
-		return nil, errors.New("--head names the ref holding the change and only means something alongside --base")
+		return nil, "", errors.New("--head names the ref holding the change and only means something alongside --base")
 
 	case len(paths) == 0:
-		return nil, errors.New("no paths given: pass a directory to analyze, or --base to compare two git refs")
+		return nil, "", errors.New("no paths given: pass a directory to analyze, or --base to compare two git refs")
 
 	default:
-		return provider.NewFS(flags.before, paths), nil
+		// The prefix is taken from the paths holding the new state. With --before the two trees
+		// share one relative namespace by construction — that is what makes them comparable —
+		// and the new state is the side a classification is a statement about.
+		return provider.NewFS(flags.before, paths), provider.RootPrefix(paths), nil
 	}
 }
 
@@ -409,9 +471,21 @@ func applyGate(
 	// could not finish, which is true whether or not anybody asked it to gate.
 	if !cert.Coverage.Full() {
 		_, _ = fmt.Fprintf(stderr, "revctl: %s\n", engine.PartialCoverageBlocker)
+
+		unread := make([]string, 0, len(cert.UnanalyzedFiles))
 		for _, u := range cert.UnanalyzedFiles {
+			unread = append(unread, u.Path)
 			_, _ = fmt.Fprintf(stderr, "  - %s (%s)\n", u.Path, u.Reason)
 		}
+
+		// The way forward, when the gap is a framework this engine will never parse. It is on
+		// the certificate already; it is repeated here because stderr is where the person who
+		// has just been blocked is looking, and a refusal they cannot act on is one they will
+		// route around by removing the gate.
+		for _, remedy := range engine.RenderingRemedy(unread) {
+			_, _ = fmt.Fprintf(stderr, "  %s\n", remedy)
+		}
+
 		return errIncompleteCoverage
 	}
 

@@ -26,7 +26,9 @@
   "waived": [],
   "undoPlan": [],
   "blockers": [
-    "found 3 files in django/contrib/auth/migrations that no analyzer supports (.py migrations). Reversibility was not assessed."
+    "found 3 files in django/contrib/auth/migrations that no analyzer supports (.py migrations). Reversibility was not assessed.",
+    "Render these migrations to SQL and point the engine at the output.",
+    "Django: `python manage.py sqlmigrate \u003capp\u003e \u003cname\u003e \u003e rendered/\u003cname\u003e.sql`. Alembic: `alembic upgrade \u003crev\u003e --sql \u003e rendered/\u003crev\u003e.sql`."
   ],
   "gradeCauses": [
     "not graded: no analyzer could read the files in this changeset"

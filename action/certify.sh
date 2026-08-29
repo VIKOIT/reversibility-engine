@@ -303,7 +303,10 @@ fi
 # The job passed and the agent gate did not. Saying so is the whole point of the coverage axis:
 # without this line the only trace is a field in a JSON file nobody opens on a green build.
 if [ "$COVERAGE" = 'PARTIAL' ]; then
-    warn "Grade $GRADE meets the minimum $GATE, but $UNANALYZED file(s) were not analyzed. gate-status is $GATE_STATUS: an autonomous agent must not merge this. See the certificate for the list, or set 'require-full-coverage: true' to fail the job here."
+    # The remedy named here is rendering, not 'require-full-coverage: true'. That input is a
+    # deprecated no-op, so the old wording sent a blocked reader to a switch that does nothing —
+    # and a refusal a reader cannot act on is one they answer by removing the gate.
+    warn "Grade $GRADE meets the minimum $GATE, but $UNANALYZED file(s) were not analyzed. gate-status is $GATE_STATUS: an autonomous agent must not merge this. The certificate lists the files. If they are ORM-native migrations this engine cannot parse, render them to SQL and point 'path' at the output -- Django 'manage.py sqlmigrate', Rails 'db/structure.sql', Alembic 'alembic upgrade --sql'."
     exit 0
 fi
 

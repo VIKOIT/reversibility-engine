@@ -32,6 +32,140 @@ move:
 > partly excluded, now reports `aiGateStatus: FAIL` while still exiting 0; that divergence is
 > deliberate and the CLI announces it.
 
+### Fixed
+
+**P0 — the Django case was still live in the invocation the README documents.**
+
+```
+revctl check django/contrib/auth/migrations --gate  ->  NO_CANDIDATES, exit 0
+revctl check django/contrib/auth            --gate  ->  UNSUPPORTED_CONTENT, exit 2
+```
+
+Same files, same engine, opposite answers, and **the permissive one is the answer the documented
+invocation reached.** A field audit hit it 247 times across 60 repositories.
+
+`docs/RULES.md` §3 defines a plausible migration as a `.py`/`.rb`/`.js`/`.ts` file under a path
+segment named `migrations` — and `check ./dir` reports paths relative to the named directory,
+stripping exactly that segment. So `check ./migrations` handed the classifier `0001_initial.py`
+and the classifier answered correctly about a path that was missing the only thing it keys on.
+
+**This is the P0's third appearance and it is not a repetition of it.** The rule that governs the
+first two is that a run which *examined nothing* must not return the permissive answer. This run
+examined everything. The engine was not wrong about the changeset; it was wrong about **where**
+the changeset was — which is why no amount of hardening around "did anything get read" would have
+found it. The new invariant, now in `docs/SPECIFICATION.md` §2:
+
+> **Candidate detection must not depend on how the analysis root was named.**
+> `check ./migrations` and `check .` from its parent must reach the same outcome for the same
+> files.
+
+`provider.RootPrefix` resolves the command-line roots to their repository-relative form and
+`engine.RootedAt` carries that prefix into `Certify`. Every question about *location* is asked of
+the qualified path; **every path the certificate reports is left exactly as the caller named it**,
+so a finding stays addressable with the command the reader just ran and `InputDigest` does not
+move.
+
+**Choosing the anchor was the whole design decision, and the two rejected options are recorded**
+(§16.10) because the rejected ones are plausible. Anchoring at the root as typed loses
+`migrations` from `check migrations/versions` — the same defect one level in. Anchoring at the
+filesystem root would make a checkout parked under `~/migrate/` read every `.py` beneath it as a
+migration, which is severity invented from where somebody keeps their source. The repository root
+is both consistent and bounded, and it is the namespace `provider.Path` already documents and
+that git and GitHub already report in — so the filesystem provider now agrees with the other
+three rather than holding a fourth idea of where a file is.
+
+`TestOutcomeDoesNotDependOnHowTheAnalysisRootWasNamed` compares six invocation shapes over every
+fixture changeset in `testdata/` and needs no oracle, because the shapes are compared against each
+other. `TestTheDjangoCaseFailsFromEveryDirectionItCanBeNamed` pins the answer as well as the
+agreement: six shapes agreeing on exit 0 would satisfy the property and reinstate the P0.
+
+**The deprecation notice broke JSON output, which is the compatibility measure failing in its own
+way.**
+
+`revctl check --format json --require-full-coverage` wrote `Flag --require-full-coverage has been
+deprecated, …` to stdout, ahead of the certificate, so the output was no longer parseable JSON.
+**The flag was kept accepted so that an upgrade would not become an unknown-flag error, and
+keeping it turned the upgrade into a parse error instead** — the same failure wearing a different
+coat, and a worse one, because an unknown flag names itself and a JSON syntax error does not.
+
+Nothing here wrote that line: pflag records the message in cobra's `flagErrorBuf` during
+`ParseFlags`, and cobra flushes the buffer through the *out* writer, which is stdout so that
+`--help` reaches it. One call to `MarkDeprecated` was enough to corrupt every JSON certificate the
+command emits.
+
+> **All diagnostics, deprecations and warnings go to stderr. stdout carries the certificate and
+> nothing else, in every format.**
+
+`MarkDeprecated` is replaced by `MarkHidden` plus `warnAboutDeprecatedFlags`, a table written to
+stderr. The notice is still given — a pipeline carrying a dead flag has to hear about it, just not
+on the stream carrying the answer. Redirecting cobra's writer was rejected: cobra reaches for the
+same writer for help, and `revctl snapshot --help` on stdout is the documented way to check what
+the collector reads. **The output a user asked for is not a diagnostic.**
+
+Three tests hold it, and the third holds the *mechanism*:
+`TestStdoutIsAlwaysParseableJSON` over the flag space of `check`,
+`TestDeprecationNoticesGoToStderr` on the reported case, and
+`TestNoFlagIsDeprecatedThroughCobra`, which fails if anyone reaches for `MarkDeprecated` again.
+
+**The README rules badge said `27 PG` where the table defines 59**, and had been wrong for
+thirty-two rules because nothing checked it. It is the smallest item in the audit and it is fixed
+with a test rather than a number: `TestTheReadmeBadgeMatchesTheRuleTables` derives the counts from
+`docs/RULES.md` and prints the corrected badge on failure, and
+`TestTheRulesTableOfContentsMatchesItsOwnTables` does the same for the counts in that file's own
+table of contents. The rule tables are the specification and every other claim about them was
+already checked against them; the number on the front page was the one claim exempt.
+
+**The action's coverage warning recommended a switch that does nothing.** On a partially covered
+run it told the reader to `set 'require-full-coverage: true' to fail the job here` — an input that
+has been a deprecated no-op since coverage began failing closed. It now names rendering, which is
+a remedy that exists.
+
+### Added
+
+**A blocked run now names the way forward, and the verdict behind it is unchanged.**
+
+The audit's headline: 85% of the corpus is un-gradeable, 100% of graded runs are blocked at
+`--gate`, and a Django or Rails team has no path to a passing grade, ever, because this engine
+will never parse `.py` or `.rb` migrations.
+
+**That verdict stands and is not weakened anywhere.** What changed is that the path around it is
+documented rather than discovered, because **a gate with no path to green gets uninstalled, and a
+gate nobody runs protects nothing** — a worse outcome than the one the strictness was bought to
+prevent, and one that fails silently, since an uninstalled gate reports nothing at all.
+
+- `UNSUPPORTED_CONTENT` and coverage-`PARTIAL` blockers now carry `engine.RenderToSQL` — *"Render
+  these migrations to SQL and point the engine at the output"* — plus the concrete command per
+  format: Django `manage.py sqlmigrate`, Alembic `alembic upgrade --sql`, Rails `db/structure.sql`.
+  Both Python tools are named rather than guessed between. `.js` and `.ts` get the general
+  sentence and no tool-specific line, because node-pg-migrate, Knex, TypeORM and Prisma each spell
+  it differently and **a command that does not exist is worse than no command**. Files that are
+  not migration-shaped get no remedy at all: telling the author of a `README.md` to render it to
+  SQL is advice that does not fit the problem, which is how a reader learns to stop reading the
+  messages.
+- The README gains **ORM migrations — render them to SQL first**, a supported path with a worked
+  Django example covering both directions (`sqlmigrate` and `--backwards`, because a migration
+  with no usable down script still caps at C), and a CI snippet.
+- The README says in one plain line, in the opening, that the engine assesses SQL, Kubernetes
+  manifests and Terraform plans — and that ORM-native migration files must be rendered first.
+
+**The three outcomes are documented together, because the middle one surprises people:**
+
+| What the engine sees | Grade | `aiGateStatus` | Exit under `--gate` |
+| --- | --- | --- | --- |
+| The rendered SQL alone | **A** | **PASS** | `0` |
+| The whole repository, ORM sources under `ignore:` | **A** | FAIL | `0` |
+| The whole repository, nothing ignored | **F**, `PARTIAL` | FAIL | `2` |
+
+The middle row is the §16.8 ruling applied unchanged: a human may accept a risk with their name on
+it, and an agent may not inherit it. So an agent-mergeable repository is one that has **moved** to
+SQL-first migrations, not one that has learned to look away from the Python ones — and saying that
+plainly, beside the green row, is the honest form of "there is a path".
+
+**Two new named principles** in `docs/SPECIFICATION.md` §2, both promoted from the fixes above
+rather than invented: *candidate detection must not depend on how the analysis root was named*,
+and *all diagnostics go to stderr; stdout carries the certificate*. A third, *a refusal must name
+the way forward*, is the first entry in the index that is not about correctness at all.
+
 ### Added
 
 **Four recurring shapes are now named principles rather than repeated reasoning.** Each had

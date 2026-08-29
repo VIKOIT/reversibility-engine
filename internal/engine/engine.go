@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -55,6 +56,32 @@ type runConfig struct {
 	// property that makes an ignore list meaningful, so the only place that knows one existed
 	// is the include predicate that rejected it.
 	ignoredByPolicy []string
+	// root is where the changeset's paths sit in the repository they were read from.
+	//
+	// A changeset path is relative to whatever the provider was pointed at, and for the
+	// filesystem provider that is a directory the caller chose. `revctl check ./migrations`
+	// therefore strips the one segment that says these files are migrations. Classification
+	// asks a question about location, so it has to ask it of the location the file actually
+	// has — see qualify, and docs/SPECIFICATION.md §16.10.
+	//
+	// Empty for every provider whose paths are already repository-relative, which is all of
+	// them except the filesystem one, so the default is the behaviour that was always correct.
+	root string
+}
+
+// qualify puts a changeset path back where it sits in the repository it was read from.
+//
+// It is used for classification and for nothing else. **Every path the certificate reports stays
+// exactly as the caller named it** — a finding, an unanalyzed file, and an ignored path are all
+// still addressable with the command the reader just ran. What moves is only the path the
+// engine asks "is this plausibly a migration" about, because that question is about where the
+// file is and not about how it was named on a command line.
+func (c runConfig) qualify(p string) string {
+	clean := normalizePath(p)
+	if c.root == "" {
+		return clean
+	}
+	return path.Join(c.root, clean)
 }
 
 // IgnoredByPolicy records the candidate files a policy excluded from this run.
@@ -73,6 +100,22 @@ func IgnoredByPolicy(paths []string) RunOption {
 // was never read is invisible — see docs/SPECIFICATION.md §16.9.
 func Enumerated(paths []string) RunOption {
 	return func(c *runConfig) { c.enumerated = append(c.enumerated, paths...) }
+}
+
+// RootedAt records where in the repository the changeset's paths are rooted.
+//
+// It exists because candidate detection must not depend on how the analysis root was named, and
+// without it, it did: `revctl check django/contrib/auth/migrations` reports its files as
+// `0001_initial.py`, having stripped exactly the segment RULES.md §3 keys on, and reached
+// NO_CANDIDATES and exit 0 where `revctl check django/contrib/auth` reached UNSUPPORTED_CONTENT
+// and exit 2 over the same thirteen files. The permissive answer was the one the documented
+// invocation found.
+//
+// Callers whose paths are already repository-relative — git, GitHub, the fake — pass nothing,
+// which is the empty prefix and the behaviour they always had. provider.RootPrefix computes it
+// for the filesystem provider. See docs/SPECIFICATION.md §16.10.
+func RootedAt(prefix string) RunOption {
+	return func(c *runConfig) { c.root = prefix }
 }
 
 // WithPolicy sets the resolved policy. A nil policy means none, which is the default and must
@@ -221,7 +264,12 @@ func (e *Engine) Certify(
 		enumerated = pathsOf(files)
 	}
 
-	outcome, unsupported := e.outcome(files, enumerated)
+	// Classification happens in the repository's namespace, not in the changeset's. A path here is
+	// relative to whatever the provider was pointed at, and `revctl check ./migrations` therefore
+	// strips the one segment that says these files are migrations — see runConfig.qualify.
+	qualify := run.qualify
+
+	outcome, unsupported := e.outcome(files, enumerated, qualify)
 
 	// Grade is computed from every finding, waived ones included. It states what the evidence
 	// says about the change, and no configuration may move it: a waiver accepts a risk, it does
@@ -269,7 +317,7 @@ func (e *Engine) Certify(
 	// permanently close the gate.
 	ignoredCandidates := 0
 	for _, p := range run.ignoredByPolicy {
-		if Candidate(p) {
+		if Candidate(qualify(p)) {
 			ignoredCandidates++
 		}
 	}
@@ -286,7 +334,7 @@ func (e *Engine) Certify(
 		AIGateStatus:    grade.Gate(conditions),
 		Outcome:         outcome,
 		Coverage:        coverage,
-		UnanalyzedFiles: nonNilUnanalyzed(unanalyzedFiles(unsupported)),
+		UnanalyzedFiles: nonNilUnanalyzed(unanalyzedFiles(unsupported, qualify)),
 		IgnoredByPolicy: nonNilStrings(run.ignoredByPolicy),
 		Applicable:      outcome.Certifies(),
 		InputDigest:     digest,

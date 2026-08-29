@@ -116,6 +116,10 @@ func score(in scoreInput) scoreResult {
 				blockers = append(blockers, "not analyzed: "+p)
 			}
 
+			// The way forward, where there is one. A refusal a reader cannot act on is one they
+			// will route around, and a gate with no path to green gets uninstalled.
+			blockers = append(blockers, RenderingRemedy(in.unsupported)...)
+
 			return scoreResult{
 				grade:    domain.GradeF,
 				blockers: blockers,

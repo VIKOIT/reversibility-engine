@@ -100,10 +100,15 @@ func classifyCandidate(p string) (bool, string) {
 // unanalyzedFiles turns the candidate paths into the per-file record the certificate carries.
 //
 // Paths arrive sorted from outcome, so this is deterministic without sorting again.
-func unanalyzedFiles(paths []string) []domain.UnanalyzedFile {
+//
+// The reason is derived from the qualified path and the path is reported unqualified. That is
+// the split the whole of §16.10 rests on: the question "what kind of file is this" is about
+// where the file sits, and the answer a reader acts on has to name the file the way they named
+// it themselves.
+func unanalyzedFiles(paths []string, qualify func(string) string) []domain.UnanalyzedFile {
 	out := make([]domain.UnanalyzedFile, 0, len(paths))
 	for _, p := range paths {
-		_, reason := classifyCandidate(p)
+		_, reason := classifyCandidate(qualify(p))
 		if reason == "" {
 			reason = "not analyzed, and it sits in a migration directory"
 		}
@@ -119,6 +124,75 @@ func unanalyzedFiles(paths []string) []domain.UnanalyzedFile {
 // not matter, and then the wording is the thing nobody reads.
 const PartialCoverageBlocker = "Cannot guarantee reversibility. Unanalyzed files found in " +
 	"migration directories. Remove them or explicitly ignore them in the config."
+
+// RenderToSQL is the way forward out of both refusals, and it is a supported path rather than a
+// workaround.
+//
+// **The verdict behind it is not being softened.** This engine assesses SQL, rendered Kubernetes
+// manifests, and Terraform plans. It will never parse a Django `.py` or a Rails `.rb` migration,
+// so on an ORM-native repository 85% of the corpus is un-gradeable and every graded run is
+// blocked at `--gate`. That is the honest answer and it stands.
+//
+// What does not stand is leaving the path out of the message. A team told only that their
+// changeset cannot be certified, with no route to a passing grade, uninstalls the gate — and a
+// gate nobody runs protects nothing, which is a worse outcome than the one the strictness was
+// bought to prevent. Every ORM worth naming can emit the SQL it is about to run. Rendering it is
+// the supported workflow, and the refusal is where a reader will actually be standing when they
+// need to know that.
+const RenderToSQL = "Render these migrations to SQL and point the engine at the output."
+
+// renderingRemedies names the concrete command for each format the engine cannot parse.
+//
+// Keyed by extension, because the extension is all that is known at this point. A `.py`
+// migration is Django's or Alembic's and both are named rather than guessed between: two
+// answers cost a reader one line, and the wrong single answer costs them the whole path.
+//
+// `.js` and `.ts` have no one convention worth printing — node-pg-migrate, Knex, TypeORM and
+// Prisma each spell it differently — so they get the general sentence and nothing invented. A
+// command that does not exist is worse than no command.
+var renderingRemedies = map[string]string{
+	".py": "Django: `python manage.py sqlmigrate <app> <name> > rendered/<name>.sql`. " +
+		"Alembic: `alembic upgrade <rev> --sql > rendered/<rev>.sql`.",
+	".rb": "Rails: set `config.active_record.schema_format = :sql`, run `bin/rails db:migrate`, " +
+		"and point the engine at `db/structure.sql`.",
+}
+
+// RenderingRemedy returns the way-forward lines for a set of files the engine could not read.
+//
+// One general sentence, then one line per format that has a name for the command. Sorted and
+// deduplicated, because these end up in Blockers and a certificate must be byte-identical for
+// identical input.
+//
+// It returns nothing when nothing in the list is a migration this advice applies to. A `.md`
+// beside the migrations fails coverage too, and telling its author to render it to SQL would be
+// advice that does not fit the problem — which is how a reader learns to stop reading the
+// messages.
+func RenderingRemedy(paths []string) []string {
+	seen := map[string]bool{}
+	for _, p := range paths {
+		ext := strings.ToLower(path.Ext(strings.ReplaceAll(p, "\\", "/")))
+		if candidateExtensions[ext] {
+			seen[ext] = true
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+
+	exts := make([]string, 0, len(seen))
+	for ext := range seen {
+		exts = append(exts, ext)
+	}
+	sort.Strings(exts)
+
+	out := []string{RenderToSQL}
+	for _, ext := range exts {
+		if remedy, ok := renderingRemedies[ext]; ok {
+			out = append(out, remedy)
+		}
+	}
+	return out
+}
 
 // InMigrationDir reports whether a path sits under a directory named for migrations.
 //
@@ -143,12 +217,17 @@ func InMigrationDir(p string) bool {
 //   - the directory holds at least one file an analyzer claimed, whatever it is called. A
 //     directory of .sql files named db/schema/ is a migration directory by any honest reading,
 //     and requiring the conventional name would let a rename defeat the coverage check.
-func (e *Engine) migrationDirectories(enumerated []string) map[string]bool {
+//
+// It works in the qualified namespace, because both clauses are questions about location and a
+// changeset path has had its root's name stripped off the front — see runConfig.qualify. The map
+// is therefore keyed by qualified directory, and every lookup into it must qualify too.
+func (e *Engine) migrationDirectories(enumerated []string, qualify func(string) string) map[string]bool {
 	dirs := map[string]bool{}
 
 	for _, p := range enumerated {
-		if e.Supports(p) || InMigrationDir(p) {
-			dirs[path.Dir(normalizePath(p))] = true
+		q := qualify(p)
+		if e.Supports(p) || InMigrationDir(q) {
+			dirs[path.Dir(q)] = true
 		}
 	}
 	return dirs
@@ -168,7 +247,16 @@ func (e *Engine) migrationDirectories(enumerated []string) map[string]bool {
 // It works from the **enumeration** rather than from the files, which is the §16.9 fix: a file
 // that exists and was never read is exactly what this has to report, and it cannot appear in a
 // list of files that were read.
-func (e *Engine) outcome(files []domain.ChangedFile, enumerated []string) (domain.AnalysisOutcome, []string) {
+//
+// Every question it asks about *location* is asked of the qualified path, and every path it
+// *returns* is the one the caller gave it. A changeset path is relative to whatever the provider
+// was pointed at, so `revctl check ./migrations` hands this function `0001_initial.py` — and
+// classifying that is how the Django case reached NO_CANDIDATES and exit 0. See §16.10.
+func (e *Engine) outcome(
+	files []domain.ChangedFile,
+	enumerated []string,
+	qualify func(string) string,
+) (domain.AnalysisOutcome, []string) {
 	read := make(map[string]bool, len(files))
 	claimed := false
 
@@ -179,7 +267,7 @@ func (e *Engine) outcome(files []domain.ChangedFile, enumerated []string) (domai
 		}
 	}
 
-	dirs := e.migrationDirectories(enumerated)
+	dirs := e.migrationDirectories(enumerated, qualify)
 
 	var unsupported []string
 	for _, p := range enumerated {
@@ -190,7 +278,8 @@ func (e *Engine) outcome(files []domain.ChangedFile, enumerated []string) (domai
 		// Outside every migration directory, only a migration-shaped file counts: a .py at the
 		// repository root is a script, and holding a changeset hostage to it would be the
 		// severity-from-ignorance failure this engine is not allowed to commit.
-		if dirs[path.Dir(normalizePath(p))] || Candidate(p) {
+		q := qualify(p)
+		if dirs[path.Dir(q)] || Candidate(q) {
 			unsupported = append(unsupported, p)
 		}
 	}
@@ -217,6 +306,14 @@ func normalizePath(p string) string {
 // applicable" is what let the Django case through, because it read as "nothing here" rather
 // than as "thirteen files I cannot parse". One line per directory, so a changeset touching
 // several apps says so instead of collapsing into a single count.
+//
+// **It names the directory as the caller named it, never the qualified path**, and that is not a
+// missed opportunity to be more specific. A blocker is on the certificate, the certificate must
+// be byte-identical for identical input, and a qualified path outside a checkout is an absolute
+// one — so naming it here would make the certificate depend on which machine produced it and
+// where the tree happened to be unpacked. That is the same class of input as a timestamp or a
+// hostname, and the determinism rule excludes all three. §16.10 qualifies paths to classify
+// them and for nothing else.
 func unsupportedContentBlockers(paths []string) []string {
 	type group struct {
 		count int
@@ -266,7 +363,9 @@ func unsupportedContentBlockers(paths []string) []string {
 			" migrations). Reversibility was not assessed.")
 	}
 
-	return blockers
+	// Then, once, the way forward. It is appended rather than repeated per directory: a team
+	// with migrations in six apps needs the command once, not six times.
+	return append(blockers, RenderingRemedy(paths)...)
 }
 
 func plural(n int, noun string) string {

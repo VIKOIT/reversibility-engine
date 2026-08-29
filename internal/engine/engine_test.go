@@ -198,12 +198,25 @@ func TestCertifyUnsupportedContent(t *testing.T) {
 
 	// The message has to name what it saw. A bare "not applicable" is what made this readable
 	// as "nothing here" for as long as it shipped.
-	if len(cert.Blockers) != 1 {
-		t.Fatalf("Blockers = %v, want exactly one line naming the directory", cert.Blockers)
+	//
+	// One line per directory, so a changeset touching several apps says so rather than
+	// collapsing into a count.
+	if len(cert.Blockers) == 0 {
+		t.Fatal("Blockers is empty; a refusal that names nothing reads as 'nothing here'")
 	}
 	for _, want := range []string{"3 files", "django/contrib/auth/migrations", ".py", "not assessed"} {
 		if !strings.Contains(cert.Blockers[0], want) {
 			t.Errorf("blocker %q does not mention %q", cert.Blockers[0], want)
+		}
+	}
+
+	// And it has to name the way forward. The engine will never parse a .py migration, which is
+	// the honest verdict and is not being softened — but a refusal with no route to a passing
+	// grade is one a team answers by uninstalling the gate.
+	rest := strings.Join(cert.Blockers[1:], "\n")
+	for _, want := range []string{"Render these migrations to SQL", "sqlmigrate", "alembic"} {
+		if !strings.Contains(rest, want) {
+			t.Errorf("the blockers do not name the way forward %q:\n%s", want, rest)
 		}
 	}
 }

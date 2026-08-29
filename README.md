@@ -3,7 +3,7 @@
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-663366)
 ![Status](https://img.shields.io/badge/status-v1.1.2-brightgreen)
 ![Policy](https://img.shields.io/badge/policy-fail--closed-critical)
-![Rules](https://img.shields.io/badge/rules-27%20PG%20%C2%B7%2015%20K8S%20%C2%B7%209%20TF-blue)
+![Rules](https://img.shields.io/badge/rules-59%20PG%20%C2%B7%2015%20K8S%20%C2%B7%209%20TF-blue)
 
 [![CI](https://github.com/VIKOIT/reversibility-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/VIKOIT/reversibility-engine/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/VIKOIT/reversibility-engine)](https://github.com/VIKOIT/reversibility-engine/releases)
@@ -23,6 +23,12 @@ The answer is a reversibility certificate: a grade of **A, B, C, or F**, a
 concrete undo plan, and an explicit list of what cannot be undone. Grade F means
 a rollback would lose data. Autonomous coding agents may merge on grade A and on
 nothing else.
+
+**The engine assesses SQL, Kubernetes manifests and Terraform plans — ORM-native
+migration files must be rendered to SQL first.** A Django `.py`, a Rails `.rb` or
+an Alembic revision is a program, and this engine does not run programs. Rendering
+is a supported path with a worked example: see [ORM migrations — render them to
+SQL first](#orm-migrations--render-them-to-sql-first).
 
 ```console
 $ revctl check ./migrations
@@ -695,8 +701,10 @@ a README is was never a risk decision.
 
 > This is stricter than v1.1.2, where partial coverage exited 0 and only failed
 > behind `--require-full-coverage`. That flag is now a deprecated no-op — remove
-> it. If a repository uses a migration format this engine cannot read, list those
-> paths under `ignore:` once and the check goes quiet.
+> it. If your repository uses a migration format this engine cannot read, the
+> answer is not `ignore:` on its own: see [ORM migrations — render them to SQL
+> first](#orm-migrations--render-them-to-sql-first), which is a supported path
+> to a passing grade rather than a way of silencing the check.
 
 The five verdicts a finding can carry, in severity order:
 
@@ -707,6 +715,95 @@ REVERSIBLE  <  COSTLY  <  UNKNOWN  <  IRREVERSIBLE  <  WILL_FAIL
 `UNKNOWN` and `WILL_FAIL` both grade **F**, and for different reasons: one is a
 change nobody understood, the other is a change that cannot succeed. Neither can
 be covered by a waiver.
+
+---
+
+## ORM migrations — render them to SQL first
+
+**This engine assesses SQL, rendered Kubernetes manifests, and Terraform plans.**
+It does not read Django `.py`, Rails `.rb`, or Alembic migration files, and it is
+not going to. Those are programs. What they do to a schema is decided when the ORM
+runs them, and a static reader looking at the source cannot know it — which is
+exactly the situation in which this engine is required to answer `UNKNOWN`.
+
+Said plainly, because discovering it one blocked pull request at a time is worse:
+**on a repository whose migrations are ORM-native, most of the changeset is
+un-gradeable, and `--gate` blocks every run.** There is no threshold you can lower
+that makes an unread migration safe, and none is being offered.
+
+There is a path to green, and every ORM already supports it: each of them can
+print the SQL it is about to run. Render it, keep the output in the repository,
+and point the engine at that. **The rendered SQL is what the database will
+actually execute**, which makes it a better subject for the question than the
+Python ever was.
+
+| Framework | Render with |
+| --- | --- |
+| Django | `python manage.py sqlmigrate <app> <name>`, and `--backwards` for the reverse |
+| Rails | `config.active_record.schema_format = :sql`, then `db/structure.sql` |
+| Alembic | `alembic upgrade <rev> --sql` |
+
+### Worked example — Django
+
+Render both directions. The reverse is not optional: a migration with no usable
+down script caps the grade at **C**, so rendering only `--forwards` buys you a
+readable changeset and still not an A.
+
+```console
+$ mkdir -p db/rendered
+
+$ python manage.py sqlmigrate myapp 0042_add_notes \
+    > db/rendered/0042_add_notes.up.sql
+$ python manage.py sqlmigrate myapp 0042_add_notes --backwards \
+    > db/rendered/0042_add_notes.down.sql
+
+$ revctl check db/rendered --gate
+## Reversibility Certificate — Grade A
+...
+exit 0
+```
+
+`grade: A`, `coverage: FULL`, `aiGateStatus: PASS`. Commit `db/rendered/` and gate
+on it in CI:
+
+```yaml
+- name: Render migrations
+  run: |
+    mkdir -p db/rendered
+    python manage.py sqlmigrate myapp 0042_add_notes > db/rendered/0042_add_notes.up.sql
+    python manage.py sqlmigrate myapp 0042_add_notes --backwards > db/rendered/0042_add_notes.down.sql
+
+- uses: VIKOIT/reversibility-engine@v1
+  with:
+    path: db/rendered
+    gate: 'A'
+```
+
+### What happens if the `.py` files are still in the changeset
+
+Three outcomes, and the difference between the second and the third is the part
+worth knowing before you choose:
+
+| What the engine sees | Grade | `aiGateStatus` | Exit under `--gate` |
+| --- | --- | --- | --- |
+| The rendered SQL alone — `revctl check db/rendered` | **A** | ✅ **PASS** | `0` |
+| The whole repository, with the ORM sources under `ignore:` | **A** | ❌ FAIL | `0` |
+| The whole repository, nothing ignored | **F** (`coverage: PARTIAL`) | ❌ FAIL | `2` |
+
+The middle row is the one that surprises people, and it is deliberate. `ignore:`
+is a human accepting a risk with their name on it, and **a human decision never
+buys an agent a merge** — so the pipeline goes green and the AI merge gate stays
+shut. That is the same rule that governs waivers, applied to the same question.
+
+If you want an agent to be able to merge, the ORM sources must not be in the
+changeset at all: the repository has to have moved to SQL-first migrations, not
+merely learned to look away from the Python ones.
+
+```yaml
+# .reversibility.yml — the middle row
+ignore:
+  - "**/migrations/*.py"
+```
 
 ---
 
@@ -949,6 +1046,13 @@ none.
   `actions/checkout`; the error says so when it happens.
 - **Rendered manifests only.** Helm charts and Kustomize overlays must be
   rendered before analysis (`helm template`, `kustomize build`).
+- **Rendered SQL only — ORM-native migrations are never parsed.** A Django `.py`,
+  a Rails `.rb`, or an Alembic revision is a program, and what it does to a schema
+  is decided when the ORM runs it. On such a repository most of the changeset is
+  un-gradeable and `--gate` blocks every run; there is no threshold that makes an
+  unread migration safe. Render to SQL and gate on the output — the path, and the
+  one place it still does not reach a `PASS`, is in [ORM migrations — render them
+  to SQL first](#orm-migrations--render-them-to-sql-first).
 - **PostgreSQL only.** MySQL, SQL Server, and MongoDB are not supported.
 - **Terraform is plan-only, and AWS-only.** The analyzer reads
   `terraform show -json` output; it does not parse `.tf` source, and it

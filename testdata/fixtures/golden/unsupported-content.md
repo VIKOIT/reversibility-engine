@@ -20,6 +20,8 @@ _This change contains files that may be migrations, and no analyzer in this engi
 The engine cannot read the following, so it has measured nothing. An autonomous agent must not merge this change.
 
 - found 3 files in django/contrib/auth/migrations that no analyzer supports (.py migrations). Reversibility was not assessed.
+- Render these migrations to SQL and point the engine at the output.
+- Django: `python manage.py sqlmigrate <app> <name> > rendered/<name>.sql`. Alembic: `alembic upgrade <rev> --sql > rendered/<rev>.sql`.
 
 ### Not analyzed
 
