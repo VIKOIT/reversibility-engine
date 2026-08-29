@@ -125,7 +125,7 @@ func TestApplyWaivers(t *testing.T) {
 
 			p := &policy.Policy{Waivers: tc.waivers}
 
-			decision, err := p.Apply(tc.findings, tc.today)
+			decision, err := p.Apply(tc.findings, tc.today, domain.Identity())
 			if err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
@@ -163,7 +163,7 @@ func TestWaivedFindingsCarryTheirJustification(t *testing.T) {
 		ApprovedBy: "vikoit",
 	}}}
 
-	decision, err := p.Apply([]domain.Finding{finding("PG012", "a.sql", domain.ReversibilityCostly)}, today)
+	decision, err := p.Apply([]domain.Finding{finding("PG012", "a.sql", domain.ReversibilityCostly)}, today, domain.Identity())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestApplyOverrides(t *testing.T) {
 			Severity: domain.ReversibilityIrreversible,
 		}}}
 
-		decision, err := p.Apply([]domain.Finding{finding("K8S008", "d.yaml", domain.ReversibilityCostly)}, today)
+		decision, err := p.Apply([]domain.Finding{finding("K8S008", "d.yaml", domain.ReversibilityCostly)}, today, domain.Identity())
 		if err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
@@ -216,7 +216,7 @@ func TestApplyOverrides(t *testing.T) {
 			Severity: domain.ReversibilityCostly,
 		}}}
 
-		_, err := p.Apply([]domain.Finding{finding("PG001", "a.sql", domain.ReversibilityIrreversible)}, today)
+		_, err := p.Apply([]domain.Finding{finding("PG001", "a.sql", domain.ReversibilityIrreversible)}, today, domain.Identity())
 		if err == nil {
 			t.Fatal("an override that weakened a finding was accepted")
 		}
@@ -233,7 +233,7 @@ func TestApplyOverrides(t *testing.T) {
 			Severity: domain.ReversibilityIrreversible,
 		}}}
 
-		decision, err := p.Apply([]domain.Finding{finding("PG001", "a.sql", domain.ReversibilityIrreversible)}, today)
+		decision, err := p.Apply([]domain.Finding{finding("PG001", "a.sql", domain.ReversibilityIrreversible)}, today, domain.Identity())
 		if err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
@@ -252,7 +252,7 @@ func TestApplyOverrides(t *testing.T) {
 			Waivers:   []policy.Waiver{waiver("K8S008", "", "2026-10-01")},
 		}
 
-		decision, err := p.Apply([]domain.Finding{finding("K8S008", "d.yaml", domain.ReversibilityCostly)}, today)
+		decision, err := p.Apply([]domain.Finding{finding("K8S008", "d.yaml", domain.ReversibilityCostly)}, today, domain.Identity())
 		if err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
@@ -272,7 +272,7 @@ func TestIgnores(t *testing.T) {
 		"db/schema.generated.sql": true,
 		"migrations/0001.sql":     false,
 	} {
-		if got := p.Ignores(path); got != want {
+		if got := p.Ignores(domain.Located(path)); got != want {
 			t.Errorf("Ignores(%q) = %v, want %v", path, got, want)
 		}
 	}
@@ -290,7 +290,7 @@ func TestNilPolicyIsInert(t *testing.T) {
 	}
 
 	findings := []domain.Finding{finding("PG001", "a.sql", domain.ReversibilityIrreversible)}
-	decision, err := p.Apply(findings, today)
+	decision, err := p.Apply(findings, today, domain.Identity())
 	if err != nil {
 		t.Fatalf("Apply on a nil policy: %v", err)
 	}

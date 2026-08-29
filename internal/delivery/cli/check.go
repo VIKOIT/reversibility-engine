@@ -186,6 +186,22 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 		enumerated        []provider.Path
 	)
 
+	source, root, err := resolveProvider(flags, paths)
+	if err != nil {
+		return err
+	}
+
+	// The provider is resolved before `choose` is built, because `choose` makes path-keyed
+	// decisions and every one of those is made in one namespace — the one this locator maps
+	// into. Deciding first and locating afterwards is what left `ignore:` globs matching the
+	// changeset's spelling while candidate detection used the repository's. See §16.13.
+	locate := domain.NewLocator(root)
+
+	// The matcher is the ignore list plus a record of which patterns did anything. A pattern
+	// that matches nothing is dead config, and dead config in a safety tool reads as protection
+	// the user does not have.
+	ignores := pol.Matcher()
+
 	// choose runs once over the complete listing, which is what lets it answer questions a
 	// per-path predicate could not: "read this README because the directory it sits in also
 	// holds a .sql file" needs to see the directory.
@@ -204,28 +220,25 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 				continue
 			}
 
+			at := locate(p.Path)
+
 			// An ignored path is excluded from the enumeration as well as from the read, and
 			// that is the §16.8 ruling rather than an oversight: coverage describes what the
 			// engine could not read, and this is something a human decided it should not. It is
 			// reported separately, under IgnoredByPolicy, so nothing is hidden — and it closes
 			// the merge gate when it is a real migration.
-			if pol.Ignores(p.Path) {
+			if ignores.Ignores(at) {
 				ignoredCandidates = append(ignoredCandidates, p.Path)
 				continue
 			}
 
 			enumerated = append(enumerated, p)
 
-			if eng.Supports(p.Path) {
+			if eng.Supports(at) {
 				out = append(out, p)
 			}
 		}
 		return out
-	}
-
-	source, root, err := resolveProvider(flags, paths)
-	if err != nil {
-		return err
 	}
 
 	_, files, err := provider.Resolve(cmd.Context(), source, "", choose)
@@ -249,7 +262,15 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	cert, analysisErr := eng.Certify(cmd.Context(), files,
 		engine.Enumerated(enumeratedPaths(enumerated)),
 		engine.RootedAt(root),
+		engine.DeadIgnores(ignores.Dead()),
 		engine.IgnoredByPolicy(ignoredCandidates))
+
+	// The certificate already carries these, and they are repeated on stderr because the person
+	// who wrote the config is watching a terminal, not reading JSON. Dead config is protection
+	// the user does not have, so it is said where they are.
+	for _, warning := range cert.PolicyWarnings {
+		_, _ = fmt.Fprintf(opts.Stderr, "revctl: %s\n", warning)
+	}
 
 	out, closeOut, err := openOutput(opts.Stdout, flags.output)
 	if err != nil {
@@ -590,9 +611,20 @@ func buildAnalyzers(flags *checkFlags, pol *policy.Policy) ([]analyzer.Analyzer,
 		}
 	}
 
+	// --terraform-plan names a file relative to the user's shell; the engine knows the same file
+	// by its path in the changeset. Those are two namespaces, and comparing them directly is
+	// what the analyzer used to paper over with bidirectional suffix matching — which also
+	// over-claimed, since `a/plan.json` suffix-matched `b/a/plan.json`. Resolving here, where
+	// touching the filesystem is allowed, puts both sides in the decision namespace and lets the
+	// comparison be exact. See §16.13.
+	plans := make([]string, 0, len(flags.plans))
+	for _, p := range flags.plans {
+		plans = append(plans, provider.QualifyPath(p))
+	}
+
 	tf, err := terraform.New(terraform.Options{
 		Overrides:      overrides,
-		ExtraPlanPaths: flags.plans,
+		ExtraPlanPaths: plans,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configuring the Terraform analyzer: %w", err)

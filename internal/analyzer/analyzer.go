@@ -22,7 +22,15 @@ type Analyzer interface {
 
 	// Supports reports whether this analyzer claims the given path. A file no analyzer claims
 	// is not an error; it is simply outside the engine's scope.
-	Supports(path string) bool
+	//
+	// It takes a domain.Located rather than a string because claiming a file is a path-keyed
+	// decision, and every one of those is made in one namespace — see domain.Located. Most
+	// implementations look only at the extension and would be right either way; the Terraform
+	// analyzer is not, because `--terraform-plan` names a file and a name has to be compared
+	// against something. It compared against the changeset's spelling and papered over the
+	// mismatch with suffix matching, which over-claimed. The type is what stops the next
+	// implementation from having to notice.
+	Supports(at domain.Located) bool
 
 	// Analyze classifies the supported files in the changeset.
 	//

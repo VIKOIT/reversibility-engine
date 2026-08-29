@@ -30,8 +30,13 @@ func New() *Analyzer { return &Analyzer{} }
 func (a *Analyzer) Name() string { return Name }
 
 // Supports claims .yaml and .yml files.
-func (a *Analyzer) Supports(path string) bool {
-	ext := strings.ToLower(extension(path))
+//
+// Extension alone, so the namespace makes no difference to the answer here. The argument is a
+// domain.Located because claiming a file is a path-keyed decision and those are made in one
+// namespace — not because this particular rule needs the qualification. See the note on
+// analyzer.Analyzer.Supports for the implementation that does.
+func (a *Analyzer) Supports(at domain.Located) bool {
+	ext := at.Ext()
 	return ext == ".yaml" || ext == ".yml"
 }
 
@@ -62,7 +67,7 @@ func (a *Analyzer) Analyze(ctx context.Context, files []domain.ChangedFile) ([]d
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("%s analyzer: %w", Name, err)
 		}
-		if !a.Supports(f.Path) {
+		if !a.Supports(f.Location()) {
 			continue
 		}
 
@@ -188,13 +193,3 @@ func joinDescriptions(objects []*object) string {
 
 // deepEqual compares two decoded YAML values structurally.
 func deepEqual(a, b any) bool { return reflect.DeepEqual(a, b) }
-
-// extension returns the final dot-suffix of a slash-separated path, or "" if there is none.
-func extension(path string) string {
-	slash := strings.LastIndex(path, "/")
-	dot := strings.LastIndex(path, ".")
-	if dot < 0 || dot < slash {
-		return ""
-	}
-	return path[dot:]
-}

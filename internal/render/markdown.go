@@ -126,6 +126,7 @@ func (Markdown) Render(w io.Writer, cert domain.ReversibilityCertificate) error 
 	writeUndoPlan(&b, cert)
 	writeDownMigrations(&b, cert)
 	writeContextWarnings(&b, cert)
+	writePolicyWarnings(&b, cert)
 	writeUnclassifiedTypes(&b, cert)
 	writeFooter(&b, cert)
 
@@ -414,6 +415,27 @@ func writeContextWarnings(b *strings.Builder, cert domain.ReversibilityCertifica
 	b.WriteString("### Production context\n\n")
 	for _, w := range cert.ContextWarnings {
 		fmt.Fprintf(b, "- ⚠️ %s\n", mdEscape(w))
+	}
+	b.WriteString("\n")
+}
+
+// writePolicyWarnings reports configuration that did nothing.
+//
+// Dead config in a safety tool reads as protection the user does not have, so it is stated
+// rather than left to be inferred — the same reason the unanalyzed files are listed. It is not
+// a defect in the change and the heading says so.
+func writePolicyWarnings(b *strings.Builder, cert domain.ReversibilityCertificate) {
+	if len(cert.PolicyWarnings) == 0 {
+		return
+	}
+
+	b.WriteString("### Configuration that did nothing\n\n")
+	b.WriteString("These entries in the policy matched nothing in this changeset. " +
+		"**Nothing below is a defect in your change** — it is configuration that is not " +
+		"protecting you.\n\n")
+
+	for _, w := range cert.PolicyWarnings {
+		fmt.Fprintf(b, "- %s\n", mdEscape(w))
 	}
 	b.WriteString("\n")
 }

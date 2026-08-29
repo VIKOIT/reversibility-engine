@@ -51,6 +51,31 @@ type ChangedFile struct {
 
 	// Current is the content after the change. Nil for StatusRemoved.
 	Current []byte `json:"-"`
+
+	// At is Path in the namespace path-keyed decisions use — see Located.
+	//
+	// It is carried on the file rather than computed where it is needed, because computing it
+	// requires resolving a command-line root against the filesystem and an analyzer may not
+	// touch the filesystem. The boundary that already did the I/O fills this in; everything
+	// downstream reads a value.
+	//
+	// Empty means Path is already in the decision namespace, which is the correct answer for
+	// every provider except the filesystem one and is what Location falls back to. That is not
+	// a permissive default: an unset locator means no root was named, and no root named means
+	// nothing was stripped.
+	At Located `json:"-"`
+}
+
+// Location returns the path this file is decided by.
+//
+// Use it rather than Path anywhere the question is "what kind of file is this" or "where does
+// it sit". Path answers "what should the certificate call it", and those two stopped being the
+// same question the first time somebody ran `revctl check ./migrations`.
+func (f ChangedFile) Location() Located {
+	if f.At != "" {
+		return f.At
+	}
+	return Located(f.Path)
 }
 
 // IsAdded reports whether the file did not exist before this change.

@@ -55,8 +55,8 @@ var candidateExtensions = map[string]bool{
 //   - any .sql file, wherever it sits. A .sql the Postgres analyzer claimed is ANALYZED and
 //     never arrives here, so this fires only when SQL was present and nothing was going to
 //     read it — which is precisely the case that must not pass.
-func Candidate(p string) bool {
-	ok, _ := classifyCandidate(p)
+func Candidate(at domain.Located) bool {
+	ok, _ := classifyCandidate(at)
 	return ok
 }
 
@@ -66,9 +66,9 @@ func Candidate(p string) bool {
 // Django-style .py migrations" is a fact about this tool; anything that reads as a complaint
 // about the changeset would be the engine inventing severity from its own ignorance, which is
 // the thing the two-axis certificate exists to prevent.
-func classifyCandidate(p string) (bool, string) {
-	clean := strings.ToLower(path.Clean(strings.ReplaceAll(p, "\\", "/")))
-	ext := path.Ext(clean)
+func classifyCandidate(at domain.Located) (bool, string) {
+	clean := strings.ToLower(string(at))
+	ext := at.Ext()
 
 	if strings.HasSuffix(clean, ".sql") {
 		return true, "no analyzer claimed this .sql file"
@@ -79,7 +79,7 @@ func classifyCandidate(p string) (bool, string) {
 		// migration directory — see Engine.outcome — and the reason has to say which of those
 		// two things happened, because they call for different responses: teach the engine a
 		// format, or move the file out and ignore it.
-		if InMigrationDir(p) {
+		if InMigrationDir(at) {
 			return false, "not analyzed, and it sits in a migration directory"
 		}
 		return false, ""
@@ -88,7 +88,7 @@ func classifyCandidate(p string) (bool, string) {
 	// The file's own name is not consulted as a directory, so a file literally called
 	// "migrate.py" at the repository root is not a candidate. That is deliberate: it is far
 	// more often a management script than a migration.
-	for _, segment := range strings.Split(path.Dir(clean), "/") {
+	for _, segment := range at.Dir().Segments() {
 		if migrationDirs[segment] {
 			return true, "no analyzer reads " + ext + " migrations"
 		}
@@ -105,10 +105,10 @@ func classifyCandidate(p string) (bool, string) {
 // the split the whole of §16.10 rests on: the question "what kind of file is this" is about
 // where the file sits, and the answer a reader acts on has to name the file the way they named
 // it themselves.
-func unanalyzedFiles(paths []string, qualify func(string) string) []domain.UnanalyzedFile {
+func unanalyzedFiles(paths []string, locate domain.Locator) []domain.UnanalyzedFile {
 	out := make([]domain.UnanalyzedFile, 0, len(paths))
 	for _, p := range paths {
-		_, reason := classifyCandidate(qualify(p))
+		_, reason := classifyCandidate(locate(p))
 		if reason == "" {
 			reason = "not analyzed, and it sits in a migration directory"
 		}
@@ -199,9 +199,8 @@ func RenderingRemedy(paths []string) []string {
 // This is the half of "is this a migration directory" that can be answered from one path, which
 // is what a provider's include predicate has to work with: it decides whether to read a file
 // before it has seen the rest of the changeset.
-func InMigrationDir(p string) bool {
-	clean := strings.ToLower(path.Clean(strings.ReplaceAll(p, "\\", "/")))
-	for _, segment := range strings.Split(path.Dir(clean), "/") {
+func InMigrationDir(at domain.Located) bool {
+	for _, segment := range at.Dir().Segments() {
 		if migrationDirs[segment] {
 			return true
 		}
@@ -221,13 +220,13 @@ func InMigrationDir(p string) bool {
 // It works in the qualified namespace, because both clauses are questions about location and a
 // changeset path has had its root's name stripped off the front — see runConfig.qualify. The map
 // is therefore keyed by qualified directory, and every lookup into it must qualify too.
-func (e *Engine) migrationDirectories(enumerated []string, qualify func(string) string) map[string]bool {
-	dirs := map[string]bool{}
+func (e *Engine) migrationDirectories(enumerated []string, locate domain.Locator) map[domain.Located]bool {
+	dirs := map[domain.Located]bool{}
 
 	for _, p := range enumerated {
-		q := qualify(p)
-		if e.Supports(p) || InMigrationDir(q) {
-			dirs[path.Dir(q)] = true
+		at := locate(p)
+		if e.Supports(at) || InMigrationDir(at) {
+			dirs[at.Dir()] = true
 		}
 	}
 	return dirs
@@ -255,31 +254,31 @@ func (e *Engine) migrationDirectories(enumerated []string, qualify func(string) 
 func (e *Engine) outcome(
 	files []domain.ChangedFile,
 	enumerated []string,
-	qualify func(string) string,
+	locate domain.Locator,
 ) (domain.AnalysisOutcome, []string) {
 	read := make(map[string]bool, len(files))
 	claimed := false
 
 	for _, f := range files {
 		read[f.Path] = true
-		if e.Supports(f.Path) {
+		if e.Supports(f.Location()) {
 			claimed = true
 		}
 	}
 
-	dirs := e.migrationDirectories(enumerated, qualify)
+	dirs := e.migrationDirectories(enumerated, locate)
 
 	var unsupported []string
 	for _, p := range enumerated {
-		if read[p] && e.Supports(p) {
+		at := locate(p)
+		if read[p] && e.Supports(at) {
 			continue
 		}
 
 		// Outside every migration directory, only a migration-shaped file counts: a .py at the
 		// repository root is a script, and holding a changeset hostage to it would be the
 		// severity-from-ignorance failure this engine is not allowed to commit.
-		q := qualify(p)
-		if dirs[path.Dir(q)] || Candidate(q) {
+		if dirs[at.Dir()] || Candidate(at) {
 			unsupported = append(unsupported, p)
 		}
 	}
@@ -294,10 +293,6 @@ func (e *Engine) outcome(
 	default:
 		return domain.OutcomeNoCandidates, nil
 	}
-}
-
-func normalizePath(p string) string {
-	return path.Clean(strings.ReplaceAll(p, "\\", "/"))
 }
 
 // unsupportedContentBlockers turns the candidate paths into the message the certificate carries.

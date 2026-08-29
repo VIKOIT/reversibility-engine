@@ -118,7 +118,7 @@ func TestSupports(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
 			t.Parallel()
-			if got := subject.Supports(tt.path); got != tt.want {
+			if got := subject.Supports(domain.Located(tt.path)); got != tt.want {
 				t.Errorf("Supports(%q) = %v, want %v", tt.path, got, tt.want)
 			}
 		})

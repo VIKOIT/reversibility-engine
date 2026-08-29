@@ -159,6 +159,20 @@ type ReversibilityCertificate struct {
 	// the snapshot.
 	ContextWarnings []string `json:"contextWarnings,omitempty"`
 
+	// PolicyWarnings records configuration that did nothing: an `ignore:` glob that matched no
+	// path in this changeset, or a waiver that covered no finding.
+	//
+	// **Dead config in a safety tool reads as protection the user does not have**, which is the
+	// same reason UnanalyzedFiles exists: never let the reader infer. It is the certificate's
+	// job to say so, not only the CLI's, because the GitHub App is where most people read one
+	// and a warning on a terminal nobody is watching is not a warning.
+	//
+	// It is not an error and it never moves a grade. A waiver written for a rule that did not
+	// fire on this pull request is doing exactly what it should — so the wording is an
+	// observation, and it is separate from ContextWarnings because that field is about
+	// snapshots and this one is about the policy file.
+	PolicyWarnings []string `json:"policyWarnings,omitempty"`
+
 	// UndoPlan is built from the UndoStep fields of Findings and of Waived alike, in reverse
 	// order of application. It is empty when any of them is IRREVERSIBLE — see Blockers.
 	//

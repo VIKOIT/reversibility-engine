@@ -103,9 +103,16 @@ func (p *CertificateProcessor) certify(ctx context.Context, client *gh.Client, j
 	// That is the split earning its cost here more than anywhere else. Fetching content is an
 	// API call per file against a quota shared with everything else the app does.
 	choose := func(listed []provider.Path) []provider.Path {
+		// The GitHub comparison API reports paths relative to the repository root, which is
+		// already the namespace path-keyed decisions are made in — so the locator here is the
+		// identity, and it is written out rather than assumed. `domain.Identity()` says "these
+		// paths are already where they claim to be"; a missing locator would say nothing, and
+		// the difference between those two is the defect in §16.13.
+		locate := domain.Identity()
+
 		out := make([]provider.Path, 0, len(listed))
 		for _, path := range listed {
-			if p.engine.Supports(path.Path) {
+			if p.engine.Supports(locate(path.Path)) {
 				out = append(out, path)
 			}
 		}

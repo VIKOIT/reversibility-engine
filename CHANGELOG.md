@@ -32,6 +32,133 @@ move:
 > partly excluded, now reports `aiGateStatus: FAIL` while still exiting 0; that divergence is
 > deliberate and the CLI announces it.
 
+### Changed — read this if you have a `.reversibility.yml`
+
+**Policy globs are now matched against the project-relative path, and a config whose globs
+silently matched nothing may begin matching.**
+
+`ignore:` patterns and waiver `path:` patterns were matched against the changeset's spelling of a
+file, which is relative to whatever directory the run was pointed at. So a waiver written
+
+```yaml
+waivers:
+  - rule: PG001
+    path: "db/migrate/0001_*.sql"
+```
+
+matched nothing at all under `revctl check ./db/migrate`, because the engine saw that file as
+`0001_drop.up.sql`. The operator had written a waiver, the file said a risk was accepted, and no
+risk was accepted. The same held for `ignore:`.
+
+Both are now resolved in the namespace every other path-keyed decision uses. **That is the
+correction, not a regression** — the pattern always meant what it says, and now it does — but the
+consequence runs in one direction worth stating plainly:
+
+| Before | Now |
+| --- | --- |
+| A project-relative glob under a narrowed root matched nothing | It matches |
+| A glob written against the stripped path matched | It no longer does |
+
+So a waiver you believed was inert may now waive, and a waiver written against the stripped path
+will stop. **Nobody should discover either from a changed grade**, which is why this is its own
+heading: run `revctl check` once after upgrading and read the new `policyWarnings` on the
+certificate, which names every pattern that matched nothing.
+
+**Dead config is now reported**, on the certificate as `policyWarnings` and on stderr:
+
+```
+revctl: ignore pattern legacy/** matched no file in this changeset
+revctl: waiver PG001 at db/migrate/0001_*.sql covered no finding in this changeset
+```
+
+A pattern that matches nothing is indistinguishable, from the outside, from a pattern that is
+protecting you — and **dead config in a safety tool reads as protection the user does not have.**
+It is never an error and it never moves a grade: a waiver written for a rule that did not fire on
+this pull request is doing exactly what it should. Certificate schema `1.5.0` gains the field;
+`1.5.0` has not shipped, so this folds into it rather than bumping.
+
+### Fixed
+
+**The Django P0's cause, rather than its fourth instance.**
+
+Fixing candidate detection left `ignore:` globs, waiver `path:` globs and `--terraform-plan`
+matching against the changeset's spelling. **Two path namespaces in one decision surface is what
+produced the P0, and keeping one of them was keeping the cause.** The ruling:
+
+> **Path-keyed decisions use one namespace, and it is not the one the caller typed.** A decision
+> that depends on how the analysis root was named is a decision that changes answer for the same
+> files. The caller's naming survives in exactly one place: what gets rendered.
+
+An audit of every path comparison in the engine turned up a fourth live instance, which is the
+reason the rule is now stated generally rather than applied twice:
+
+| # | Decision | What it did | Consequence |
+| --- | --- | --- | --- |
+| 1 | Candidate detection | Classified `0001_initial.py` | The P0: `NO_CANDIDATES`, exit 0 |
+| 2 | `ignore:` globs | Matched the stripped path | An ignore list that read as configured and was inert |
+| 3 | Waiver `path:` globs | The same | Worse: a waiver matching nothing looks exactly like one that has not expired |
+| 4 | `--terraform-plan` | Bidirectional suffix match | Over-claimed |
+
+The fourth had already met this problem and answered it with a workaround — a comment in the
+Terraform analyzer said the two spellings "differ", and matched by suffix in both directions. It
+also **over-claimed**: `--terraform-plan a/plan.json` claimed `b/a/plan.json` too, handing the
+analyzer a file nobody named, and a file it claims and cannot read is UNKNOWN, which grades **F**.
+Both sides are resolved into one namespace now and the comparison is exact. The shape worth
+recognising: **a comparison that needs a fuzzy match is usually two namespaces wearing a
+disguise.**
+
+**Enforced by a type rather than by discipline.** `domain.Located` is a distinct type; every
+path-keyed function takes it; `engine.Candidate(f.Path)` no longer compiles. The compiler found
+both remaining call sites during the change, which is the argument for the type in one sentence.
+
+**The anchor moved from the checkout to the project, and the globs forced that correction.**
+Anchoring only at `.git` meant that a tree without one resolved to absolute paths, and every
+relative glob in it would have matched nothing — the exact failure being removed, reappearing in
+the config. `.reversibility.yml` is a project marker too: a policy file is as good evidence of
+where a project starts as a `.git` is, and a tree with neither has no globs to break, because a
+glob comes from a policy file and a policy file would have been a marker.
+
+### Added
+
+**No rendered field may carry a machine-specific value, and three tests hold it.**
+
+Qualifying paths for classification also made them available for rendering, and the first version
+of the `UNSUPPORTED_CONTENT` message used the qualified directory — which outside a project is
+absolute. Two runs over the same tree unpacked in two places would have produced different
+certificates, each carrying the analyst's home directory into a pull request comment. It was
+caught by attention rather than by a test, so it is now a test:
+
+> **No rendered field, in any format, may contain an absolute filesystem path, a hostname, or a
+> username.**
+
+It belongs beside the no-timestamp rule and could not have been caught by the existing determinism
+tests, which compare two runs **on one machine** — where an absolute path is perfectly stable and
+perfectly wrong. `TestNoRenderedOutputCarriesAMachineSpecificValue` scans every format of every
+location-naming outcome; `TestTheSameTreeInTwoPlacesRendersIdentically` unpacks one tree twice and
+compares bytes, catching a leak of any shape; `TestGoldenCertificatesCarryNoMachineSpecificValue`
+extends it to the committed fixtures, which are regenerated on somebody's machine and then
+asserted as correct forever.
+
+**Documented numbers are derived from their authority by test, not maintained by hand.**
+
+The badge fix generalises:
+
+> **Any number in documentation that duplicates a fact stated in the specification must be derived
+> by test.**
+
+Now derived: the rules badge, the counts in `docs/RULES.md`'s own table of contents, the Terraform
+catalog's resource-type and per-class counts, the certificate schema version, the release-target
+count, and every `PG001–PG059`-style range in prose and in anchors. Two mechanisms are deliberate
+— **a claim whose wording moved fails rather than passes**, because a guard that quietly stops
+guarding is how the badge drifted in the first place, and **the failure prints the corrected
+text**, so it is a fix rather than a research task.
+
+**The source-scan deprecation test now states its limitation.** `TestNoFlagIsDeprecatedThroughCobra`
+scans this repository's sources, so a deprecation arriving through a dependency's own mechanism
+passes it untouched. That gap is covered only by `TestStdoutIsAlwaysParseableJSON`, which watches
+the stream and does not care where a stray byte came from. The two are not redundant and the
+comment now says which one actually holds.
+
 ### Fixed
 
 **P0 — the Django case was still live in the invocation the README documents.**

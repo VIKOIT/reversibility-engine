@@ -48,6 +48,11 @@ type Options struct {
 	Overrides []Override
 
 	// ExtraPlanPaths are files to claim regardless of their name, from --terraform-plan.
+	//
+	// **They must already be in the decision namespace.** The CLI resolves what the user typed
+	// through provider.QualifyPath before it gets here, because resolving a path against the
+	// filesystem is I/O and an analyzer does none. Handing this a raw command-line argument is
+	// how the suffix-matching workaround came to exist.
 	ExtraPlanPaths []string
 }
 
@@ -58,7 +63,7 @@ type Options struct {
 type Analyzer struct {
 	catalog   *Catalog
 	overrides map[string]Class
-	extra     map[string]bool
+	extra     map[domain.Located]bool
 }
 
 // New returns an analyzer, or an error if the configuration is not permitted.
@@ -79,7 +84,7 @@ func New(opts Options) (*Analyzer, error) {
 	a := &Analyzer{
 		catalog:   c,
 		overrides: map[string]Class{},
-		extra:     map[string]bool{},
+		extra:     map[domain.Located]bool{},
 	}
 
 	for _, o := range opts.Overrides {
@@ -89,7 +94,7 @@ func New(opts Options) (*Analyzer, error) {
 	}
 
 	for _, p := range opts.ExtraPlanPaths {
-		a.extra[normalizePath(p)] = true
+		a.extra[domain.Located(normalizePath(p))] = true
 	}
 
 	return a, nil
@@ -130,39 +135,27 @@ func (a *Analyzer) applyOverride(o Override) error {
 func (a *Analyzer) Name() string { return "terraform" }
 
 // Supports implements analyzer.Analyzer.
-func (a *Analyzer) Supports(p string) bool {
-	clean := normalizePath(p)
-
-	if strings.HasSuffix(clean, PlanSuffix) {
+//
+// **The comparison against `--terraform-plan` is exact**, and it can be because both sides are
+// now in the same namespace: the CLI resolves what the user typed through
+// `provider.QualifyPath`, and the engine hands this the file's `domain.Located`.
+//
+// It used to be a bidirectional suffix match, with a comment saying the two spellings "differ".
+// They did, and that was the Django P0 in a fourth costume — a workaround for a missing
+// namespace rather than a namespace. It also over-claimed in a way nobody had cause to notice:
+// `--terraform-plan a/plan.json` matched `b/a/plan.json` as well, so naming one plan could hand
+// the Terraform analyzer a file that was never named, and a changeset that should have been
+// UNKNOWN got graded against a catalog.
+func (a *Analyzer) Supports(at domain.Located) bool {
+	if strings.HasSuffix(string(at), PlanSuffix) {
 		return true
 	}
 
-	// --terraform-plan is given as the user typed it, which is usually a path relative to their
-	// shell or an absolute one, while Supports is asked about the path as it appears in the
-	// changeset. Those differ, so the two are compared by path suffix in either direction — the
-	// same mismatch that made a policy ignore list match nothing before S10.
-	for claimed := range a.extra {
-		if pathsReferToTheSameFile(claimed, clean) {
-			return true
-		}
-	}
-
-	return false
+	return a.extra[at]
 }
 
 func normalizePath(p string) string {
 	return path.Clean(strings.ReplaceAll(p, "\\", "/"))
-}
-
-// pathsReferToTheSameFile compares two spellings of a path.
-//
-// Suffix matching at a separator boundary, never a bare basename compare: "plan.json" must not
-// claim "vendor/somewhere/plan.json" just because the last segment agrees.
-func pathsReferToTheSameFile(a, b string) bool {
-	if a == b {
-		return true
-	}
-	return strings.HasSuffix(a, "/"+b) || strings.HasSuffix(b, "/"+a)
 }
 
 // CatalogVersion implements analyzer.CatalogVersioner.
@@ -189,7 +182,7 @@ func (a *Analyzer) Analyze(ctx context.Context, files []domain.ChangedFile) ([]d
 	var out []domain.Finding
 
 	for _, f := range sorted {
-		if !a.Supports(f.Path) || f.IsRemoved() {
+		if !a.Supports(f.Location()) || f.IsRemoved() {
 			continue
 		}
 		out = append(out, a.analyzeFile(f)...)

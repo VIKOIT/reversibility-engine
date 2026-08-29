@@ -480,7 +480,7 @@ func TestSupports(t *testing.T) {
 	}
 
 	for path, want := range tests {
-		if got := a.Supports(path); got != want {
+		if got := a.Supports(domain.Located(path)); got != want {
 			t.Errorf("Supports(%q) = %v, want %v", path, got, want)
 		}
 	}

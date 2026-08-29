@@ -8,6 +8,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/VIKOIT/reversibility-engine/internal/policy"
 )
 
 // This file answers one question, and getting it wrong was a P0 in its own right:
@@ -26,12 +28,23 @@ import (
 //
 // See docs/SPECIFICATION.md §16.10.
 
-// vcsMarkers are the entries that mark a directory as the root of a checkout.
+// projectMarkers are the entries that mark a directory as the root of a project.
 //
-// The same three names the enumeration walk already skips, so there is one idea of what a
-// repository is rather than two. A marker may be a file rather than a directory: a git worktree
-// writes `.git` as a file holding a pointer.
-var vcsMarkers = []string{".git", ".hg", ".svn"}
+// The three version-control names are the ones the enumeration walk already skips, so there is
+// one idea of what a checkout is rather than two. A marker may be a file rather than a directory:
+// a git worktree writes `.git` as a file holding a pointer.
+//
+// **`.reversibility.yml` is on this list and it is not an afterthought.** The decision namespace
+// is not only what the engine classifies against, it is what the user's `ignore:` and waiver
+// `path:` globs are written against — and those are written relative to the project, because the
+// policy file sits at its root. Anchoring only at a checkout would mean that a tree without one
+// resolved to absolute paths, and every relative glob in it would silently match nothing. That
+// is the exact failure this whole namespace exists to remove, reappearing in the config.
+//
+// So the anchor is "where this project starts", and a policy file is as good evidence of that as
+// a `.git` is. A tree with neither has no globs to break, because a glob comes from a policy file
+// and a policy file would have been a marker.
+var projectMarkers = []string{".git", ".hg", ".svn", policy.FileName}
 
 // RootPrefix returns the prefix that puts an FS provider's paths back into the namespace Path
 // documents — the file's location relative to the repository root.
@@ -40,16 +53,18 @@ var vcsMarkers = []string{".git", ".hg", ".svn"}
 // never before reporting one: the certificate keeps naming files exactly as the caller named
 // them, so a finding's path is still one the reader can paste into the same command.
 //
-// **The anchor is the repository, not the filesystem.** Both are self-consistent — the defect is
-// an anchor that moves with the argument — and the repository is the one the rules are written
-// about: docs/RULES.md §3 asks whether a file "sits under a path segment named migrations",
-// meaning in the repository, not on the machine. Anchoring at the filesystem root instead would
-// make a checkout parked under `~/migrate/` read every `.py` file beneath it as a migration,
-// which is severity invented from where somebody keeps their source.
+// **The anchor is the project, not the filesystem.** Both are self-consistent — the defect is an
+// anchor that moves with the argument — and the project is the one the rules and the config are
+// both written about: docs/RULES.md §3 asks whether a file "sits under a path segment named
+// migrations", meaning in the repository rather than on the machine, and an `ignore:` glob means
+// the same thing. Anchoring at the filesystem root would make a checkout parked under
+// `~/migrate/` read every `.py` file beneath it as a migration, which is severity invented from
+// where somebody keeps their source.
 //
-// Outside a checkout there is no better anchor than the absolute path, and that is what is used.
-// It is consistent, which is the property being bought here; it is only unqualified by a
-// repository boundary because there is none to qualify it.
+// Outside a project there is no better anchor than the absolute path, and that is what is used.
+// It is consistent, which is the property being bought here, and it costs nothing that could
+// have worked: the globs that would break are written in a policy file, and a policy file is
+// itself a marker — see projectMarkers.
 //
 // Several roots contribute only the prefix they share. A segment true of one root and not of
 // another is not true of the changeset, and asserting it would classify files by a directory
@@ -77,6 +92,35 @@ func RootPrefix(roots []string) string {
 	return path.Join(common...)
 }
 
+// QualifyPath maps a path the user typed on a command line into the decision namespace.
+//
+// RootPrefix answers "where is this analysis rooted"; this answers "where is this one file", and
+// they need to agree or the two sides of a comparison are back in different namespaces. It is
+// what `--terraform-plan` goes through: that flag names a file relative to the user's shell,
+// while the engine knows the same file by its path in the changeset, and comparing those two
+// spellings directly is what produced the suffix-matching workaround the Terraform analyzer used
+// to carry.
+//
+// The path need not exist. A plan that has not been rendered yet still resolves, and the answer
+// is what it will be once it does.
+func QualifyPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		// Unresolvable: hand back what was given rather than a guess. It will not match, which
+		// is the fail-closed direction — a plan the engine cannot locate is one it does not
+		// claim, and an unclaimed .json is not graded against the catalog.
+		return filepath.ToSlash(p)
+	}
+
+	if repo := projectRoot(filepath.Dir(abs)); repo != "" {
+		if within, err := filepath.Rel(repo, abs); err == nil {
+			return filepath.ToSlash(within)
+		}
+	}
+
+	return filepath.ToSlash(abs)
+}
+
 // rootSegments resolves one command-line root to the segments it contributes.
 //
 // It resolves rather than reading the argument, because the argument is exactly what must not
@@ -96,7 +140,7 @@ func rootSegments(root string) ([]string, bool) {
 	}
 
 	rel := abs
-	if repo := repositoryRoot(abs); repo != "" {
+	if repo := projectRoot(abs); repo != "" {
 		within, err := filepath.Rel(repo, abs)
 		if err != nil {
 			return nil, false
@@ -117,14 +161,13 @@ func rootSegments(root string) ([]string, bool) {
 	return out, true
 }
 
-// repositoryRoot walks up from dir to the checkout that contains it, or returns "" if there is
-// none.
+// projectRoot walks up from dir to the project that contains it, or returns "" if there is none.
 //
 // The walk is on directory metadata only and stops at the first marker, so it costs a handful of
-// stats on the way to a repository root that is almost always one or two levels up.
-func repositoryRoot(dir string) string {
+// stats on the way to a root that is almost always one or two levels up.
+func projectRoot(dir string) string {
 	for {
-		for _, marker := range vcsMarkers {
+		for _, marker := range projectMarkers {
 			if _, err := os.Lstat(filepath.Join(dir, marker)); err == nil {
 				return dir
 			}

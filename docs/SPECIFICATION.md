@@ -123,6 +123,55 @@ the engine would make `revctl check .` read the whole repository and the GitHub 
 file in every touched directory. That is an API-quota decision, and it is not one to make as a
 side effect of a coverage fix.
 
+### Path-keyed decisions use one namespace
+
+> **Path-keyed decisions use one namespace, and it is not the one the caller typed.** A decision
+> that depends on how the analysis root was named is a decision that changes answer for the same
+> files.
+
+This is the general form of the rule below it, and it is stated separately because fixing the
+specific case left the cause in place. Candidate detection was corrected to resolve paths against
+the repository; `ignore:` globs, waiver `path:` globs and `--terraform-plan` went on matching
+against the changeset's spelling. **Two namespaces in one decision surface is what produced the
+P0, and keeping one of them was keeping the cause.**
+
+The namespace is the **project**: the file's path relative to the root of the checkout or the
+directory holding `.reversibility.yml`. That choice is not arbitrary — it is the namespace the
+rule tables are written about (*"a path segment named `migrations`"* means in the repository) and
+the one users write globs in (relative to the policy file, which sits at the root). Anchoring at
+the filesystem root would be equally self-consistent and would make a checkout parked under
+`~/migrate/` read every `.py` beneath it as a migration. See §16.10 for the anchor and §16.13 for
+the rest.
+
+**The caller's naming survives in exactly one place, and that place is output.** A qualified path
+outside a project is an absolute path, so a certificate carrying one would stop being
+byte-identical between machines — the same class of input as a timestamp or a hostname. So:
+
+> **The qualified namespace classifies; it never renders.**
+
+Enforced by the type, not by discipline: `domain.Located` is a distinct type, every path-keyed
+function takes it, and handing one a raw changeset path is a compile error. That converts "somebody
+forgot" into "somebody wrote a conversion", and a conversion is visible and greppable where a
+forgotten qualification was nothing at all.
+
+**Every place a path is compared, and what namespace it uses** — the audit §16.13 required,
+recorded here so the next contributor extends it rather than repeating it:
+
+| Where | Namespace | Why |
+| --- | --- | --- |
+| `engine.Candidate`, `InMigrationDir`, `migrationDirectories`, `outcome` | **Located** | The P0. Keys on a directory segment above the file. |
+| `policy.Ignores` / `IgnoreMatcher` | **Located** | Globs are written against the project. |
+| Waiver `path:` (`policy.waiverFor`) | **Located** | Same, and §16.13 changes S10 semantics here. |
+| `analyzer.Supports` — all three | **Located** | Postgres and Kubernetes read the extension only and would be right either way; Terraform compares `--terraform-plan` against a file and would not. |
+| `--terraform-plan` values | **Located**, via `provider.QualifyPath` | Named relative to the user's shell; resolved at the boundary, where I/O is allowed. |
+| Down-migration pairing (`postgres/migration.go`) | changeset-relative, **invariant** | Pairs by `path.Dir` relative to each other. A uniform prefix shifts both sides equally. |
+| `policy.IsPolicyFile` | base name, **invariant** | Compares the file name and nothing else. |
+| Context-sibling lookup (`git.go`, `github.go`) | provider-internal, **invariant** | Both sides come from one listing, so it is self-consistent by construction. |
+| `skipDir`, fake-provider skips | base name, **invariant** | Enumeration decisions. They define the namespace rather than deciding within it. |
+| `RenderingRemedy`, `unsupportedContentBlockers`, every renderer | **as the caller named it** | Output. Deliberately not Located — see the determinism rule above. |
+| Action `exclude` inputs | git pathspec, **invariant** | Resolved by git in the repository, which is the same namespace. |
+| Snapshot enrichment | not a path at all | Matches on table and column names. |
+
 ### Candidate detection must not depend on how the analysis root was named
 
 > **Candidate detection must not depend on how the analysis root was named.**
@@ -226,7 +275,9 @@ rather than the principles living only where they were first needed.
 | Any field that constrains the verdict appears in every rendered output | §2 above | `GradeCauses`, and what a certificate owes a reader |
 | Every classification has a table row | §13 | The D2 shape: code claiming a construct the table omits |
 | Enumeration and retrieval are separate concerns | §2 above | The Django P0, the coverage denominator, and the rename bypass — one root cause |
-| Candidate detection must not depend on how the analysis root was named | §2 above | `check ./migrations` vs `check .`; anything that classifies by path |
+| Path-keyed decisions use one namespace | §2 above | Candidates, ignore globs, waiver paths, `Supports`, `--terraform-plan` — and what may be rendered |
+| Candidate detection must not depend on how the analysis root was named | §2 above | `check ./migrations` vs `check .`; the instance the general rule came from |
+| Any number in documentation duplicating the specification is derived by test | §2 below | The rules badge, catalog counts, schema version, rule ID ranges |
 | All diagnostics go to stderr; stdout carries the certificate | §2 above | Deprecations, warnings, gate reasons — and what `--help` is not |
 | A refusal must name the way forward | §2 below | `UNSUPPORTED_CONTENT`, coverage-`PARTIAL`, and the ORM rendering path |
 | The overwrite principle | [`RULES.md` §1](RULES.md#the-overwrite-principle) | PG012, PG013, PG028, PG043, PG050, PG054, PG057 |
@@ -323,6 +374,32 @@ Note the two disciplines the rule imposes in the same breath:
   0 and still fails the AI merge gate, because §16.8 is unchanged: a human may accept a risk with
   their name on it and an agent may not inherit it. The README states that outcome beside the
   green one rather than leaving a team to find it after they trusted a passing build.
+
+### A documented number that duplicates the specification is derived by test
+
+> **Any number in documentation that duplicates a fact stated in the specification must be derived
+> by test, not maintained by hand.**
+
+The README's rules badge said `27 PG` while the table defined 59. It had been wrong for
+thirty-two rules and nothing noticed, because nothing checked it — every other claim about the
+tables is verified against them, and the number on the front page was the one claim exempt.
+
+The fix is not a corrected number, it is a test that computes it. `TestTheReadmeBadgeMatchesTheRuleTables`
+derives the badge from `docs/RULES.md` and prints the corrected line on failure;
+`TestDocumentedNumbersAreDerivedFromTheirAuthority` does the same for the Terraform catalog counts,
+the schema version, and the release-target count; `TestDocumentedRuleIDRangesMatchTheTables` does it
+for every `PG001–PG059`-style range in prose and in anchors.
+
+Two properties of the mechanism are load-bearing:
+
+- **A claim that has moved fails rather than passes.** If the wording changes so the pattern no
+  longer matches, the test fails and says so. A guard that quietly stops guarding is how the
+  badge drifted in the first place.
+- **The failure states the authority and prints the corrected text**, so a failure is a fix and
+  not a research task.
+
+Adding a documented number means adding a row to that table. Anything a reader could act on that
+is stated twice — a count, a version, a range, a supported-platform list — belongs in it.
 
 ## 3. Scope
 
@@ -537,6 +614,7 @@ type ReversibilityCertificate struct {
     UndoPlan       []UndoStep
     Blockers       []string  // human-readable reasons for F
     ContextWarnings []string // stale snapshots and the like (S11)
+    PolicyWarnings  []string // config that did nothing: a dead ignore glob or waiver
 }
 ```
 
@@ -551,12 +629,14 @@ here.** It lives in exactly one place, `domain.SchemaVersion`, re-exported as
 | `1.2.0` | `Finding.Context`, `ContextWarnings` | S11 |
 | `1.3.0` | `WILL_FAIL` — a new value in an existing enum | S11-patch |
 | `1.4.0` | `CatalogVersion` | S12 |
-| `1.5.0` | `Outcome`, `Coverage`, `UnanalyzedFiles`, `IgnoredByPolicy`, `GradeCauses`; `Grade` gained `N/A`; `AIGateStatus` gained `NOT_APPLICABLE`, and a `PASS` now also requires full coverage and no policy-ignored candidate | P0 and its follow-ups |
+| `1.5.0` | `Outcome`, `Coverage`, `UnanalyzedFiles`, `IgnoredByPolicy`, `GradeCauses`, `PolicyWarnings`; `Grade` gained `N/A`; `AIGateStatus` gained `NOT_APPLICABLE`, and a `PASS` now also requires full coverage and no policy-ignored candidate | P0 and its follow-ups |
 
-**`1.5.0` covers four separate changes and it is deliberately one version.** They were developed
+**`1.5.0` covers five separate changes and it is deliberately one version.** They were developed
 as 1.5.0, 1.6.0 and 1.7.0, and collapsed before release because no consumer ever saw the
 intermediates. Three version numbers that never meant anything outside this repository would
-read, from a changelog, as three schemas a consumer might encounter.
+read, from a changelog, as three schemas a consumer might encounter. `PolicyWarnings` was folded
+in later on the same reasoning and by the same rule below: 1.5.0 has not shipped, so it is still
+a working note rather than a promise.
 
 The rule this settles, because it will come up again: **the honesty requirement applies to
 versions a consumer can observe. An unreleased intermediate is a working note, not a promise.**
@@ -1635,6 +1715,117 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
     and an agent may not inherit it. So an agent-mergeable repository is one that has **moved** to
     SQL-first migrations, not one that has learned to look away from the Python ones — and saying
     that plainly is the honest form of "there is a path".
+
+13. ~~**Ignore globs are matched against the root-relative path while candidate detection uses the
+    qualified one.**~~ **RESOLVED as the same defect, not a second one. Every path-keyed decision
+    now resolves against the project-qualified namespace.**
+
+    §16.10 fixed candidate detection and left `ignore:` globs, waiver `path:` globs and
+    `--terraform-plan` matching against the changeset's spelling. **Two path namespaces in one
+    decision surface is what produced the P0; keeping one of them was keeping the cause.** The
+    ruling, now in §2:
+
+    > **Path-keyed decisions use one namespace, and it is not the one the caller typed.** A
+    > decision that depends on how the analysis root was named is a decision that changes answer
+    > for the same files. The caller's naming survives in exactly one place: what gets rendered.
+
+    **What was live, in the order it was found.** The audit turned up a fourth instance, which is
+    the reason the rule is stated generally rather than applied twice:
+
+    | # | Decision | What it did | Consequence |
+    | --- | --- | --- | --- |
+    | 1 | Candidate detection | Classified `0001_initial.py` | The P0: `NO_CANDIDATES`, exit 0 |
+    | 2 | `ignore:` globs | `django/**/migrations/*.py` matched nothing under `check ./migrations` | An ignore list that read as configured and was inert |
+    | 3 | Waiver `path:` globs | Same | Worse: a waiver matching nothing looks identical to one that has not expired |
+    | 4 | `--terraform-plan` | Bidirectional suffix match, with a comment saying the spellings "differ" | Over-claimed: `a/plan.json` also claimed `b/a/plan.json`, which graded **F** as UNKNOWN |
+
+    The fourth had already met this problem and answered it with a workaround. That is the shape
+    worth recognising: **a comparison that needs a fuzzy match is usually two namespaces wearing a
+    disguise.**
+
+    **Enforced by a type, not by discipline.** `domain.Located` is a distinct string type; every
+    path-keyed function takes it; `domain.Locator` maps a changeset path into it and is built once
+    per run, at the boundary. `engine.Candidate(f.Path)` no longer compiles. That converts
+    "somebody forgot" — which is invisible — into "somebody wrote a conversion", which is visible
+    and greppable. The compiler found both remaining call sites during the change, which is the
+    argument for the type in one sentence.
+
+    `domain.ChangedFile` carries `At`, stamped once in `Certify`, so an analyzer receives the
+    value rather than computing it — an analyzer may not touch the filesystem, and resolving a
+    root requires it. An empty `At` falls back to `Path`, and that is the correct answer rather
+    than a permissive default: no root named means nothing was stripped.
+
+    **The anchor moved from the checkout to the project, and that correction was forced by the
+    globs.** §16.10 anchored at `.git`/`.hg`/`.svn` and fell back to the absolute path. Applied to
+    user-authored globs that is fatal: in a tree with no checkout, every relative pattern resolves
+    against an absolute path and matches nothing — the exact failure this namespace exists to
+    remove, reappearing in the config. So `.reversibility.yml` is a project marker too. A policy
+    file is as good evidence of "where this project starts" as a `.git` is, and **a tree with
+    neither has no globs to break, because a glob comes from a policy file and a policy file would
+    have been a marker.**
+
+    **This changes S10 semantics and the change is announced rather than discovered.** A waiver
+    written `path: "migrations/0001_*.sql"` — the way anybody writes one — matched nothing under
+    `check ./migrations` and now applies. A config whose globs silently matched nothing may begin
+    matching. **That is the correction, not a regression**, and it is in the changelog under its
+    own heading because nobody should meet it as a changed grade.
+    `TestWaiverPathIsWrittenAgainstTheProject` asserts the new rule where its predecessor asserted
+    the old one.
+
+    **Dead config is now reported, and that is the other half of the ruling.** A pattern that
+    matches nothing is indistinguishable, from the outside, from a pattern that is protecting you
+    — and **dead config in a safety tool reads as protection the user does not have.** Same
+    principle as naming unanalyzed files: never let the reader infer. `PolicyWarnings` lists every
+    `ignore:` that matched no path and every waiver that covered no finding, on the certificate
+    and on stderr, worded as an observation. It is never an error and never moves a grade: a
+    waiver written for a rule that did not fire on this pull request is doing exactly what it
+    should.
+
+    The complete audit — every place a path is compared, and whether it is namespace-sensitive or
+    invariant — is the table in §2 rather than here, because it is a standing reference and not a
+    record of one decision.
+
+14. ~~**Nothing stops a machine-specific value reaching a rendered certificate.**~~ **RESOLVED.
+    No rendered field, in any format, may contain an absolute path, a hostname, or a username.**
+
+    This is the rule the §16.10 work nearly broke, and it is written down rather than remembered
+    because it was caught by attention rather than by a test.
+
+    Qualifying paths for classification also made them available for rendering, and the first
+    version of the `UNSUPPORTED_CONTENT` message used the qualified directory — which outside a
+    project is absolute. Two runs over the same tree unpacked in two places would have produced
+    different certificates, and every one of them would have carried the analyst's home directory
+    into a pull request comment.
+
+    > **No rendered field, in any format, may contain an absolute filesystem path, a hostname, or
+    > a username.**
+
+    It belongs beside the no-timestamp rule and is enforced the same way, because the existing
+    determinism tests could not have caught it: they compare two runs **on one machine**, where an
+    absolute path is perfectly stable and perfectly wrong.
+
+    Three tests hold it. `TestNoRenderedOutputCarriesAMachineSpecificValue` scans every format of
+    every location-naming outcome for the shapes a leak takes.
+    `TestTheSameTreeInTwoPlacesRendersIdentically` unpacks one tree twice and compares bytes,
+    which catches a leak of any shape at all.
+    `TestGoldenCertificatesCarryNoMachineSpecificValue` extends it to the committed fixtures,
+    because a golden file is regenerated on somebody's machine and then asserted as correct
+    forever.
+
+15. ~~**Documented numbers are maintained by hand.**~~ **RESOLVED. A number in documentation that
+    duplicates the specification is derived by test.**
+
+    The principle graduated to §2. What belongs here is the reasoning about scope: the badge was
+    the instance, and the generalisation is that **every claim about the tables was already
+    checked against them except the ones a reader sees first.**
+
+    Derived now: the rules badge, the counts in `docs/RULES.md`'s own table of contents, the
+    Terraform catalog's resource-type and per-class counts, the certificate schema version, the
+    release-target count, and every `PG001–PG059`-style range in prose and anchors.
+
+    Two mechanisms are deliberate. **A claim whose wording moved fails rather than passes** — a
+    guard that quietly stops guarding is how the badge drifted in the first place — and **the
+    failure prints the corrected text**, so it is a fix rather than a research task.
 
 ## 17. Fixture conventions
 

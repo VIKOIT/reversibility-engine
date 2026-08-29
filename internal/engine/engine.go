@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path"
 	"sort"
 	"strings"
 	"time"
@@ -56,33 +55,34 @@ type runConfig struct {
 	// property that makes an ignore list meaningful, so the only place that knows one existed
 	// is the include predicate that rejected it.
 	ignoredByPolicy []string
+	// deadIgnores are `ignore:` patterns that matched no path in this changeset.
+	//
+	// The engine cannot discover these for the same reason it cannot discover the ignored
+	// paths: selection happens before Certify is called. Dead waivers it does discover, because
+	// applying waivers is its own job.
+	deadIgnores []string
 	// root is where the changeset's paths sit in the repository they were read from.
 	//
 	// A changeset path is relative to whatever the provider was pointed at, and for the
 	// filesystem provider that is a directory the caller chose. `revctl check ./migrations`
 	// therefore strips the one segment that says these files are migrations. Classification
 	// asks a question about location, so it has to ask it of the location the file actually
-	// has — see qualify, and docs/SPECIFICATION.md §16.10.
+	// has — see runConfig.locator, and docs/SPECIFICATION.md §16.10.
 	//
 	// Empty for every provider whose paths are already repository-relative, which is all of
 	// them except the filesystem one, so the default is the behaviour that was always correct.
 	root string
 }
 
-// qualify puts a changeset path back where it sits in the repository it was read from.
+// locator returns the mapping from this run's changeset paths into the decision namespace.
 //
-// It is used for classification and for nothing else. **Every path the certificate reports stays
+// It is used for decisions and for nothing else. **Every path the certificate reports stays
 // exactly as the caller named it** — a finding, an unanalyzed file, and an ignored path are all
-// still addressable with the command the reader just ran. What moves is only the path the
-// engine asks "is this plausibly a migration" about, because that question is about where the
-// file is and not about how it was named on a command line.
-func (c runConfig) qualify(p string) string {
-	clean := normalizePath(p)
-	if c.root == "" {
-		return clean
-	}
-	return path.Join(c.root, clean)
-}
+// still addressable with the command the reader just ran. What moves is only the path the engine
+// asks "is this plausibly a migration", "does an ignore glob cover this", "does a waiver cover
+// this", and "does an analyzer claim this" about, because every one of those is a question about
+// where the file sits and not about how it was named on a command line.
+func (c runConfig) locator() domain.Locator { return domain.NewLocator(c.root) }
 
 // IgnoredByPolicy records the candidate files a policy excluded from this run.
 //
@@ -116,6 +116,16 @@ func Enumerated(paths []string) RunOption {
 // for the filesystem provider. See docs/SPECIFICATION.md §16.10.
 func RootedAt(prefix string) RunOption {
 	return func(c *runConfig) { c.root = prefix }
+}
+
+// DeadIgnores records `ignore:` patterns that matched nothing in this changeset.
+//
+// A pattern that matches nothing is dead config, and **dead config in a safety tool reads as
+// protection the user does not have.** It reaches the certificate rather than only a terminal,
+// for the reason UnanalyzedFiles does: the reader must never have to infer what their
+// configuration did.
+func DeadIgnores(patterns []string) RunOption {
+	return func(c *runConfig) { c.deadIgnores = append(c.deadIgnores, patterns...) }
 }
 
 // WithPolicy sets the resolved policy. A nil policy means none, which is the default and must
@@ -198,6 +208,16 @@ func (e *Engine) Certify(
 		opt(&run)
 	}
 	sort.Strings(run.ignoredByPolicy)
+	// Every path-keyed decision in this run is made in one namespace, and this is where the
+	// changeset enters it. Stamping happens once, here, rather than at each decision site,
+	// because a decision site that forgets is exactly the defect — four times over, see
+	// domain.Located.
+	//
+	// It is stamped and not rewritten: ChangedFile.Path is untouched, so the digest below, every
+	// finding, and every rendered path stay as the caller named them.
+	locate := run.locator()
+	files = located(files, locate)
+
 	// The policy is an input to the verdict, so it is part of what the digest attributes the
 	// verdict to. It is mixed in only when a policy exists, which keeps every digest ever
 	// produced without one exactly as it was.
@@ -247,7 +267,7 @@ func (e *Engine) Certify(
 
 	// A policy that cannot be resolved is a broken run, not a run without a policy. Continuing
 	// would enforce something nobody configured.
-	decision, err := e.policy.Apply(findings, e.today)
+	decision, err := e.policy.Apply(findings, e.today, locate)
 	if err != nil {
 		wrapped := fmt.Errorf("engine: %w", err)
 		return failedCertificate(digest, wrapped), wrapped
@@ -266,10 +286,8 @@ func (e *Engine) Certify(
 
 	// Classification happens in the repository's namespace, not in the changeset's. A path here is
 	// relative to whatever the provider was pointed at, and `revctl check ./migrations` therefore
-	// strips the one segment that says these files are migrations — see runConfig.qualify.
-	qualify := run.qualify
-
-	outcome, unsupported := e.outcome(files, enumerated, qualify)
+	// strips the one segment that says these files are migrations — see runConfig.locator.
+	outcome, unsupported := e.outcome(files, enumerated, locate)
 
 	// Grade is computed from every finding, waived ones included. It states what the evidence
 	// says about the change, and no configuration may move it: a waiver accepts a risk, it does
@@ -317,7 +335,7 @@ func (e *Engine) Certify(
 	// permanently close the gate.
 	ignoredCandidates := 0
 	for _, p := range run.ignoredByPolicy {
-		if Candidate(qualify(p)) {
+		if Candidate(locate(p)) {
 			ignoredCandidates++
 		}
 	}
@@ -334,7 +352,7 @@ func (e *Engine) Certify(
 		AIGateStatus:    grade.Gate(conditions),
 		Outcome:         outcome,
 		Coverage:        coverage,
-		UnanalyzedFiles: nonNilUnanalyzed(unanalyzedFiles(unsupported, qualify)),
+		UnanalyzedFiles: nonNilUnanalyzed(unanalyzedFiles(unsupported, locate)),
 		IgnoredByPolicy: nonNilStrings(run.ignoredByPolicy),
 		Applicable:      outcome.Certifies(),
 		InputDigest:     digest,
@@ -346,7 +364,10 @@ func (e *Engine) Certify(
 		Blockers:        nonNilStrings(blockers),
 		GradeCauses:     nonNilStrings(scored.causes),
 		ContextWarnings: e.contextWarnings(),
-		DownMigrations:  nonNilStatuses(downMigrations),
+		// Not nonNilStrings: the field is omitempty, so an empty slice would not survive a JSON
+		// round trip and the certificate would stop being its own fixed point.
+		PolicyWarnings: policyWarnings(run.deadIgnores, decision.DeadWaivers),
+		DownMigrations: nonNilStatuses(downMigrations),
 	}
 
 	if len(analyzerErrors) > 0 {
@@ -394,9 +415,9 @@ func (e *Engine) run(ctx context.Context, files []domain.ChangedFile) (findings 
 // Providers use this to avoid reading files nobody will look at. It is the engine's answer
 // rather than a list of extensions maintained separately, so a new analyzer widens the net
 // automatically instead of requiring two places to be updated in step.
-func (e *Engine) Supports(path string) bool {
+func (e *Engine) Supports(at domain.Located) bool {
 	for _, a := range e.analyzers {
-		if a.Supports(path) {
+		if a.Supports(at) {
 			return true
 		}
 	}
@@ -560,6 +581,47 @@ func pathsOf(files []domain.ChangedFile) []string {
 	return out
 }
 
+// policyWarnings turns dead configuration into lines a human can act on.
+//
+// **Worded as an observation, never an accusation.** A waiver written for a rule that did not
+// fire on this pull request is doing exactly what it should, and a message implying otherwise
+// would train people to ignore the whole category — which is the failure mode this is meant to
+// prevent, arrived at from the other side.
+//
+// Order is the order the patterns appear in the policy file, so the certificate is deterministic
+// and a reader can find the line. nil rather than an empty slice when there is nothing to say:
+// the field is omitempty, and an empty one would not survive a JSON round trip.
+func policyWarnings(deadIgnores, deadWaivers []string) []string {
+	if len(deadIgnores)+len(deadWaivers) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(deadIgnores)+len(deadWaivers))
+	for _, pattern := range deadIgnores {
+		out = append(out, "ignore pattern "+pattern+" matched no file in this changeset")
+	}
+	for _, waiver := range deadWaivers {
+		out = append(out, "waiver "+waiver+" covered no finding in this changeset")
+	}
+	return out
+}
+
+// located stamps each file with where it sits in the decision namespace.
+//
+// It copies rather than mutating in place: Certify is called with a slice the caller owns, and
+// an orchestrator that writes into its argument is one shared Engine away from two runs
+// corrupting each other. Path is never touched — the stamp is additional, so every digest,
+// finding and rendered path is exactly what it was.
+func located(files []domain.ChangedFile, locate domain.Locator) []domain.ChangedFile {
+	out := make([]domain.ChangedFile, len(files))
+	copy(out, files)
+
+	for i := range out {
+		out[i].At = locate(out[i].Path)
+	}
+	return out
+}
+
 func nonNilUnanalyzed(in []domain.UnanalyzedFile) []domain.UnanalyzedFile {
 	if in == nil {
 		return []domain.UnanalyzedFile{}
@@ -614,7 +676,7 @@ func (e *Engine) catalogs(files []domain.ChangedFile) (version, digest string) {
 
 		claimed := false
 		for _, f := range files {
-			if a.Supports(f.Path) {
+			if a.Supports(f.Location()) {
 				claimed = true
 				break
 			}

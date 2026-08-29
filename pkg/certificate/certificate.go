@@ -291,6 +291,12 @@ type Certificate struct {
 	// moment somebody stopped refreshing the snapshot.
 	ContextWarnings []string `json:"contextWarnings,omitempty"`
 
+	// PolicyWarnings records configuration that did nothing: an `ignore:` glob that matched no
+	// path in this changeset, or a waiver that covered no finding. Dead config in a safety tool
+	// reads as protection the user does not have, so it is reported rather than left to be
+	// inferred. It is never an error and never moves a grade.
+	PolicyWarnings []string `json:"policyWarnings,omitempty"`
+
 	// UndoPlan is the rollback script, in reverse order of application. When any finding is
 	// irreversible or unknown it is replaced by a statement that no complete undo exists.
 	UndoPlan []string `json:"undoPlan"`
@@ -345,6 +351,7 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 		PolicyDigest:    in.PolicyDigest,
 		CatalogVersion:  in.CatalogVersion,
 		ContextWarnings: in.ContextWarnings,
+		PolicyWarnings:  in.PolicyWarnings,
 		Findings:        make([]Finding, 0, len(in.Findings)),
 		Waived:          make([]WaivedFinding, 0, len(in.Waived)),
 		UndoPlan:        make([]string, 0, len(in.UndoPlan)),

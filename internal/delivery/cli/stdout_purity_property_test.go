@@ -175,6 +175,14 @@ func TestDeprecationNoticesGoToStderr(t *testing.T) {
 // allowed dependencies is complete: pflag is cobra's, not this module's, and promoting it to a
 // direct dependency to write one assertion is not a trade worth making.
 //
+// **Its limitation, stated so nobody reads it as stronger than it is: a source scan checks the
+// source of this repository.** A deprecation arriving through a dependency's own mechanism —
+// cobra marking one of its built-in flags deprecated, a future cobra printing some other warning
+// through the same writer — passes this test untouched, because the call is not in these files.
+// That gap is covered only by TestStdoutIsAlwaysParseableJSON, which watches the stream rather
+// than the source and does not care where a stray byte came from. The two are not redundant:
+// this one names the cause and can be acted on, that one is the one that actually holds.
+//
 // The property above would catch the symptom anyway. This catches the cause, and it says what to
 // do about it, which the symptom cannot.
 func TestNoFlagIsDeprecatedThroughCobra(t *testing.T) {

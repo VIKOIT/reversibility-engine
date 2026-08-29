@@ -33,7 +33,7 @@ func (p panickingAnalyzer) Name() string {
 	return p.name
 }
 
-func (p panickingAnalyzer) Supports(string) bool {
+func (p panickingAnalyzer) Supports(domain.Located) bool {
 	if p.panicIn == "Supports" {
 		panic(p.value)
 	}
@@ -152,8 +152,8 @@ func TestRuntimeFaultsAreRecovered(t *testing.T) {
 
 type faultingAnalyzer struct{ fault func() }
 
-func (faultingAnalyzer) Name() string         { return "faulting" }
-func (faultingAnalyzer) Supports(string) bool { return true }
+func (faultingAnalyzer) Name() string                 { return "faulting" }
+func (faultingAnalyzer) Supports(domain.Located) bool { return true }
 
 func (f faultingAnalyzer) Analyze(context.Context, []domain.ChangedFile) ([]domain.Finding, error) {
 	f.fault()

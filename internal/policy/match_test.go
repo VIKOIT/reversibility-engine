@@ -6,6 +6,7 @@ package policy_test
 import (
 	"testing"
 
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 	"github.com/VIKOIT/reversibility-engine/internal/policy"
 )
 
@@ -66,7 +67,7 @@ func TestMatch(t *testing.T) {
 		t.Run(tc.pattern+" vs "+tc.path, func(t *testing.T) {
 			t.Parallel()
 
-			if got := policy.Match(tc.pattern, tc.path); got != tc.want {
+			if got := policy.Match(tc.pattern, domain.Located(tc.path)); got != tc.want {
 				t.Errorf("Match(%q, %q) = %v, want %v", tc.pattern, tc.path, got, tc.want)
 			}
 		})

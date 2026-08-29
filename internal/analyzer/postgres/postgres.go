@@ -38,8 +38,11 @@ func NewWithParser(p parser.SQLParser) *Analyzer { return &Analyzer{parser: p} }
 func (a *Analyzer) Name() string { return Name }
 
 // Supports claims .sql files.
-func (a *Analyzer) Supports(path string) bool {
-	return strings.EqualFold(extension(path), ".sql")
+//
+// Extension alone, so the namespace makes no difference to the answer here — see the note on
+// analyzer.Analyzer.Supports for why the argument is a domain.Located regardless.
+func (a *Analyzer) Supports(at domain.Located) bool {
+	return at.Ext() == ".sql"
 }
 
 // ValidateDownMigrations implements analyzer.DownMigrationValidator, so the orchestrator can
@@ -87,7 +90,7 @@ func (a *Analyzer) Analyze(ctx context.Context, files []domain.ChangedFile) ([]d
 			return nil, fmt.Errorf("%s analyzer: %w", Name, err)
 		}
 
-		if !a.Supports(f.Path) || f.IsRemoved() {
+		if !a.Supports(f.Location()) || f.IsRemoved() {
 			continue
 		}
 		if _, isDown, isMigration := classifyPath(f.Path); !isMigration || isDown {
@@ -179,16 +182,6 @@ func firstNonEmptyLine(sql string) string {
 		}
 	}
 	return ""
-}
-
-// extension returns the final dot-suffix of a slash-separated path, or "" if there is none.
-func extension(path string) string {
-	slash := strings.LastIndex(path, "/")
-	dot := strings.LastIndex(path, ".")
-	if dot < 0 || dot < slash {
-		return ""
-	}
-	return path[dot:]
 }
 
 // templateMarkers are delimiters that no valid PostgreSQL statement begins with, and that every

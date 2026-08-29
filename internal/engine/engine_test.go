@@ -46,8 +46,8 @@ type stubAnalyzer struct {
 	panics   any
 }
 
-func (s stubAnalyzer) Name() string         { return s.name }
-func (s stubAnalyzer) Supports(string) bool { return s.supports }
+func (s stubAnalyzer) Name() string                 { return s.name }
+func (s stubAnalyzer) Supports(domain.Located) bool { return s.supports }
 
 func (s stubAnalyzer) Analyze(context.Context, []domain.ChangedFile) ([]domain.Finding, error) {
 	if s.panics != nil {

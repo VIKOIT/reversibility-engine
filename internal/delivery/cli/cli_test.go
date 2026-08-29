@@ -843,7 +843,17 @@ func TestPolicyGateIsOverriddenByTheFlag(t *testing.T) {
 // A waiver's path matches the finding's file exactly as the certificate prints it, and a pattern
 // that matches nothing is inert. Over-matching a waiver is the one direction this must not fail
 // in, so the mismatch is deliberately a no-op rather than a near-miss that applies anyway.
-func TestWaiverPathMatchesTheFindingAsReported(t *testing.T) {
+// TestWaiverPathIsWrittenAgainstTheProject pins the S10 semantic change.
+//
+// **This test used to assert the opposite**, and the inversion is the correction rather than a
+// regression. A waiver `path:` was matched against the changeset's spelling of a file, so a
+// waiver written `migrations/0001_*.sql` — the path as it appears in the repository, which is
+// how anyone writes one — matched nothing whenever the run was rooted at `./migrations`. The
+// operator believed a risk had been accepted, and nothing said otherwise.
+//
+// Globs are now matched in the same namespace every other path-keyed decision uses, so a waiver
+// applies to the same files however the analysis root was named. See §16.13.
+func TestWaiverPathIsWrittenAgainstTheProject(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -852,15 +862,17 @@ func TestWaiverPathMatchesTheFindingAsReported(t *testing.T) {
 		wantCode int
 	}{
 		{
-			// `revctl check ./migrations` reports files relative to the directory named.
-			name:     "a pattern matching the reported path applies",
-			path:     "0001_*.sql",
+			// The way somebody actually writes one: the path as it appears in the project.
+			// Before the fix this matched nothing, silently.
+			name:     "a project-relative pattern applies",
+			path:     "migrations/0001_*.sql",
 			wantCode: cli.ExitOK,
 		},
 		{
-			// The same waiver written for a repository-relative path matches nothing here.
-			name:     "a pattern matching nothing is inert",
-			path:     "migrations/0001_*.sql",
+			// Written against the stripped path instead. It no longer matches, and the run says
+			// so rather than leaving the operator to infer it.
+			name:     "a pattern written against the stripped path is inert, and says so",
+			path:     "0001_*.sql",
 			wantCode: cli.ExitGateFailed,
 		},
 	}
@@ -869,8 +881,13 @@ func TestWaiverPathMatchesTheFindingAsReported(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			root := destructiveMigrations(t)
-			policyPath := writePolicy(t, t.TempDir(), fmt.Sprintf(`version: 1
+			// A project, laid out the way a repository is: the policy at the root, the
+			// migrations in a subdirectory, and the run pointed at the subdirectory.
+			project := writeTree(t, map[string]string{
+				"migrations/0001_drop.up.sql":   "DROP TABLE legacy_orders;\n",
+				"migrations/0001_drop.down.sql": "CREATE TABLE legacy_orders (id bigint);\n",
+			})
+			writePolicy(t, project, fmt.Sprintf(`version: 1
 waivers:
   - rule: PG001
     path: %q
@@ -878,9 +895,15 @@ waivers:
     expires: %s
 `, tc.path, soon(t)))
 
-			_, stderr, code := run("check", "--config", policyPath, "--min-grade", "A", root)
+			_, stderr, code := run("check", "--min-grade", "A", filepath.Join(project, "migrations"))
 			if code != tc.wantCode {
 				t.Fatalf("exit code = %d, want %d\n%s", code, tc.wantCode, stderr)
+			}
+
+			// Dead config is never left to be inferred. A waiver that covered nothing has to
+			// say so, or it reads as protection the operator does not have.
+			if tc.wantCode == cli.ExitGateFailed && !strings.Contains(stderr, "covered no finding") {
+				t.Errorf("a waiver that matched nothing was not reported:\n%s", stderr)
 			}
 		})
 	}

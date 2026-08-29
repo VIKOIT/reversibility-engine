@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/VIKOIT/reversibility-engine/internal/domain"
 )
 
 // Match reports whether a slash-separated path matches a glob pattern.
@@ -26,8 +28,14 @@ import (
 // A pattern that reaches here is assumed to have passed ValidatePattern, which is what makes
 // ignoring path.Match's error safe: a malformed pattern is rejected when the policy is loaded,
 // so it can never silently match nothing at the moment somebody is relying on it.
-func Match(pattern, name string) bool {
-	return matchSegments(segments(pattern), segments(name))
+// **The path is a domain.Located, not a string, and that is the fix for a defect rather than a
+// stylistic choice.** Globs were matched against the changeset's spelling of a path while
+// candidate detection used the repository's, so `ignore: ["django/**/migrations/*.py"]` matched
+// nothing at all under `revctl check ./migrations` — a configured ignore list that read as
+// working and was inert. Dead config in a safety tool is protection the user does not have. See
+// docs/SPECIFICATION.md §2, "Path-keyed decisions use one namespace".
+func Match(pattern string, name domain.Located) bool {
+	return matchSegments(segments(pattern), segments(string(name)))
 }
 
 // ValidatePattern reports whether a pattern is well formed.

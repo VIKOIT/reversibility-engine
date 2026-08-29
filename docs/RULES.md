@@ -592,6 +592,26 @@ blocked. That is the honest answer; what the remedy adds is that the path around
 rather than discovered, because a gate with no path to green gets uninstalled. See
 [`docs/SPECIFICATION.md` §16.12](SPECIFICATION.md).
 
+**A glob is written against the project, and matched against it.** `ignore:` patterns and waiver
+`path:` patterns resolve in the same namespace every other path-keyed decision uses — the file's
+location relative to the repository root, or to the directory holding `.reversibility.yml`. They
+were matched against the changeset's spelling until `1.5.0`, so `ignore: ["db/migrate/**"]` matched
+nothing whenever the run was rooted at `./db/migrate`, and nothing said so. See
+[`docs/SPECIFICATION.md` §16.13](SPECIFICATION.md).
+
+**A pattern that matches nothing is reported.** An `ignore:` that excluded no path, or a waiver
+that covered no finding, appears in `PolicyWarnings` on the certificate and on stderr:
+
+```
+revctl: ignore pattern legacy/** matched no file in this changeset
+revctl: waiver PG001 at db/migrate/0001_*.sql covered no finding in this changeset
+```
+
+It is never an error and it never moves a grade — a waiver written for a rule that did not fire on
+this pull request is doing exactly what it should. It is reported because **dead config in a
+safety tool reads as protection the user does not have**, which is the same requirement that puts
+the unanalyzed files on the certificate: never let the reader infer.
+
 **The escape hatch is the policy, and it works.** `ignore:` is explicit, mixed into
 `PolicyDigest`, and printed on the certificate — a recorded decision is not a bypass. Only
 ignored **candidates** close the merge gate (§16.8): ignoring a `README.md` beside the migrations

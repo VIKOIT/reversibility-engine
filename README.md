@@ -576,6 +576,30 @@ terraform_types:           # classify a resource type the catalog does not know
     class: STATEFUL        # STATEFUL or STATELESS; never weakens the catalog
 ```
 
+**Globs are relative to the project, not to what you pointed the engine at.** Write
+`db/migrate/0001_*.sql` — the path as it appears in your repository — and it applies whether the
+run was `revctl check .`, `revctl check ./db`, or `revctl check ./db/migrate`. The project root is
+where your `.git` or your `.reversibility.yml` is.
+
+> This changed in schema `1.5.0`. Globs used to be matched against the path *as the run reported
+> it*, so a project-relative pattern matched nothing whenever the analysis root was narrower than
+> the repository — silently. If you have a policy written before this, run `revctl check` once
+> and read `policyWarnings`; a pattern you believed was working may not have been, and one written
+> against the narrowed path will now stop.
+
+**A pattern that matches nothing says so.** An `ignore:` that excluded no file, or a waiver that
+covered no finding, is reported on the certificate under `policyWarnings` and on stderr:
+
+```console
+$ revctl check ./db/migrate
+revctl: ignore pattern legacy/** matched no file in this changeset
+revctl: waiver PG001 at db/migrate/0001_*.sql covered no finding in this changeset
+```
+
+It is not an error and it never moves a grade — a waiver for a rule that did not fire on this pull
+request is doing its job. It is reported because a pattern that matches nothing is
+indistinguishable, from the outside, from one that is protecting you.
+
 **A waiver never improves the measurement.** The certificate keeps two numbers:
 
 | Field | Meaning |
