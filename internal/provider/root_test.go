@@ -5,6 +5,7 @@ package provider_test
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -377,5 +378,82 @@ func writeMarker(t *testing.T, dir, name, body string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 		t.Fatalf("writing %s: %v", name, err)
+	}
+}
+
+// TestTheTwoSidesOfTheComparisonAgree is the property the CI failure violated.
+//
+// `--terraform-plan` names a file; the engine knows the same file by its changeset path plus the
+// analysis root's prefix. Those are the two sides of one exact comparison, and they are computed
+// by two different functions — so the property that matters is not what either returns, it is
+// that they return the same thing.
+//
+// They did not, on Linux only: ResolveRoot dropped the empty segment a leading `/` produces and
+// rejoined without it, so `/tmp/x` became `tmp/x` while QualifyPath kept `/tmp/x`. An absolute
+// Windows path has no empty leading segment, so every local run agreed and the suite was green.
+// **A test that only holds on the platform the author uses is not holding anything**, which is
+// why this one asserts agreement rather than a value: agreement is checkable everywhere.
+func TestTheTwoSidesOfTheComparisonAgree(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		project func(t *testing.T) string
+	}{
+		{"inside a checkout", func(t *testing.T) string { return repoWith(t, "infra", "db/migrate") }},
+		{"outside any project", func(t *testing.T) string {
+			root := t.TempDir()
+			for _, dir := range []string{"infra", "db/migrate"} {
+				if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(dir)), 0o755); err != nil {
+					t.Fatalf("creating %s: %v", dir, err)
+				}
+			}
+			return root
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			project := tc.project(t)
+
+			for _, rel := range []string{"infra/plan.json", "db/migrate/0001.up.sql"} {
+				file := filepath.Join(project, filepath.FromSlash(rel))
+				if err := os.WriteFile(file, []byte("{}\n"), 0o644); err != nil {
+					t.Fatalf("writing %s: %v", rel, err)
+				}
+			}
+
+			for _, shape := range []struct {
+				name string
+				root string
+				// within is the file's path as the changeset reports it, relative to root.
+				within string
+			}{
+				{"rooted at the project", project, "infra/plan.json"},
+				{"rooted at a subdirectory", filepath.Join(project, "infra"), "plan.json"},
+				{"rooted at a nested subdirectory", filepath.Join(project, "db", "migrate"), "0001.up.sql"},
+			} {
+				t.Run(shape.name, func(t *testing.T) {
+					root := provider.ResolveRoot([]string{shape.root})
+
+					// What the engine decides about: the root's prefix joined onto the changeset
+					// path. This is exactly what domain.NewLocator does.
+					fromChangeset := path.Join(root.Prefix, shape.within)
+
+					// What the flag resolves to for the same file on disk.
+					fromFlag := provider.QualifyPath(filepath.Join(shape.root, filepath.FromSlash(shape.within)))
+
+					if fromChangeset != fromFlag {
+						t.Errorf(
+							"the two sides of the comparison disagree for the same file:\n"+
+								"  from the changeset: %q\n"+
+								"  from the flag:      %q\n"+
+								"An exact comparison between them is what claims a --terraform-plan "+
+								"file, so a difference here means the flag stops claiming what it names.",
+							fromChangeset, fromFlag)
+					}
+				})
+			}
+		})
 	}
 }

@@ -83,7 +83,7 @@ var projectMarkers = []string{".git", ".hg", ".svn", policy.FileName}
 // debug a pattern that matches nothing, which is the same reason PolicyWarnings exists.
 func ResolveRoot(roots []string) Root {
 	var (
-		common  []string
+		common  string
 		anchor  string
 		first   = true
 		agreed  = true
@@ -91,7 +91,7 @@ func ResolveRoot(roots []string) Root {
 	)
 
 	for _, root := range roots {
-		segments, marker, ok := rootSegments(root)
+		at, marker, ok := rootLocation(root)
 		if !ok {
 			// A root that cannot be resolved anchors nothing. Guessing a prefix would classify
 			// files by a location the provider never established, and the empty prefix is the
@@ -100,11 +100,11 @@ func ResolveRoot(roots []string) Root {
 		}
 
 		if first {
-			common, anchor, first, located = segments, marker, false, true
+			common, anchor, first, located = at, marker, false, true
 			continue
 		}
 
-		common = commonSegments(common, segments)
+		common = commonPath(common, at)
 		if marker != anchor {
 			// Two roots in two different projects. Neither anchor describes the run, and naming
 			// one of them would be worse than naming none.
@@ -116,7 +116,7 @@ func ResolveRoot(roots []string) Root {
 		anchor = ""
 	}
 
-	return Root{Prefix: path.Join(common...), Anchor: anchor}
+	return Root{Prefix: common, Anchor: anchor}
 }
 
 // Root describes where an analysis is rooted, in the namespace decisions are made in.
@@ -165,13 +165,8 @@ func QualifyPath(p string) string {
 		return filepath.ToSlash(p)
 	}
 
-	if project, _ := projectRoot(filepath.Dir(abs)); project != "" {
-		if within, err := filepath.Rel(project, abs); err == nil {
-			return filepath.ToSlash(within)
-		}
-	}
-
-	return filepath.ToSlash(abs)
+	at, _ := locate(abs)
+	return at
 }
 
 // rootSegments resolves one command-line root to the segments it contributes.
@@ -179,10 +174,52 @@ func QualifyPath(p string) string {
 // It resolves rather than reading the argument, because the argument is exactly what must not
 // matter: `./migrations`, `../auth/migrations`, an absolute path, and `.` from inside the
 // directory all name the same place and must all classify the same way.
-func rootSegments(root string) ([]string, string, bool) {
+// locate puts one absolute filesystem path into the decision namespace.
+//
+// **This is the only function that answers that question, and it being the only one is the
+// point.** ResolveRoot and QualifyPath are the two sides of a single comparison — where the
+// changeset is rooted, and where one named file sits — so a second implementation of the mapping
+// is a second chance for the two sides to disagree.
+//
+// They did disagree, on Linux only, and it is worth recording because it is this session's own
+// invariant broken by this session's own code. ResolveRoot split the path into segments, dropped
+// the empty one that a leading `/` produces, and rejoined — so `/tmp/x` came back as `tmp/x`.
+// QualifyPath returned `/tmp/x`. On Windows an absolute path opens with a drive letter and has no
+// empty leading segment, so the two agreed and the defect was invisible; on Linux
+// `--terraform-plan` stopped claiming the file it named, and the changeset graded N/A.
+//
+// The lesson is the one already written in §2: two implementations of one namespace is the defect,
+// and the fix is to have one. Not to make the second one more careful.
+func locate(abs string) (at, marker string) {
+	if project, m := projectRoot(abs); project != "" {
+		if within, err := filepath.Rel(project, abs); err == nil {
+			return cleanNamespaced(filepath.ToSlash(within)), m
+		}
+	}
+	return cleanNamespaced(filepath.ToSlash(abs)), ""
+}
+
+// cleanNamespaced normalizes a namespaced path, mapping "here" to the empty prefix.
+//
+// path.Clean is what preserves a leading slash, and preserving it is the whole fix: an absolute
+// path in this namespace stays absolute, so the two callers of locate produce byte-identical
+// strings for the same file.
+func cleanNamespaced(p string) string {
+	if clean := path.Clean(p); clean != "." {
+		return clean
+	}
+	return ""
+}
+
+// rootLocation resolves one command-line root into the decision namespace.
+//
+// It resolves rather than reading the argument, because the argument is exactly what must not
+// matter: `./migrations`, `../auth/migrations`, an absolute path, and `.` from inside the
+// directory all name the same place and must all classify the same way.
+func rootLocation(root string) (at, marker string, ok bool) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		return nil, "", false
+		return "", "", false
 	}
 
 	// A root naming one file contributes its directory. The provider keys that file by its base
@@ -192,27 +229,8 @@ func rootSegments(root string) ([]string, string, bool) {
 		abs = filepath.Dir(abs)
 	}
 
-	rel := abs
-	project, marker := projectRoot(abs)
-	if project != "" {
-		within, err := filepath.Rel(project, abs)
-		if err != nil {
-			return nil, "", false
-		}
-		rel = within
-	}
-
-	var out []string
-	for _, segment := range strings.Split(filepath.ToSlash(rel), "/") {
-		switch segment {
-		case "", ".", "..":
-			// Neither a traversal step nor the empty segment of a leading slash names a
-			// directory, so neither can contribute one.
-		default:
-			out = append(out, segment)
-		}
-	}
-	return out, marker, true
+	at, marker = locate(abs)
+	return at, marker, true
 }
 
 // projectRoot walks up from dir to the project that contains it, or returns "" if there is none.
@@ -239,17 +257,25 @@ func projectRoot(dir string) (root, marker string) {
 	}
 }
 
-// commonSegments returns the leading segments a and b agree on.
-func commonSegments(a, b []string) []string {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
+// commonPath returns the leading path segments a and b agree on.
+//
+// **Empty segments are compared, not dropped.** The empty segment a leading `/` produces is what
+// makes a POSIX path absolute, so discarding it here would turn `/tmp/a` and `/tmp/b` into a
+// common prefix of `tmp` — a relative path naming a directory that does not exist, and one that
+// no longer matches what QualifyPath returns for the same tree. That was the Linux-only defect;
+// see locate.
+func commonPath(a, b string) string {
+	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
+
+	n := len(as)
+	if len(bs) < n {
+		n = len(bs)
 	}
 
-	for i := 0; i < n; i++ {
-		if a[i] != b[i] {
-			return a[:i]
-		}
+	i := 0
+	for i < n && as[i] == bs[i] {
+		i++
 	}
-	return a[:n]
+
+	return strings.Join(as[:i], "/")
 }

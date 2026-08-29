@@ -18,6 +18,41 @@ move:
 
 Nothing yet.
 
+## [v1.2.1] - 2026-08-29
+
+**A fail-open in `v1.2.0`, on POSIX only, found by CI twenty minutes after the tag.**
+
+### Fixed
+
+**`--terraform-plan` did not claim the file it named, on Linux and macOS, when the analyzed tree
+was not inside a project.** The plan went unanalyzed; if it was the only thing in the changeset
+the run reported `NO_CANDIDATES`, graded **N/A**, and **exited 0 under `--gate`**. A destructive
+plan under an unconventional name passed a gate that should have graded it **F**.
+
+| | |
+| --- | --- |
+| **Affected** | Linux and macOS. Windows was never affected. |
+| **Condition** | No `.git`, `.hg`, `.svn` or `.reversibility.yml` at or above the analysis root. |
+| **Not affected** | Any run inside a checkout — which is every CI run using `actions/checkout`, and the GitHub Action. |
+| **Direction** | Fail-open. The gate passed where it should have failed. |
+
+**The cause was two implementations of one namespace mapping** — the defect class this release
+exists to remove, committed by the change that removed it. `ResolveRoot` split a path into
+segments, dropped the empty one that a leading `/` produces, and rejoined: `/tmp/x` came back as
+`tmp/x`. `QualifyPath` returned `/tmp/x`. The `--terraform-plan` comparison is exact, so the two
+never matched.
+
+An absolute Windows path opens with a drive letter and has no empty leading segment, so on the
+development machine the two agreed and the full suite passed. **A test that only holds on the
+platform the author uses is not holding anything.**
+
+The two functions are now one: both call a single `locate`, so they cannot disagree. The fix is
+not a more careful second implementation, because that is what was already there.
+
+Held by `TestTheTwoSidesOfTheComparisonAgree`, which asserts the two sides return the same string
+rather than asserting either value — agreement is checkable on every platform — and by
+OS-independent unit tests over the path logic with POSIX inputs written out literally.
+
 ## [v1.2.0] - 2026-08-29
 
 **The release the audit was for.** Everything below has been in `main` and in nobody's CI:
@@ -1336,7 +1371,8 @@ that runs the engine 100× over every fixture.
 - Kubernetes findings carry no line numbers — a structural diff has no single
   line to blame.
 
-[Unreleased]: https://github.com/VIKOIT/reversibility-engine/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/VIKOIT/reversibility-engine/compare/v1.2.1...HEAD
+[v1.2.1]: https://github.com/VIKOIT/reversibility-engine/compare/v1.2.0...v1.2.1
 [v1.2.0]: https://github.com/VIKOIT/reversibility-engine/compare/v1.1.2...v1.2.0
 [v1.1.2]: https://github.com/VIKOIT/reversibility-engine/releases/tag/v1.1.2
 [0.1.0]: https://github.com/VIKOIT/reversibility-engine/releases/tag/v0.1.0

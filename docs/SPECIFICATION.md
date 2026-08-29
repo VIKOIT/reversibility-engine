@@ -1283,6 +1283,18 @@ what stand between a new user and an immediate failing gate.
   a quick one, a commit for anything longer, and the revert is then `git stash pop` or
   `git restore --source=HEAD --staged --worktree` against a tree that has nothing to lose.
 
+- **A test that only holds on the platform its author uses is not holding anything.** Where a
+  behaviour differs between POSIX and Windows — and every path behaviour does — assert the part
+  that is the same everywhere, or write the platform's inputs out literally.
+
+  `--terraform-plan` compares two computed strings for exact equality, and the two computations
+  disagreed on Linux only: an absolute POSIX path has an empty leading segment and an absolute
+  Windows path does not. Every local run agreed, the full suite was green, and CI failed on the
+  first push. The tests that hold it now do two things: one asserts the two sides **agree** rather
+  than asserting either value, because agreement is checkable on any platform; the others are unit
+  tests over the path logic with `/tmp/...` written out as a literal, so the host OS cannot
+  change the answer.
+
 - **Before implementing an analyzer, write its fixtures and failing tests first.**
 - **One fixture pair per rule ID** — all 59 Postgres rules, all 15 Kubernetes rules, and all
   9 active Terraform rules. **A rule with no fixture does not exist.**
@@ -1948,6 +1960,42 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
     those is to make the caller say it out loud.
 
     Not implemented, per the owner's instruction to propose rather than build.
+
+18. ~~**The namespace had two implementations after all.**~~ **RESOLVED in `v1.2.1`, and it is the
+    rule of §16.13 broken by the commit that wrote it.**
+
+    `ResolveRoot` and `QualifyPath` are the two sides of one exact comparison — where the changeset
+    is rooted, and where one named file sits. They were two functions, and on Linux they returned
+    different strings for the same file: the root resolver split the path into segments, dropped
+    the empty one a leading `/` produces, and rejoined, so `/tmp/x` came back as `tmp/x`.
+
+    **The consequence was a fail-open.** `--terraform-plan` never matched, so the plan went
+    unanalyzed; alone in a changeset it produced `NO_CANDIDATES`, grade **N/A**, and **exit 0
+    under `--gate`**. A destructive plan under an unconventional name passed. It required no
+    project marker at or above the analysis root, so every run inside a checkout was unaffected —
+    which is why it reached a release.
+
+    **Three things are worth carrying forward, and only the third is about paths.**
+
+    - **The rule was right and I applied it to the callers, not to myself.** §16.13 says two
+      implementations of one namespace is the defect and the fix is to unify them. I unified the
+      four *consumers* onto `domain.Located` and left the two *producers* separate, because they
+      looked like different questions — "where is the root" and "where is this file" — rather than
+      one question asked twice. **A shared type does not unify anything if the values entering it
+      are computed twice.**
+    - **The suite was green because the developer's platform hid it.** An absolute Windows path
+      opens with a drive letter and has no empty leading segment. Nothing in the test suite could
+      have failed locally, which is now a testing rule in §13: assert what is the same on every
+      platform, or write the other platform's inputs out literally.
+    - **`release.yml` does not run the test suite**, so a tag can publish over a failure `ci.yml`
+      would catch. That is deliberate — the release builds and smoke-tests each native binary, and
+      duplicating the suite per target would triple the release time — but it means **a green CI
+      run is a precondition for tagging and nothing enforces it.** Recorded as an open question
+      rather than fixed, because the answer is a workflow change and the owner scopes those.
+
+    The two functions are now one: both call `locate`, and there is no second implementation left
+    to disagree with. `TestTheTwoSidesOfTheComparisonAgree` asserts they return the same string
+    rather than asserting either value.
 
 ## 17. Fixture conventions
 
