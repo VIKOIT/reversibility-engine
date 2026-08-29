@@ -297,6 +297,16 @@ type Certificate struct {
 	// inferred. It is never an error and never moves a grade.
 	PolicyWarnings []string `json:"policyWarnings,omitempty"`
 
+	// PathAnchor names the marker that established the namespace path-keyed decisions were made
+	// in — `.git`, `.reversibility.yml` — or "" when no project root was found and paths resolved
+	// absolutely. It is the marker name, never a directory: a certificate may not carry a path
+	// from the machine that produced it.
+	PathAnchor string `json:"pathAnchor,omitempty"`
+
+	// PathPrefix is where the analysis root sat inside that project, so a reader can see what a
+	// path looked like when a glob was tested against it. Present only alongside PathAnchor.
+	PathPrefix string `json:"pathPrefix,omitempty"`
+
 	// UndoPlan is the rollback script, in reverse order of application. When any finding is
 	// irreversible or unknown it is replaced by a statement that no complete undo exists.
 	UndoPlan []string `json:"undoPlan"`
@@ -352,6 +362,8 @@ func FromDomain(in domain.ReversibilityCertificate) Certificate {
 		CatalogVersion:  in.CatalogVersion,
 		ContextWarnings: in.ContextWarnings,
 		PolicyWarnings:  in.PolicyWarnings,
+		PathAnchor:      in.PathAnchor,
+		PathPrefix:      in.PathPrefix,
 		Findings:        make([]Finding, 0, len(in.Findings)),
 		Waived:          make([]WaivedFinding, 0, len(in.Waived)),
 		UndoPlan:        make([]string, 0, len(in.UndoPlan)),

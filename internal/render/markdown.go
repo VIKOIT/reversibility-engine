@@ -437,6 +437,20 @@ func writePolicyWarnings(b *strings.Builder, cert domain.ReversibilityCertificat
 	for _, w := range cert.PolicyWarnings {
 		fmt.Fprintf(b, "- %s\n", mdEscape(w))
 	}
+
+	// Where the globs were resolved, stated only here — a reader who is not debugging a pattern
+	// does not need it, and a reader who is cannot proceed without it. In a monorepo the answer
+	// is genuinely not obvious: the nearest marker wins, and which one that is depends on a walk
+	// up the filesystem nobody can see from a pull request.
+	if cert.PathAnchor != "" {
+		b.WriteString("\nPatterns were matched against paths relative to the project root, " +
+			"found at `" + mdEscape(cert.PathAnchor) + "`")
+		if cert.PathPrefix != "" {
+			b.WriteString(", with this changeset rooted at `" + mdEscape(cert.PathPrefix) + "/`")
+		}
+		b.WriteString(".\n")
+	}
+
 	b.WriteString("\n")
 }
 

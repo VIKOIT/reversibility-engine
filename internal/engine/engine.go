@@ -72,6 +72,13 @@ type runConfig struct {
 	// Empty for every provider whose paths are already repository-relative, which is all of
 	// them except the filesystem one, so the default is the behaviour that was always correct.
 	root string
+	// anchor names the marker that established the project root — `.git`, `.reversibility.yml` —
+	// or "" when none was found and paths resolved absolutely.
+	//
+	// It reaches the certificate so a user can see which root a glob was resolved against. Without
+	// it, a pattern that matches nothing is undebuggable: the answer depends on a walk up the
+	// filesystem that the user cannot see and, in a monorepo, may not predict.
+	anchor string
 }
 
 // locator returns the mapping from this run's changeset paths into the decision namespace.
@@ -83,6 +90,19 @@ type runConfig struct {
 // this", and "does an analyzer claim this" about, because every one of those is a question about
 // where the file sits and not about how it was named on a command line.
 func (c runConfig) locator() domain.Locator { return domain.NewLocator(c.root) }
+
+// anchoredPrefix is the prefix when it is safe to render, and "" otherwise.
+//
+// With no project marker the prefix is an absolute path. Reporting it would tell a reader exactly
+// what they want to know and would also publish the analyst's home directory into a pull request
+// comment, so the anchor being absent is itself the answer: paths resolved absolutely, and a
+// project-relative glob cannot match. policyWarnings says that in words.
+func (c runConfig) anchoredPrefix() string {
+	if c.anchor == "" {
+		return ""
+	}
+	return c.root
+}
 
 // IgnoredByPolicy records the candidate files a policy excluded from this run.
 //
@@ -112,10 +132,13 @@ func Enumerated(paths []string) RunOption {
 // invocation found.
 //
 // Callers whose paths are already repository-relative — git, GitHub, the fake — pass nothing,
-// which is the empty prefix and the behaviour they always had. provider.RootPrefix computes it
+// which is the empty prefix and the behaviour they always had. provider.ResolveRoot computes it
 // for the filesystem provider. See docs/SPECIFICATION.md §16.10.
-func RootedAt(prefix string) RunOption {
-	return func(c *runConfig) { c.root = prefix }
+func RootedAt(prefix, anchor string) RunOption {
+	return func(c *runConfig) {
+		c.root = prefix
+		c.anchor = anchor
+	}
 }
 
 // DeadIgnores records `ignore:` patterns that matched nothing in this changeset.
@@ -366,7 +389,11 @@ func (e *Engine) Certify(
 		ContextWarnings: e.contextWarnings(),
 		// Not nonNilStrings: the field is omitempty, so an empty slice would not survive a JSON
 		// round trip and the certificate would stop being its own fixed point.
-		PolicyWarnings: policyWarnings(run.deadIgnores, decision.DeadWaivers),
+		PolicyWarnings: policyWarnings(run.deadIgnores, decision.DeadWaivers, run.anchor),
+		PathAnchor:     run.anchor,
+		// Only alongside an anchor: without one the prefix is absolute, and §16.14 forbids a
+		// machine-specific value in a rendered field.
+		PathPrefix:     run.anchoredPrefix(),
 		DownMigrations: nonNilStatuses(downMigrations),
 	}
 
@@ -591,18 +618,29 @@ func pathsOf(files []domain.ChangedFile) []string {
 // Order is the order the patterns appear in the policy file, so the certificate is deterministic
 // and a reader can find the line. nil rather than an empty slice when there is nothing to say:
 // the field is omitempty, and an empty one would not survive a JSON round trip.
-func policyWarnings(deadIgnores, deadWaivers []string) []string {
+func policyWarnings(deadIgnores, deadWaivers []string, anchor string) []string {
 	if len(deadIgnores)+len(deadWaivers) == 0 {
 		return nil
 	}
 
-	out := make([]string, 0, len(deadIgnores)+len(deadWaivers))
+	out := make([]string, 0, len(deadIgnores)+len(deadWaivers)+1)
 	for _, pattern := range deadIgnores {
 		out = append(out, "ignore pattern "+pattern+" matched no file in this changeset")
 	}
 	for _, waiver := range deadWaivers {
 		out = append(out, "waiver "+waiver+" covered no finding in this changeset")
 	}
+
+	// The most likely explanation, when there is one, said at the point the reader meets the
+	// problem. With no project root every path resolved absolutely, so a pattern written relative
+	// to the project could not have matched whatever else is true of it — and that is a fact
+	// about the tree, not about the pattern, which is not something a user would think to check.
+	if anchor == "" {
+		out = append(out, "no project root was found (no .git, .hg, .svn or "+
+			policy.FileName+" above the analysis root), so paths were resolved absolutely and a "+
+			"project-relative pattern cannot match")
+	}
+
 	return out
 }
 

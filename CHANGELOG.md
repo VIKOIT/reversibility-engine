@@ -79,6 +79,24 @@ this pull request is doing exactly what it should. Certificate schema `1.5.0` ga
 
 ### Fixed
 
+**`--terraform-plan` could fail a changeset on a file nobody named.** This shipped in `v1.1.2` and
+users are entitled to know it existed.
+
+The flag was matched against the changeset by suffix, in both directions, so
+`--terraform-plan a/plan.json` **also claimed `b/a/plan.json`** — any file whose path ended in the
+same segments. The Terraform analyzer was then handed a document nobody had pointed it at, and a
+file it claims and cannot read is `UNKNOWN`, which grades **F**. So naming one plan could fail a
+pull request over an unrelated `plan.json` somewhere else in the tree, with a finding attributing
+the failure to that file.
+
+It is a wrong-direction defect: it invented severity rather than hiding it, so nothing about it was
+silent — a team that hit it saw a failing gate and a finding pointing at a file they had not
+mentioned. If you have ever passed `--terraform-plan` with a path whose last segments are not
+unique in your repository, that is the explanation.
+
+The comparison is exact now, both sides resolved into one namespace. See the namespace fix below;
+this was its fourth instance, and the only one that failed a changeset rather than passing one.
+
 **The Django P0's cause, rather than its fourth instance.**
 
 Fixing candidate detection left `ignore:` globs, waiver `path:` globs and `--terraform-plan`
@@ -119,6 +137,33 @@ where a project starts as a `.git` is, and a tree with neither has no globs to b
 glob comes from a policy file and a policy file would have been a marker.
 
 ### Added
+
+**The project root a glob was resolved against is now on the certificate.**
+
+A monorepo has a `.reversibility.yml` per package and one `.git` at the top, and those disagree
+about where the project starts. **The nearest marker walking up wins** — a package's policy is
+written about that package, so its globs say `db/migrate/**` and a run about that package must
+resolve them against paths of that shape.
+
+That answer is not always the expected one, which is why it is reported. `pathAnchor` names the
+marker and `pathPrefix` says where the analysis root sat inside the project:
+
+```json
+"pathAnchor": ".reversibility.yml",
+"pathPrefix": "db/migrate"
+```
+
+**A user who cannot see which root a glob was resolved against cannot debug a pattern that matches
+nothing.** The markdown certificate prints it beside the dead-config list, and `revctl` prints it
+on stderr — in both cases only when something matched nothing, because it is the one question a
+reader cannot answer for themselves and noise on every other run.
+
+The anchor is the marker's *name* and never its directory: a directory is a path on this machine,
+and a certificate may not carry one. `pathPrefix` appears only alongside an anchor, for the same
+reason — with no project root the prefix is absolute. When there is no anchor, the warnings say so
+in words: *"no project root was found …, so paths were resolved absolutely and a project-relative
+pattern cannot match."*
+
 
 **No rendered field may carry a machine-specific value, and three tests hold it.**
 

@@ -195,7 +195,7 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	// decisions and every one of those is made in one namespace — the one this locator maps
 	// into. Deciding first and locating afterwards is what left `ignore:` globs matching the
 	// changeset's spelling while candidate detection used the repository's. See §16.13.
-	locate := domain.NewLocator(root)
+	locate := domain.NewLocator(root.Prefix)
 
 	// The matcher is the ignore list plus a record of which patterns did anything. A pattern
 	// that matches nothing is dead config, and dead config in a safety tool reads as protection
@@ -261,7 +261,7 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	// exited 2 when the same files were named one directory up.
 	cert, analysisErr := eng.Certify(cmd.Context(), files,
 		engine.Enumerated(enumeratedPaths(enumerated)),
-		engine.RootedAt(root),
+		engine.RootedAt(root.Prefix, root.Anchor),
 		engine.DeadIgnores(ignores.Dead()),
 		engine.IgnoredByPolicy(ignoredCandidates))
 
@@ -270,6 +270,15 @@ func runCheck(cmd *cobra.Command, opts Options, flags *checkFlags, paths []strin
 	// the user does not have, so it is said where they are.
 	for _, warning := range cert.PolicyWarnings {
 		_, _ = fmt.Fprintf(opts.Stderr, "revctl: %s\n", warning)
+	}
+	if len(cert.PolicyWarnings) > 0 && cert.PathAnchor != "" {
+		// Which root the globs were resolved against. Only when something matched nothing: it is
+		// the one question a reader cannot answer for themselves, and noise on every other run.
+		where := "the project root (" + cert.PathAnchor + ")"
+		if cert.PathPrefix != "" {
+			where += ", with this changeset rooted at " + cert.PathPrefix + "/"
+		}
+		_, _ = fmt.Fprintf(opts.Stderr, "revctl: patterns were matched relative to %s\n", where)
 	}
 
 	out, closeOut, err := openOutput(opts.Stdout, flags.output)
@@ -343,10 +352,10 @@ func enumeratedPaths(listed []provider.Path) []string {
 	return out
 }
 
-func resolveProvider(flags *checkFlags, paths []string) (provider.FileProvider, string, error) {
+func resolveProvider(flags *checkFlags, paths []string) (provider.FileProvider, provider.Root, error) {
 	switch {
 	case flags.base != "" && len(flags.before) > 0:
-		return nil, "", errors.New("--base and --before are different comparisons: --base names git refs, --before names directories; pass one, not both")
+		return nil, provider.Root{}, errors.New("--base and --before are different comparisons: --base names git refs, --before names directories; pass one, not both")
 
 	case flags.base != "":
 		// Path arguments become git pathspecs, scoping the comparison to a subtree.
@@ -356,23 +365,23 @@ func resolveProvider(flags *checkFlags, paths []string) (provider.FileProvider, 
 			Paths: paths,
 		})
 		if err != nil {
-			return nil, "", fmt.Errorf("resolving the git refs: %w", err)
+			return nil, provider.Root{}, fmt.Errorf("resolving the git refs: %w", err)
 		}
 		// git reports repository-relative paths whatever pathspec narrowed the comparison, so
 		// there is nothing stripped to restore.
-		return source, "", nil
+		return source, provider.Root{}, nil
 
 	case flags.head != "":
-		return nil, "", errors.New("--head names the ref holding the change and only means something alongside --base")
+		return nil, provider.Root{}, errors.New("--head names the ref holding the change and only means something alongside --base")
 
 	case len(paths) == 0:
-		return nil, "", errors.New("no paths given: pass a directory to analyze, or --base to compare two git refs")
+		return nil, provider.Root{}, errors.New("no paths given: pass a directory to analyze, or --base to compare two git refs")
 
 	default:
 		// The prefix is taken from the paths holding the new state. With --before the two trees
 		// share one relative namespace by construction — that is what makes them comparable —
 		// and the new state is the side a classification is a statement about.
-		return provider.NewFS(flags.before, paths), provider.RootPrefix(paths), nil
+		return provider.NewFS(flags.before, paths), provider.ResolveRoot(paths), nil
 	}
 }
 

@@ -143,6 +143,31 @@ the filesystem root would be equally self-consistent and would make a checkout p
 `~/migrate/` read every `.py` beneath it as a migration. See §16.10 for the anchor and §16.13 for
 the rest.
 
+### A fuzzy match is a review finding
+
+> **Any suffix, prefix, contains, or bidirectional match on a path, identifier, or name requires a
+> written justification. The default assumption is that it is compensating for two namespaces, and
+> the fix is to unify them rather than to match loosely.**
+
+This is a review criterion, not an observation, because it is the one thing that would have found
+all four namespace defects from the outside without knowing anything about migrations.
+
+The Terraform analyzer compared `--terraform-plan` to the changeset path by suffix, in both
+directions, and **said so in a comment**: the two spellings "differ". That comment is the finding.
+A fuzzy match is what a correct comparison looks like after somebody has noticed the two sides do
+not agree and has decided to tolerate it rather than fix it — so the loose match is not the bug,
+it is the *report* of the bug, filed in a code comment where no reviewer treats it as one.
+
+It also fails in the permissive direction, which is why this is a rule and not a style note:
+`a/plan.json` suffix-matched `b/a/plan.json`, so naming one plan could hand an analyzer a file
+nobody named and fail a changeset on it.
+
+**What a justification has to say**, when a loose match really is right: which two things are being
+compared, why they are legitimately in different namespaces, and why unifying them is not
+available. "Convenience" and "the paths differ" are the two answers that mean the finding stands.
+A hostname suffix in a certificate check, a rule-ID prefix in a table lookup, a filename extension
+— those are fine and take one line to say why.
+
 **The caller's naming survives in exactly one place, and that place is output.** A qualified path
 outside a project is an absolute path, so a certificate carrying one would stop being
 byte-identical between machines — the same class of input as a timestamp or a hostname. So:
@@ -276,6 +301,7 @@ rather than the principles living only where they were first needed.
 | Every classification has a table row | §13 | The D2 shape: code claiming a construct the table omits |
 | Enumeration and retrieval are separate concerns | §2 above | The Django P0, the coverage denominator, and the rename bypass — one root cause |
 | Path-keyed decisions use one namespace | §2 above | Candidates, ignore globs, waiver paths, `Supports`, `--terraform-plan` — and what may be rendered |
+| A fuzzy match is a review finding | §2 above | Any suffix, prefix or contains match on a path, identifier or name |
 | Candidate detection must not depend on how the analysis root was named | §2 above | `check ./migrations` vs `check .`; the instance the general rule came from |
 | Any number in documentation duplicating the specification is derived by test | §2 below | The rules badge, catalog counts, schema version, rule ID ranges |
 | All diagnostics go to stderr; stdout carries the certificate | §2 above | Deprecations, warnings, gate reasons — and what `--help` is not |
@@ -1231,6 +1257,21 @@ what stand between a new user and an immediate failing gate.
 
 ## 13. Testing rules
 
+- **Commit or stash before every mutation test.** A mutation is a deliberate corruption of
+  working state, and **the undo must never be a command that also discards real work.**
+
+  This is a process rule and it is here because it was broken. A mutation was reverted with
+  `git checkout <file>`, which restored the file to the last commit and took an hour of
+  uncommitted work in that file with it. The mutation had done its job — the property failed
+  exactly as intended — and the cleanup cost more than the test was worth.
+
+  The rule is not "be careful with `git checkout`". It is that a mutation test has two phases, and
+  the second one runs *while you are thinking about the first*: you have just read a failure and
+  confirmed a property holds, which is the worst moment to be composing a destructive command. So
+  the safe state is established **before** the corruption, not recovered after it. `git stash` for
+  a quick one, a commit for anything longer, and the revert is then `git stash pop` or
+  `git restore --source=HEAD --staged --worktree` against a tree that has nothing to lose.
+
 - **Before implementing an analyzer, write its fixtures and failing tests first.**
 - **One fixture pair per rule ID** — all 59 Postgres rules, all 15 Kubernetes rules, and all
   9 active Terraform rules. **A rule with no fixture does not exist.**
@@ -1826,6 +1867,76 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
     Two mechanisms are deliberate. **A claim whose wording moved fails rather than passes** — a
     guard that quietly stops guarding is how the badge drifted in the first place — and **the
     failure prints the corrected text**, so it is a fix rather than a research task.
+
+16. ~~**Which project root a glob was resolved against is invisible.**~~ **RESOLVED. The nearest
+    marker walking up wins, and the resolved anchor is on the certificate.**
+
+    §16.13 anchored the decision namespace at the project — a VCS marker or `.reversibility.yml`
+    — and left one case unstated. **A monorepo has a policy file per package and one `.git` at the
+    top, and those disagree about where the project starts.**
+
+    **Ruling: the nearest marker walking up wins.** A package's policy is written about that
+    package — its globs say `db/migrate/**`, not `packages/api/db/migrate/**` — and a run about
+    that package has to resolve them against paths of that shape. The implementation already did
+    this, because `projectRoot` returns at the first level holding any marker; what was missing
+    was the rule being written down and a test holding it.
+
+    **And the resolved anchor is reported, which is the part that was actually missing.** The
+    answer is not always what a user expects: an outer policy above a nearer `.git`, a submodule,
+    a package that acquired a checkout of its own. **A user who cannot see which root a glob was
+    resolved against cannot debug a pattern that matches nothing** — the same principle as
+    `PolicyWarnings`, applied to the thing that explains them.
+
+    `PathAnchor` names the marker and `PathPrefix` says where the analysis root sat inside that
+    project, so a reader can see what a path looked like when a glob was tested:
+
+    ```
+    "pathAnchor": ".reversibility.yml",
+    "pathPrefix": "db/migrate"
+    ```
+
+    **Three details are load-bearing.**
+
+    - **The anchor is the marker's name, never its directory.** The directory is the more useful
+      answer and it is a path on this machine, which §16.14 forbids a certificate from carrying.
+    - **`PathPrefix` appears only alongside an anchor.** With no project root the prefix *is* an
+      absolute path, so the same rule applies — and its absence is itself informative.
+    - **When there is no anchor, `PolicyWarnings` says so in words**: *"no project root was found
+      …, so paths were resolved absolutely and a project-relative pattern cannot match."* That is
+      a fact about the tree rather than about the pattern, and it is not something a user would
+      think to check.
+
+    Several roots resolving into different projects report no anchor at all. Naming one of two
+    disagreeing anchors would be worse than naming none: a reader would debug a glob against a
+    project only half the changeset is in.
+
+17. **Where else does correctness rest on remembering rather than on a type?** **SURVEYED, NOT
+    IMPLEMENTED** — see [`docs/proposals/type-enforced-invariants.md`](proposals/type-enforced-invariants.md).
+
+    `domain.Located` worked because the compiler enforced it, and the compiler then found the
+    remaining call sites during the change rather than leaving them for an audit. The question is
+    where else that property is available.
+
+    The survey criterion, which is one level out from `TestZeroValuesAreNeverSafe`: **where does an
+    omitted, unset, or not-yet-applied value mean the permissive answer?** Not a wrong value — an
+    absent one. An unset `Reversibility` is invalid and fails closed; an unset *field* is a valid
+    zero meaning "nothing to worry about".
+
+    Four findings, in the proposal, with a recommendation on each:
+
+    | # | Where | If omitted | Recommended |
+    | --- | --- | --- | --- |
+    | 1 | `GateConditions.PolicyIgnored` | `0` — one of the three conditions for **PASS** | **Do it.** The only one that can produce a pass. |
+    | 2 | `scoreInput` — three of five fields | no errors, full coverage, no down-migration cap | Defer until `score` has a third caller. |
+    | 3 | `ChangedFile.At` | falls back to `Path` — correct for three providers of four | **Not yet**, and the reason is recorded. Revisit when a second thing calls the analyzers. |
+    | 4 | The gate re-derived in a determinism test | keeps passing while asserting less | **Do it.** Three lines. |
+
+    The general form, for the next survey: **a zero value that means "nothing is wrong" is a
+    default, and a default is a decision nobody wrote down.** The enums were fixed by making the
+    zero invalid. What remains are fields whose zero is *valid* and permissive, and the fix for
+    those is to make the caller say it out loud.
+
+    Not implemented, per the owner's instruction to propose rather than build.
 
 ## 17. Fixture conventions
 

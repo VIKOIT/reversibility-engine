@@ -46,7 +46,8 @@ import (
 // and a policy file would have been a marker.
 var projectMarkers = []string{".git", ".hg", ".svn", policy.FileName}
 
-// RootPrefix returns the prefix that puts an FS provider's paths back into the namespace Path
+// ResolveRoot returns where an analysis is rooted: the prefix that puts an FS provider's paths
+// back into the namespace Path
 // documents — the file's location relative to the repository root.
 //
 // The caller joins it onto each changeset path before asking any question about *location*, and
@@ -69,32 +70,84 @@ var projectMarkers = []string{".git", ".hg", ".svn", policy.FileName}
 // Several roots contribute only the prefix they share. A segment true of one root and not of
 // another is not true of the changeset, and asserting it would classify files by a directory
 // half of them are not in.
-func RootPrefix(roots []string) string {
-	var common []string
-	first := true
+//
+// **The nearest marker walking up wins.** A monorepo has one `.git` at the top and a
+// `.reversibility.yml` per package, and those disagree about where the project starts — so the
+// rule has to be stated rather than left to the order of a list. The nearest one is right,
+// because a package's policy is written about that package: its globs say `db/migrate/**`, not
+// `packages/api/db/migrate/**`, and the run that reads it is a run about that package.
+//
+// It follows that the answer is sometimes not what a user expects — an outer policy above a
+// nearer `.git`, a submodule, a package that acquired a checkout of its own. **That is why the
+// anchor is reported.** A user who cannot see which root a glob was resolved against cannot
+// debug a pattern that matches nothing, which is the same reason PolicyWarnings exists.
+func ResolveRoot(roots []string) Root {
+	var (
+		common  []string
+		anchor  string
+		first   = true
+		agreed  = true
+		located = false
+	)
 
 	for _, root := range roots {
-		segments, ok := rootSegments(root)
+		segments, marker, ok := rootSegments(root)
 		if !ok {
 			// A root that cannot be resolved anchors nothing. Guessing a prefix would classify
 			// files by a location the provider never established, and the empty prefix is the
 			// behaviour every caller had before this existed.
-			return ""
+			return Root{}
 		}
 
 		if first {
-			common, first = segments, false
+			common, anchor, first, located = segments, marker, false, true
 			continue
 		}
+
 		common = commonSegments(common, segments)
+		if marker != anchor {
+			// Two roots in two different projects. Neither anchor describes the run, and naming
+			// one of them would be worse than naming none.
+			agreed = false
+		}
 	}
 
-	return path.Join(common...)
+	if !located || !agreed {
+		anchor = ""
+	}
+
+	return Root{Prefix: path.Join(common...), Anchor: anchor}
 }
+
+// Root describes where an analysis is rooted, in the namespace decisions are made in.
+type Root struct {
+	// Prefix is the analysis root's own path, joined onto each changeset path before any
+	// path-keyed decision. Empty when the analysis root is the project root.
+	//
+	// **It is only machine-independent when Anchor is set.** With no project marker there is
+	// nothing to be relative to and this is an absolute path, which is why the certificate
+	// carries it only alongside an anchor — see the determinism rule in §2.
+	Prefix string
+
+	// Anchor names the marker that established the project root — `.git`, `.reversibility.yml`,
+	// and so on — or "" when none was found, or when several roots resolved into different
+	// projects and no single anchor describes the run.
+	//
+	// It is the marker's name and never its directory: the directory is a path on this machine
+	// and a certificate may not carry one.
+	Anchor string
+}
+
+// Anchored reports whether a project root was found.
+//
+// When it is false, paths resolved absolutely and **a project-relative glob cannot match
+// anything** — which is worth saying out loud rather than leaving a user to infer from an
+// ignore list that does nothing.
+func (r Root) Anchored() bool { return r.Anchor != "" }
 
 // QualifyPath maps a path the user typed on a command line into the decision namespace.
 //
-// RootPrefix answers "where is this analysis rooted"; this answers "where is this one file", and
+// ResolveRoot answers "where is this analysis rooted"; this answers "where is this one file", and
 // they need to agree or the two sides of a comparison are back in different namespaces. It is
 // what `--terraform-plan` goes through: that flag names a file relative to the user's shell,
 // while the engine knows the same file by its path in the changeset, and comparing those two
@@ -112,8 +165,8 @@ func QualifyPath(p string) string {
 		return filepath.ToSlash(p)
 	}
 
-	if repo := projectRoot(filepath.Dir(abs)); repo != "" {
-		if within, err := filepath.Rel(repo, abs); err == nil {
+	if project, _ := projectRoot(filepath.Dir(abs)); project != "" {
+		if within, err := filepath.Rel(project, abs); err == nil {
 			return filepath.ToSlash(within)
 		}
 	}
@@ -126,10 +179,10 @@ func QualifyPath(p string) string {
 // It resolves rather than reading the argument, because the argument is exactly what must not
 // matter: `./migrations`, `../auth/migrations`, an absolute path, and `.` from inside the
 // directory all name the same place and must all classify the same way.
-func rootSegments(root string) ([]string, bool) {
+func rootSegments(root string) ([]string, string, bool) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		return nil, false
+		return nil, "", false
 	}
 
 	// A root naming one file contributes its directory. The provider keys that file by its base
@@ -140,10 +193,11 @@ func rootSegments(root string) ([]string, bool) {
 	}
 
 	rel := abs
-	if repo := projectRoot(abs); repo != "" {
-		within, err := filepath.Rel(repo, abs)
+	project, marker := projectRoot(abs)
+	if project != "" {
+		within, err := filepath.Rel(project, abs)
 		if err != nil {
-			return nil, false
+			return nil, "", false
 		}
 		rel = within
 	}
@@ -158,24 +212,28 @@ func rootSegments(root string) ([]string, bool) {
 			out = append(out, segment)
 		}
 	}
-	return out, true
+	return out, marker, true
 }
 
 // projectRoot walks up from dir to the project that contains it, or returns "" if there is none.
 //
 // The walk is on directory metadata only and stops at the first marker, so it costs a handful of
 // stats on the way to a root that is almost always one or two levels up.
-func projectRoot(dir string) string {
+func projectRoot(dir string) (root, marker string) {
 	for {
-		for _, marker := range projectMarkers {
-			if _, err := os.Lstat(filepath.Join(dir, marker)); err == nil {
-				return dir
+		// Every marker at this level is considered before ascending, so the NEAREST project root
+		// wins over any above it. That is the monorepo ruling: one .git at the top and a
+		// .reversibility.yml per package disagree, and the package is right, because the
+		// package is what the run is about.
+		for _, m := range projectMarkers {
+			if _, err := os.Lstat(filepath.Join(dir, m)); err == nil {
+				return dir, m
 			}
 		}
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return ""
+			return "", ""
 		}
 		dir = parent
 	}

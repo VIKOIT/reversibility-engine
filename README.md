@@ -579,7 +579,16 @@ terraform_types:           # classify a resource type the catalog does not know
 **Globs are relative to the project, not to what you pointed the engine at.** Write
 `db/migrate/0001_*.sql` — the path as it appears in your repository — and it applies whether the
 run was `revctl check .`, `revctl check ./db`, or `revctl check ./db/migrate`. The project root is
-where your `.git` or your `.reversibility.yml` is.
+where your `.git` or your `.reversibility.yml` is; **in a monorepo the nearest one wins**, so a
+`packages/api/.reversibility.yml` makes `packages/api` the root for a run inside it, and its globs
+are written relative to that rather than to the repository.
+
+The certificate says which root was used, so you never have to guess:
+
+```json
+"pathAnchor": ".reversibility.yml",
+"pathPrefix": "db/migrate"
+```
 
 > This changed in schema `1.5.0`. Globs used to be matched against the path *as the run reported
 > it*, so a project-relative pattern matched nothing whenever the analysis root was narrower than

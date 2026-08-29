@@ -55,7 +55,7 @@ func TestRootPrefixIsTheRepositoryRelativePath(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := provider.RootPrefix([]string{filepath.Join(repo, filepath.FromSlash(tc.root))})
+			got := provider.ResolveRoot([]string{filepath.Join(repo, filepath.FromSlash(tc.root))}).Prefix
 			if got != tc.want {
 				t.Errorf("RootPrefix(%q) = %q, want %q", tc.root, got, tc.want)
 			}
@@ -90,7 +90,7 @@ func TestRootPrefixIsTheSameHoweverTheRootIsSpelled(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			chdirTo(t, tc.workdir)
 
-			if got := provider.RootPrefix([]string{tc.root}); got != want {
+			if got := provider.ResolveRoot([]string{tc.root}).Prefix; got != want {
 				t.Errorf("RootPrefix(%q) from %s = %q, want %q", tc.root, tc.workdir, got, want)
 			}
 		})
@@ -120,7 +120,7 @@ func TestRootPrefixStopsAtTheRepository(t *testing.T) {
 		t.Fatalf("writing the marker: %v", err)
 	}
 
-	got := provider.RootPrefix([]string{filepath.Join(repo, "src")})
+	got := provider.ResolveRoot([]string{filepath.Join(repo, "src")}).Prefix
 
 	if got != "src" {
 		t.Errorf("RootPrefix = %q, want %q", got, "src")
@@ -146,7 +146,7 @@ func TestRootPrefixOfAFileNamesItsDirectory(t *testing.T) {
 		t.Fatalf("writing the migration: %v", err)
 	}
 
-	if got := provider.RootPrefix([]string{file}); got != "db/migrate" {
+	if got := provider.ResolveRoot([]string{file}).Prefix; got != "db/migrate" {
 		t.Errorf("RootPrefix of a file = %q, want %q", got, "db/migrate")
 	}
 }
@@ -180,7 +180,7 @@ func TestRootPrefixOfSeveralRootsIsWhatTheyShare(t *testing.T) {
 				roots = append(roots, filepath.Join(repo, filepath.FromSlash(r)))
 			}
 
-			if got := provider.RootPrefix(roots); got != tc.want {
+			if got := provider.ResolveRoot(roots).Prefix; got != tc.want {
 				t.Errorf("RootPrefix(%v) = %q, want %q", tc.roots, got, tc.want)
 			}
 		})
@@ -201,10 +201,10 @@ func TestRootPrefixOutsideARepositoryIsStillConsistent(t *testing.T) {
 		t.Fatalf("creating %s: %v", target, err)
 	}
 
-	absolute := provider.RootPrefix([]string{target})
+	absolute := provider.ResolveRoot([]string{target}).Prefix
 
 	chdirTo(t, target)
-	dotted := provider.RootPrefix([]string{"."})
+	dotted := provider.ResolveRoot([]string{"."}).Prefix
 
 	if absolute != dotted {
 		t.Errorf("outside a repository the prefix still depends on the spelling: %q vs %q", absolute, dotted)
@@ -219,7 +219,7 @@ func TestRootPrefixOutsideARepositoryIsStillConsistent(t *testing.T) {
 func TestRootPrefixOfNothingIsNothing(t *testing.T) {
 	t.Parallel()
 
-	if got := provider.RootPrefix(nil); got != "" {
+	if got := provider.ResolveRoot(nil).Prefix; got != "" {
 		t.Errorf("RootPrefix(nil) = %q, want the empty prefix", got)
 	}
 }
@@ -240,4 +240,142 @@ func chdirTo(t *testing.T, dir string) {
 			t.Fatalf("returning to %s: %v", previous, err)
 		}
 	})
+}
+
+// TestNearestProjectMarkerWins is the monorepo ruling.
+//
+// One `.git` at the top and a `.reversibility.yml` per package disagree about where the project
+// starts, so the rule has to be stated rather than left to the order of a list. The nearest wins,
+// because a package's policy is written about that package: its globs say `db/migrate/**`, and a
+// run about that package has to resolve them against paths of that shape.
+func TestNearestProjectMarkerWins(t *testing.T) {
+	t.Parallel()
+
+	// A monorepo: one checkout at the top, a policy per package.
+	repo := repoWith(t, "packages/api/db/migrate", "packages/web/src")
+	writeMarker(t, filepath.Join(repo, "packages", "api"), ".reversibility.yml", "version: 1\n")
+
+	for _, tc := range []struct {
+		name       string
+		root       string
+		wantPrefix string
+		wantAnchor string
+	}{
+		{
+			// The package's own policy is nearer than the repository's .git.
+			name:       "inside a package that has its own policy",
+			root:       "packages/api/db/migrate",
+			wantPrefix: "db/migrate",
+			wantAnchor: ".reversibility.yml",
+		},
+		{
+			name:       "the package root itself",
+			root:       "packages/api",
+			wantPrefix: "",
+			wantAnchor: ".reversibility.yml",
+		},
+		{
+			// No policy in this package, so the walk continues to the checkout.
+			name:       "inside a package with no policy of its own",
+			root:       "packages/web/src",
+			wantPrefix: "packages/web/src",
+			wantAnchor: ".git",
+		},
+		{
+			name:       "the repository itself",
+			root:       ".",
+			wantPrefix: "",
+			wantAnchor: ".git",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := provider.ResolveRoot([]string{filepath.Join(repo, filepath.FromSlash(tc.root))})
+
+			if got.Prefix != tc.wantPrefix {
+				t.Errorf("Prefix = %q, want %q", got.Prefix, tc.wantPrefix)
+			}
+			if got.Anchor != tc.wantAnchor {
+				t.Errorf("Anchor = %q, want %q — the nearest marker walking up wins",
+					got.Anchor, tc.wantAnchor)
+			}
+		})
+	}
+}
+
+// TestAnchorIsAMarkerNameAndNeverADirectory.
+//
+// The anchor reaches the certificate, and a certificate may not carry a path from the machine
+// that produced it. Reporting the directory would be the more informative answer and would also
+// publish somebody's home directory into a pull request comment.
+func TestAnchorIsAMarkerNameAndNeverADirectory(t *testing.T) {
+	t.Parallel()
+
+	repo := repoWith(t, "db/migrate")
+	got := provider.ResolveRoot([]string{filepath.Join(repo, "db", "migrate")})
+
+	if got.Anchor != ".git" {
+		t.Fatalf("Anchor = %q, want %q", got.Anchor, ".git")
+	}
+	if strings.ContainsAny(got.Anchor, `/\`) {
+		t.Errorf("Anchor %q contains a path separator; it must be the marker name alone", got.Anchor)
+	}
+	if !got.Anchored() {
+		t.Error("Anchored() is false with an anchor set")
+	}
+}
+
+// TestNoProjectMarkerReportsNoAnchor.
+//
+// With no marker the prefix is absolute, so the absence of an anchor is what tells a caller the
+// prefix must not be rendered — and tells a user why a project-relative glob matched nothing.
+func TestNoProjectMarkerReportsNoAnchor(t *testing.T) {
+	t.Parallel()
+
+	bare := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(bare, "db", "migrate"), 0o755); err != nil {
+		t.Fatalf("creating the tree: %v", err)
+	}
+
+	got := provider.ResolveRoot([]string{filepath.Join(bare, "db", "migrate")})
+
+	if got.Anchored() || got.Anchor != "" {
+		t.Errorf("Anchor = %q over a tree with no marker, want none", got.Anchor)
+	}
+	if got.Prefix == "" {
+		t.Error("Prefix is empty; with no project root the absolute path is the namespace")
+	}
+}
+
+// TestRootsInDifferentProjectsReportNoAnchor.
+//
+// Naming one of two disagreeing anchors would be worse than naming none: a reader would debug a
+// glob against a project that only half the changeset is in.
+func TestRootsInDifferentProjectsReportNoAnchor(t *testing.T) {
+	t.Parallel()
+
+	repo := repoWith(t, "packages/api/db", "packages/web/src")
+	writeMarker(t, filepath.Join(repo, "packages", "api"), ".reversibility.yml", "version: 1\n")
+
+	got := provider.ResolveRoot([]string{
+		filepath.Join(repo, "packages", "api", "db"),
+		filepath.Join(repo, "packages", "web", "src"),
+	})
+
+	if got.Anchor != "" {
+		t.Errorf("Anchor = %q for roots in two different projects, want none", got.Anchor)
+	}
+}
+
+// writeMarker creates a project marker inside dir.
+func writeMarker(t *testing.T, dir, name, body string) {
+	t.Helper()
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", name, err)
+	}
 }

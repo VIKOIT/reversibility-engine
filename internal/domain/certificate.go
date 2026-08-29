@@ -173,6 +173,26 @@ type ReversibilityCertificate struct {
 	// snapshots and this one is about the policy file.
 	PolicyWarnings []string `json:"policyWarnings,omitempty"`
 
+	// PathAnchor names the marker that established the namespace every path-keyed decision was
+	// made in — `.git`, `.reversibility.yml`, and so on — or "" when no project root was found.
+	//
+	// **A user who cannot see which root a glob was resolved against cannot debug a pattern that
+	// matches nothing.** In a monorepo the answer is not obvious: one `.git` at the top and a
+	// `.reversibility.yml` per package disagree, the nearest wins, and which one that is depends
+	// on a walk up the filesystem nobody can see from the outside. Same principle as
+	// PolicyWarnings — never let the reader infer.
+	//
+	// It is the marker's *name*, never its directory. A directory is a path on this machine and
+	// a certificate may not carry one.
+	PathAnchor string `json:"pathAnchor,omitempty"`
+
+	// PathPrefix is where the analysis root sat inside that project, so a reader can see what a
+	// path looked like when a glob was tested against it.
+	//
+	// Present only alongside PathAnchor. With no project root the prefix is an absolute path,
+	// and a certificate carrying one would stop being byte-identical between machines.
+	PathPrefix string `json:"pathPrefix,omitempty"`
+
 	// UndoPlan is built from the UndoStep fields of Findings and of Waived alike, in reverse
 	// order of application. It is empty when any of them is IRREVERSIBLE — see Blockers.
 	//
