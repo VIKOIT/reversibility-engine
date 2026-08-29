@@ -16,15 +16,25 @@ move:
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [v1.2.0] - 2026-08-29
+
+**The release the audit was for.** Everything below has been in `main` and in nobody's CI:
+the P0 that graded thirteen unread Django migrations **A**, 32 new PostgreSQL rules, strict
+coverage, and four namespace defects. A tool that improves faster than it releases is one nobody
+is using.
+
 > **Certificate schema `1.5.0`.** One version, covering everything below: `Outcome`,
 > `Coverage`/`UnanalyzedFiles`, `IgnoredByPolicy`, `GradeCauses`, `N/A` on `Grade`,
-> `NOT_APPLICABLE` on `AIGateStatus`, and a `PASS` that now requires full coverage and no
-> policy-ignored candidate.
+> `NOT_APPLICABLE` on `AIGateStatus`, `PolicyWarnings`, `PathAnchor`/`PathPrefix`, and a `PASS`
+> that now requires full coverage and no policy-ignored candidate.
 >
-> These were developed as three bumps and collapsed before release. No consumer saw the
-> intermediates, and three version numbers that never meant anything outside this repository
-> would read as three schemas somebody might encounter. The honesty requirement applies to
-> versions a consumer can observe; an unreleased intermediate is a working note.
+> These were developed as five bumps and collapsed before this release. No consumer saw the
+> intermediates, and five version numbers that never meant anything outside this repository
+> would read as five schemas somebody might encounter. The honesty requirement applies to
+> versions a consumer can observe; an unreleased intermediate is a working note. **`1.5.0` is
+> now shipped and therefore frozen: the next change to the schema bumps it.**
 >
 > **Migrating from `1.4.0`:** a gate on `grade == "A"`, on `aiGateStatus`, or on the exit code
 > is unaffected. A gate on `grade != "F"` now passes changesets nobody analyzed — switch it to
@@ -74,8 +84,8 @@ revctl: waiver PG001 at db/migrate/0001_*.sql covered no finding in this changes
 A pattern that matches nothing is indistinguishable, from the outside, from a pattern that is
 protecting you — and **dead config in a safety tool reads as protection the user does not have.**
 It is never an error and it never moves a grade: a waiver written for a rule that did not fire on
-this pull request is doing exactly what it should. Certificate schema `1.5.0` gains the field;
-`1.5.0` has not shipped, so this folds into it rather than bumping.
+this pull request is doing exactly what it should. Certificate schema `1.5.0` gains the field; it
+was still unreleased when this landed, so it folded in rather than bumping.
 
 ### Fixed
 
@@ -1326,6 +1336,7 @@ that runs the engine 100× over every fixture.
 - Kubernetes findings carry no line numbers — a structural diff has no single
   line to blame.
 
-[Unreleased]: https://github.com/VIKOIT/reversibility-engine/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/VIKOIT/reversibility-engine/compare/v1.2.0...HEAD
+[v1.2.0]: https://github.com/VIKOIT/reversibility-engine/compare/v1.1.2...v1.2.0
 [v1.1.2]: https://github.com/VIKOIT/reversibility-engine/releases/tag/v1.1.2
 [0.1.0]: https://github.com/VIKOIT/reversibility-engine/releases/tag/v0.1.0

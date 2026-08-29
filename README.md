@@ -1,7 +1,7 @@
 # Reversibility Engine
 ![Go 1.22+](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go&logoColor=white)
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-663366)
-![Status](https://img.shields.io/badge/status-v1.1.2-brightgreen)
+![Status](https://img.shields.io/badge/status-v1.2.0-brightgreen)
 ![Policy](https://img.shields.io/badge/policy-fail--closed-critical)
 ![Rules](https://img.shields.io/badge/rules-59%20PG%20%C2%B7%2015%20K8S%20%C2%B7%209%20TF-blue)
 
@@ -64,7 +64,7 @@ A gate must also prove that it *ran*. A run that analyzed nothing exits **2**,
 never `0` — absence of output is never success. See [Fail-closed by
 construction](#fail-closed-by-construction).
 
-> **Status: v1.1.2.** Usable end to end, and packaged as a GitHub Action. Every
+> **Status: v1.2.0.** Usable end to end, and packaged as a GitHub Action. Every
 > certificate carries its own `schemaVersion`, currently `1.5.0`, which bumps on
 > any breaking field change — so a consumer can pin against the schema rather than
 > against the tool. Every rule ID has a fixture pair in `testdata/`: a rule with no
@@ -108,7 +108,7 @@ Or download a prebuilt binary — no Go toolchain, no C compiler:
 
 ```bash
 # Linux amd64; swap the asset name for your platform.
-VERSION=v1.1.2
+VERSION=v1.2.0
 curl -fsSLO "https://github.com/VIKOIT/reversibility-engine/releases/download/$VERSION/revctl_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/VIKOIT/reversibility-engine/releases/download/$VERSION/checksums.txt"
 
@@ -155,7 +155,7 @@ CGO_ENABLED=1 go install github.com/VIKOIT/reversibility-engine/cmd/revctl@lates
 # 2. Or run the published image (see the Docker section below).
 docker run --rm -v "$PWD:/repo" -w /repo \
   --entrypoint /usr/local/bin/revctl \
-  ghcr.io/vikoit/reversibility-engine:1.1.2 check ./migrations
+  ghcr.io/vikoit/reversibility-engine:1.2.0 check ./migrations
 ```
 
 The action itself now fails on an Intel Mac runner with a message naming the
@@ -948,7 +948,7 @@ which no longer receives a prebuilt binary:
 ```bash
 docker run --rm -v "$PWD:/repo" -w /repo \
   --entrypoint /usr/local/bin/revctl \
-  ghcr.io/vikoit/reversibility-engine:1.1.2 check ./migrations
+  ghcr.io/vikoit/reversibility-engine:1.2.0 check ./migrations
 ```
 
 **Immutable version tags only, and name the entrypoint.** There is deliberately

@@ -484,6 +484,16 @@ release contained unapproved work.
 The v0.2 plan is complete. There is no S13 and no session after it is planned; the next one is
 whatever the owner scopes, written up in `.claude/commands/` first as every previous session was.
 
+**Everything after S12 came from a field audit rather than a session, and shipped in `v1.2.0` on
+2026-08-29:** the P0 (§16.10 and its two predecessors), 32 further PostgreSQL rules, strict
+coverage (§16.7), the two-phase `FileProvider` (§16.9), and the four namespace defects (§16.13).
+
+That release is itself worth recording as a rule, because the gap it closed was twelve commits
+wide: **the P0 fix, the rules, and strict coverage all sat in `main` and in nobody's CI.** A tool
+that improves faster than it releases is one nobody is using, and every one of those improvements
+was worth exactly nothing to a consumer until the tag existed. **Ship before the next
+investigation**, not after it.
+
 ## 5. Layout
 
 ```
@@ -660,9 +670,10 @@ here.** It lives in exactly one place, `domain.SchemaVersion`, re-exported as
 **`1.5.0` covers five separate changes and it is deliberately one version.** They were developed
 as 1.5.0, 1.6.0 and 1.7.0, and collapsed before release because no consumer ever saw the
 intermediates. Three version numbers that never meant anything outside this repository would
-read, from a changelog, as three schemas a consumer might encounter. `PolicyWarnings` was folded
-in later on the same reasoning and by the same rule below: 1.5.0 has not shipped, so it is still
-a working note rather than a promise.
+read, from a changelog, as three schemas a consumer might encounter. `PolicyWarnings`, `PathAnchor`
+and `PathPrefix` were folded in later on the same reasoning and by the same rule below: while
+1.5.0 was unreleased it was still a working note rather than a promise. **It shipped in `v1.2.0`
+and is now frozen — the next change to the schema bumps it.**
 
 The rule this settles, because it will come up again: **the honesty requirement applies to
 versions a consumer can observe. An unreleased intermediate is a working note, not a promise.**
