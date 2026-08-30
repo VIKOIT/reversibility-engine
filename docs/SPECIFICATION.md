@@ -459,6 +459,12 @@ What follows from it, and what the audit in §16.18 applies:
 - **Nothing a consumer resolves may move without proving it moved forwards.** `@v1` means the
   newest `v1.x`, so a workflow that can move it backwards has a fail-open regardless of whether
   anyone has triggered it.
+- **Every language in the repository is linted, not only the one the product is written in.**
+  The delivery path is written in shell and YAML, and until §16.19 not one line of either was
+  read by a tool. A corrupted conditional — `if [ "\false" = 'true' ]` — sat in the code every
+  consumer executes for three releases, disabling a deprecation warning, while `shellcheck`
+  would have named it in under a second. Code held only by review is code held by whoever last
+  read it quickly.
 
 **In:** static analysis only. PostgreSQL `.sql` migrations. Rendered Kubernetes manifests
 (`.yaml`). Terraform plan JSON (`*.tfplan.json`), added in S12 — **plans only, never
@@ -1344,6 +1350,22 @@ what stand between a new user and an immediate failing gate.
   a reason to declare something done. Nothing is tagged before CI has gone green on the commit
   being tagged, and `release.yml` now enforces that rather than trusting it (§16.18).
 
+- **A language nothing lints is a language nothing holds.** Every file the repository ships
+  gets a mechanical reader, in whatever language it is written.
+
+  This is the platform rule's sibling and it was learned from a worse case. "Passes on my
+  machine" at least means something ran. `action/certify.sh` had a conditional corrupted into a
+  constant — `if [ "\false" = 'true' ]` — which made a deprecation warning unreachable, and it
+  survived review twice and three releases because **no tool in this repository had ever read a
+  shell script.** The engine had five mechanical gates; the code every consumer of the action
+  actually executes had none.
+
+  `shellcheck` names it `SC2050` in under a second. The `shell` job in `ci.yml` runs it over
+  every `*.sh` `git ls-files` reports — discovered rather than listed, so a new script cannot be
+  born unlinted — and `actionlint` over every workflow, which reaches the inline `run:` blocks
+  where most of the release path lives. Set at `--severity=warning`, because `SC2050` is a
+  warning and an error-only gate would have missed the defect that motivated the gate.
+
 - **Before implementing an analyzer, write its fixtures and failing tests first.**
 - **One fixture pair per rule ID** — all 59 Postgres rules, all 15 Kubernetes rules, and all
   9 active Terraform rules. **A rule with no fixture does not exist.**
@@ -2053,8 +2075,9 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
     to disagree with. `TestTheTwoSidesOfTheComparisonAgree` asserts they return the same string
     rather than asserting either value.
 
-19. ~~**The release path has never been audited the way the engine has.**~~ **AUDITED. Two more
-    fail-opens found and fixed, one recorded as accepted, one proposed.**
+19. ~~**The release path has never been audited the way the engine has.**~~ **AUDITED. Three
+    defects found and fixed — two fail-opens and one silent no-op — plus the structural gap
+    underneath the third, and one risk recorded as accepted.**
 
     §3 now says the release path is production code and holds it to the engine's invariants. This
     is that sentence applied to `release.yml`, `publish-image.yml`, `action/` and the action
@@ -2088,6 +2111,54 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
     backwards. Equal is allowed, because re-running a release must be idempotent rather than an
     error. A deliberate rollback is a human moving the tag by hand and saying so in the notes.
 
+    **The sixth: a deprecation warning that could not fire, and nine scripts nobody linted.**
+
+    `action/certify.sh` reads the deprecated `require-full-coverage` input for exactly one
+    reason, and its own comment stated it: *"The input is still read so a workflow that sets it
+    gets a warning rather than silence."* The condition was:
+
+    ```sh
+    if [ "\false" = 'true' ]; then                 # a form feed, then "alse"
+        warn "'require-full-coverage' is deprecated and ignored: ..."
+    fi
+    ```
+
+    `${INPUT_REQUIRE_FULL_COVERAGE:-false}` had been corrupted into a constant while the input
+    was being deprecated, in `7ba9850` — the commit whose subject is *"a partial pass is a
+    bypass"*. The constant is never `true`, so the branch is unreachable and **the warning has
+    never once been printed.** It shipped in `v1.1.2`, `v1.2.0` and `v1.2.1`.
+
+    **What it costs, stated precisely, because this one is not a fail-open.** Partial coverage
+    fails closed in the engine whatever this input says, so no gate was weakened and no bad
+    change merged on account of it. What was lost is the *notification*: a consumer who still
+    writes `require-full-coverage: true` is relying on a switch that does nothing, and the one
+    mechanism that would have told them so was dead. §2 forbids silent success; this is the
+    adjacent failure, **a silent no-op**, and it is in the same input that produced fail-open
+    number two in the §3 table.
+
+    **The finding is not the line, it is that nothing could have caught it.** `shellcheck`
+    reports it as `SC2050` — *"This expression is constant. Did you forget the `$` on a
+    variable?"* — in under a second. The repository has nine shell scripts: four in `action/`,
+    which is the code every consumer of this action actually executes, four in `scripts/`, and
+    the CI gate in `.github/scripts/`. **Not one of them was linted by anything, ever**, and the
+    inline `run:` blocks in seven workflows — where the build, the verification, the checksum
+    assembly and the major-tag comparison all live — were not either.
+
+    That is the asymmetry §3 names, measured: the engine is held by `go vet`, `golangci-lint`,
+    an architecture test, fuzzing and an 85% coverage gate, and the shell that decides whether
+    the engine runs at all was held by review. Review had seen this line at least twice.
+
+    The `shell` job in `ci.yml` now runs `shellcheck --severity=warning` over every `*.sh` that
+    `git ls-files` reports — discovered, not listed, so a new script cannot be born unlinted —
+    and `actionlint` over every workflow, which extracts each `run:` block and runs shellcheck
+    on that too. Both were clean on the rest of the repository the first time they ran, so the
+    gate costs nothing ongoing and would have cost this defect nothing to catch.
+
+    **`--severity=warning`, not `--severity=error`.** `SC2050` is a warning. An error-only gate
+    would have passed this exact line, and a lint job that cannot catch the defect that
+    motivated it is theatre.
+
+
     **The complete audit.** Everything in the release path, and what holds it:
 
     | Surface | Verdict |
@@ -2101,6 +2172,8 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
     | `action/certify.sh` — `|| true` on the analysis runs | **Correct, not a gap.** The exit code is read separately and the verdict comes from the JSON; the certificate is written even when the gate fails, which is the documented contract. |
     | `action-selftest.yml` — `continue-on-error: true` | **Correct.** It is how the selftest asserts that a grade F *failed* the step. |
     | `action/install.sh` — a cached binary is run without re-verifying its checksum | **ACCEPTED, with the reasoning recorded below.** |
+    | `action/certify.sh` — the `require-full-coverage` deprecation warning was unreachable | **Fixed.** The sixth. A silent no-op, not a fail-open: the gate still failed closed, but the user was never told the input does nothing. |
+    | All nine `*.sh`, and the `run:` blocks in all seven workflows — never linted by anything | **Fixed.** `shellcheck` and `actionlint` now run in CI. This is the row that explains the one above it. |
 
     **The cached binary, and why it is accepted rather than fixed.** `install.sh` returns early
     when `$REVCTL` is already executable, so a restored cache is run without a checksum. That is

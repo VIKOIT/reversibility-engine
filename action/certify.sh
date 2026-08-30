@@ -82,11 +82,14 @@ fi
 
 FAIL_ON_GATE="${INPUT_FAIL_ON_GATE:-true}"
 
-# Off by default. gate-status already refuses to pass a partially analyzed change, so this only
-# decides whether the *job* fails too — which is a choice about the pipeline, not about safety.
-# Deprecated and ignored: partial coverage always fails now, with no flag needed. The input is
-# still read so a workflow that sets it gets a warning rather than silence.
-if [ "alse" = 'true' ]; then
+# Deprecated and ignored: partial coverage always fails now, with no flag needed.
+#
+# The input is still *read*, and that is the entire purpose of this block. A workflow that
+# still sets it is relying on a switch that does nothing, and this warning is the only thing
+# between that user and a false belief about their own gate. The condition was once
+# ${INPUT_REQUIRE_FULL_COVERAGE:-false} and was corrupted into a constant, which made the
+# warning unreachable and left the user in silence -- see docs/SPECIFICATION.md §16.19.
+if [ "${INPUT_REQUIRE_FULL_COVERAGE:-false}" = 'true' ]; then
     warn "'require-full-coverage' is deprecated and ignored: partial coverage always fails now. Remove it."
 fi
 

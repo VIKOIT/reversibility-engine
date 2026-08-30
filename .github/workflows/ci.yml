@@ -30,6 +30,72 @@ jobs:
       - name: internal/domain must import only stdlib
         run: sh scripts/check-domain-imports.sh
 
+  # The release path is production code (docs/SPECIFICATION.md §3), and until this job existed
+  # not one line of it was linted. The engine has go vet, golangci-lint, an architecture test,
+  # fuzzing and an 85% coverage gate; the shell that decides whether that engine runs at all had
+  # nothing, and a corrupted conditional sat in `action/certify.sh` through two releases:
+  #
+  #     if [ "\false" = 'true' ]; then   # was ${INPUT_REQUIRE_FULL_COVERAGE:-false}
+  #
+  # shellcheck reports that as SC2050 in under a second. It was never run. See §16.19.
+  #
+  # Discipline did not catch it and review did not catch it, so it is checked mechanically —
+  # the same reasoning as the architecture job above.
+  shell:
+    name: Shell and workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Preinstalled on GitHub-hosted runners, so this adds no dependency and no install time.
+      - name: shellcheck every script in the repository
+        run: |
+          set -euo pipefail
+          shellcheck --version
+
+          # Found rather than listed. A script nobody remembered to add to a list is a script
+          # that never gets linted, which is the failure this job exists to prevent — the same
+          # argument scripts/fuzz.sh makes for discovering fuzz targets.
+          mapfile -t scripts < <(git ls-files '*.sh' | sort)
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo '::error::No shell scripts found. This job is looking in the wrong place.'
+            exit 1
+          fi
+          printf 'Linting %d script(s):\n' "${#scripts[@]}"
+          printf '  %s\n' "${scripts[@]}"
+
+          # --severity=warning, not error. SC2050 — the constant-expression check that would
+          # have caught the corrupted conditional — is a warning, so an error-only gate would
+          # have let it through and this job would have been theatre.
+          shellcheck --severity=warning --format=gcc "${scripts[@]}"
+
+      # shellcheck covers the .sh files. It does not see the shell inside a workflow's `run:`
+      # block, and that is where most of the release path actually lives — the build, the
+      # verification, the checksum assembly and the major-tag comparison are all inline. actionlint
+      # extracts those blocks and runs shellcheck over them, and checks the workflow schema too.
+      - name: actionlint every workflow
+        env:
+          ACTIONLINT_VERSION: '1.7.7'
+          # A linter that gates CI is a binary this repository runs, and an unverified binary is
+          # not run — the same rule action/install.sh applies to revctl.
+          ACTIONLINT_SHA256: '023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757'
+        run: |
+          set -euo pipefail
+          asset="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${asset}"
+
+          work="$(mktemp -d)"
+          curl --silent --show-error --fail --location --retry 3 --retry-delay 2 \
+            --output "$work/$asset" "$url"
+
+          echo "${ACTIONLINT_SHA256}  $work/$asset" | sha256sum --check --strict
+
+          tar -xzf "$work/$asset" -C "$work" actionlint
+          "$work/actionlint" -version
+
+          # The shellcheck binary is on PATH, so actionlint uses it for every `run:` block automatically.
+          "$work/actionlint" -color
+
   build:
     name: Build
     runs-on: ubuntu-latest

@@ -14,7 +14,19 @@ move:
 - **Rule IDs** (`PG001`, `K8S001`, …) — people suppress, alert on, and dashboard
   against them, so they are never renumbered or reused.
 
-## [Unreleased]
+## [v1.2.2] - 2026-08-30
+
+> **If you set `require-full-coverage` on `v1.1.2`, `v1.2.0` or `v1.2.1`, that input did nothing
+> and never said so.** The deprecation warning written to tell you it was ignored could not run:
+> its condition had been corrupted into a constant, so the branch was unreachable in every one of
+> those releases. **Your gate was not weakened** — partial coverage fails closed inside the engine
+> whatever that input says, so nothing merged that should not have. But if you believed that flag
+> was the thing enforcing it, it was not, and no line of any run told you. Remove the input; it is
+> a no-op with or without the warning.
+
+**The delivery path, audited against the rule that it is production code.** Three defects, none of
+them ever triggered by anyone, and — the finding that matters more than any of them — the reason
+none of them could have been caught.
 
 ### Changed — the release path is production code
 
@@ -57,6 +69,38 @@ backwards; equal is still allowed, so re-running a release stays idempotent.
 
 Nobody triggered either of these. They are fixed because a fail-open that needs a particular tag
 to be pushed is still a fail-open, and this project has now shipped three of them.
+
+**A deprecation warning that could never fire.** `action/certify.sh` reads the deprecated
+`require-full-coverage` input for one reason, and its own comment said so: *"The input is still
+read so a workflow that sets it gets a warning rather than silence."* The condition had been
+corrupted into a constant — `if [ "\false" = 'true' ]`, where
+`${INPUT_REQUIRE_FULL_COVERAGE:-false}` used to be — in the very commit that deprecated the
+input. The branch was unreachable, so **the warning has never once been printed**, in `v1.1.2`,
+`v1.2.0` or `v1.2.1`.
+
+**This one is not a fail-open, and saying otherwise would overstate it.** Partial coverage fails
+closed in the engine whatever that input says, so no gate was weakened and nothing merged that
+should not have. What was lost is the notification: anyone still writing `require-full-coverage:
+true` is relying on a switch that does nothing, and the one mechanism that would have told them
+was dead. If that is you, remove the input — partial coverage always fails now, with no flag
+needed.
+
+### Changed — every language in the repository is linted, not just Go
+
+**Nothing had ever read a shell script in this repository.** The engine has `go vet`,
+`golangci-lint`, an architecture test, fuzzing and an 85% coverage gate. The nine `*.sh` files —
+including the four in `action/`, which is the code every consumer of this action actually
+executes — and the inline `run:` blocks of seven workflows had no mechanical reader at all. That
+is why a constant conditional survived review twice and shipped three times; `shellcheck` reports
+it as `SC2050` in under a second.
+
+CI now runs `shellcheck --severity=warning` over every `*.sh` that `git ls-files` reports —
+discovered rather than listed, so a new script cannot be born unlinted — and `actionlint` over
+every workflow, which extracts each `run:` block and runs shellcheck on that too. Both were clean
+on the rest of the repository the first time they ran.
+
+`--severity=warning` rather than `--severity=error` is deliberate: `SC2050` is a warning, and an
+error-only gate would have passed the exact line that motivated the job.
 
 ## [v1.2.1] - 2026-08-29
 
@@ -1415,7 +1459,8 @@ that runs the engine 100× over every fixture.
 - Kubernetes findings carry no line numbers — a structural diff has no single
   line to blame.
 
-[Unreleased]: https://github.com/VIKOIT/reversibility-engine/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/VIKOIT/reversibility-engine/compare/v1.2.2...HEAD
+[v1.2.2]: https://github.com/VIKOIT/reversibility-engine/compare/v1.2.1...v1.2.2
 [v1.2.1]: https://github.com/VIKOIT/reversibility-engine/compare/v1.2.0...v1.2.1
 [v1.2.0]: https://github.com/VIKOIT/reversibility-engine/compare/v1.1.2...v1.2.0
 [v1.1.2]: https://github.com/VIKOIT/reversibility-engine/releases/tag/v1.1.2
