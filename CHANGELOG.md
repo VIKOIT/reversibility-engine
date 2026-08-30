@@ -14,6 +14,51 @@ move:
 - **Rule IDs** (`PG001`, `K8S001`, …) — people suppress, alert on, and dashboard
   against them, so they are never renumbered or reused.
 
+## [Unreleased]
+
+### Security — `:v1` in GHCR still serves the image from the original incident
+
+> **If your workflow pins `VIKOIT/reversibility-engine@v1.0.0`, `@v1.0.1` or `@v1.0.2`, your gate
+> is passing without analyzing anything, and has been since the v1.1.0 image was published.**
+> Those three tags are a *Docker* action that runs `ghcr.io/vikoit/reversibility-engine:v1` with
+> no entrypoint and no args. That tag currently resolves to the 1.1.0 image, whose `ENTRYPOINT` is
+> `revctl`, and `revctl` with no arguments prints help and exits 0. There is no wrong grade —
+> there is no grade, and no grade reads as success. **Upgrade to `@v1`**, which resolves to
+> v1.2.2 and is a composite action that does not pull the image at all.
+
+Measured against the registry on 2026-08-30: `:v1` and `:1.1.0` are the same digest
+(`sha256:6176139a…`), while `:1.0.2` — the manifest `:v1` was supposed to be restored to — is
+`sha256:a9c16f85…`. `restore-image-tag.yml` was written for exactly this repair and appears never
+to have been run. **A repair that exists is not a repair that ran**, which is the sixth defect's
+shape one level up.
+
+Not yet resolved, and deliberately not decided unilaterally: GHCR deletes *versions*, not tags, so
+deleting `:v1` also unpublishes the immutable `:1.1.0`. The options and their trade-offs are laid
+out in `docs/SPECIFICATION.md` §16.20.
+
+### Changed — the release gate asserts its own assumption
+
+`require-green-ci.sh` resolves CI by `head_sha`, which is only proven to mean what the gate needs
+under a `push` event. It now exits non-zero for any other event, naming `head_sha` as the untested
+assumption, rather than growing support for a flow this project does not use. A `workflow_dispatch`
+run of `release.yml` or `publish-image.yml` will now fail at the guard.
+
+### Added — the surface inventory
+
+`docs/SPECIFICATION.md` §16.21 enumerates every surface that ships to a user and has no automated
+reader: `action.yml`, the deprecated-input plumbing, the `Dockerfile`, the certificate JSON shape,
+markdown links and anchors, README invocations, `restore-image-tag.yml`, `signatures/cla.json`,
+commitment-bearing prose, and the now-refused `workflow_dispatch` triggers. It is an inventory,
+not a work plan — nothing on it is being fixed.
+
+### Fixed — a claim in the specification that was stronger than its evidence
+
+§16.18 asserted that every CI run this repository had ever had was a `push` event. That came from a
+20-run sample and is false: of 39 `ci.yml` runs, 33 are `push` and 6 are `pull_request`. The gate
+proof does not depend on the absolute — it needs only that the release path's event is `push` — but
+the sentence overstated the evidence, in the section about not trusting unverified claims. Corrected
+in place, with the correction recorded rather than quietly edited.
+
 ## [v1.2.2] - 2026-08-30
 
 > **If you set `require-full-coverage` on `v1.1.2`, `v1.2.0` or `v1.2.1`, that input did nothing

@@ -2078,12 +2078,20 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
 
       Method, and why this shape: a throwaway `ci-gate-proof` branch carried a `t.Fatal` in
       `internal/domain` and a one-line addition of that branch to `ci.yml`'s push trigger.
-      **Every CI run this repository has ever had is a `push` event**, and a release tag always
-      names a commit pushed to a branch CI runs on, so a pull-request-triggered run would have
-      exercised a path the release process never uses. The proof used the real one. The tag
-      `v0.0.1-cigate-proof` matches `v*.*.*`, so both publishing workflows fired; the prerelease
-      hyphen means `major-tag` skips it, so even a total failure of the gate could not have moved
-      `@v1` onto a deliberately broken commit.
+      **A release tag always names a commit that reached CI as a `push`**, so the proof used a
+      push-event run; a pull-request-triggered run would have exercised a path the release
+      process does not take. The tag `v0.0.1-cigate-proof` matches `v*.*.*`, so both publishing
+      workflows fired; the prerelease hyphen means `major-tag` skips it, so even a total failure
+      of the gate could not have moved `@v1` onto a deliberately broken commit.
+
+      *Correction, recorded rather than quietly edited.* This paragraph first claimed that every
+      CI run this repository had ever had was a `push` event. That was drawn from a 20-run sample
+      and it is false: of 39 `ci.yml` runs, **33 are `push` and 6 are `pull_request`**, all six on
+      a since-deleted `test-bad-migration` branch. The proof does not depend on the absolute — it
+      needs only that the release path's event is `push`, which holds — but the sentence asserted
+      something stronger than the evidence, in the section whose whole subject is not trusting
+      unverified claims. The check that would have caught it is one API call over all pages
+      rather than the first.
 
       Observed, on 2026-08-30:
 
@@ -2109,6 +2117,30 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
       The branch and tag were deleted afterwards. **Re-run this proof after any change to
       `require-green-ci.sh` or to either workflow's first job** — it costs one branch, one tag
       and about ten minutes, and it is the only evidence that the gate gates.
+
+      **The gate now asserts the assumption it rests on, rather than supporting more events.**
+      It resolves CI by `head_sha`, and what `head_sha` means is only *proven* for a `push` —
+      which is what a release tag produces, and the only event the gate has ever been exercised
+      under. `require-green-ci.sh` therefore exits non-zero when `GITHUB_EVENT_NAME` is anything
+      else, naming `head_sha` as the untested assumption.
+
+      **This is deliberately not pull_request support.** Adding a branch for an event this
+      release flow does not use would ship an unrun code path inside the one component whose
+      entire job is to be trusted — a guard that looks like a guard and is not, which is the
+      defect this audit found six times. Widening the check requires establishing what `head_sha`
+      resolves to under the new event and re-running the refusal proof under it, in that order.
+
+      Two consequences, stated rather than discovered later:
+
+      - `release.yml` and `publish-image.yml` both still declare `workflow_dispatch`, and a
+        dispatch run will now fail at the guard. `release.yml` has exactly one historical
+        dispatch run (2026-08-26, green, before the guard existed). The trigger is left in place
+        because the failure is loud and immediate; see §16.21 row 10.
+      - `ci.yml` does run on `pull_request` — 6 of its 39 runs — and a PR run's `head_sha` is the
+        real branch-head commit, not a synthetic merge SHA (verified 2026-08-30). So the gate
+        reading a PR run's conclusion would in fact be reading a genuine verdict on that exact
+        tree. **It refuses anyway**, because "would in fact be" is reasoning, and this gate is
+        the last thing in the system that should be protected by reasoning instead of evidence.
 
     The two functions are now one: both call `locate`, and there is no second implementation left
     to disagree with. `TestTheTwoSidesOfTheComparisonAgree` asserts they return the same string
@@ -2226,6 +2258,89 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
     depends entirely on GitHub's cache scoping, and if that ever changes this becomes an
     unverified binary deciding whether changes merge. If the cache is ever shared more widely, or
     if a self-hosted runner with a shared cache volume enters the picture, this must be fixed
+
+20. **OPEN, AND LIVE IN PRODUCTION RIGHT NOW: `ghcr.io/vikoit/reversibility-engine:v1` still
+    serves the incident image.** Found while acting on the ruling to delete that tag. It is not a
+    stale alias pointing at an unknown old digest — it is pointing at *the* defective one.
+
+    Measured on 2026-08-30 against the registry:
+
+    | Tag | Digest |
+    | --- | --- |
+    | `:v1` | `sha256:6176139a…` |
+    | `:1.1.0` | `sha256:6176139a…` — **the same image** |
+    | `:1.0.2` | `sha256:a9c16f85…` — what `:v1` was supposed to be restored to |
+
+    `restore-image-tag.yml` exists for exactly one purpose, stated in its own header: put `:v1`
+    back on the 1.0.2 manifest after the v1.1.0 image replaced `entrypoint.sh` with `revctl`.
+    **It appears never to have been run, or not to have taken.** The repair was written, reviewed,
+    committed — and the thing it was written to repair stayed broken. That is the same shape as
+    the sixth defect one level up: the mechanism existed and nobody checked that it fired.
+
+    **Who is exposed, exactly.** `action.yml` is a Docker action at git tags `v1.0.0`, `v1.0.1`
+    and `v1.0.2`, and composite from `v1.1.0` onward. The Docker one pulls
+    `docker://ghcr.io/vikoit/reversibility-engine:v1` and sets neither `entrypoint:` nor `args:`,
+    so it runs the image's `ENTRYPOINT` bare. In the 1.1.0 image that is `revctl`, and `revctl`
+    with no arguments prints help and exits 0.
+
+    > A consumer pinned at `@v1.0.0`, `@v1.0.1` or `@v1.0.2` today gets a **passing gate that
+    > analyzed nothing.** Not a wrong grade — no grade, read as success.
+
+    `@v1` itself is *not* exposed: the `v1` git tag resolves to v1.2.2, which is composite and
+    never pulls the image. The exposed population is precisely the people who pinned early and
+    never upgraded.
+
+    **The ruling is to delete `:v1`, and it cannot be executed as written.** Two blockers, both
+    established rather than assumed:
+
+    - **GHCR deletes versions, not tags.** A version *is* a manifest digest, and its tags are
+      attributes of it; there is no per-tag delete in the REST API, in the registry API, or in the
+      web UI. `:v1` and `:1.1.0` are one version, so deleting it unpublishes the immutable
+      `1.1.0` tag as collateral. No sequence of copies avoids this — a moving alias is always a
+      copy of some version's digest, so it never has a digest of its own to delete.
+    - **Credentials.** The token available to this session carries `gist, repo, workflow`. Package
+      operations need `read:packages` / `delete:packages`, which it does not have.
+
+    **The choice, which belongs to the owner and is not assumed here.** Deleting the version makes
+    `:v1` return not found — the loud failure the ruling wants — and makes `:1.1.0` return not
+    found too. `1.1.0` is itself the defective image, so losing it is arguably correct rather than
+    collateral; but it is an *immutable* version tag, and unpublishing one breaks the promise that
+    a pinned version stays pullable. The alternative is to run `restore-image-tag.yml` and put
+    `:v1` back on 1.0.2, which **repairs** those consumers instead of failing them. That is
+    restore, not delete, and the ruling rejected *freezing* on the grounds that it relies on
+    nobody pulling — restoring does not rely on that. It is a third option the ruling did not have
+    this evidence for, recorded so the decision is made on the full set.
+
+    **Not done unilaterally**, because all three outcomes mutate a registry that decides whether
+    other people's gates work, and they differ in who breaks.
+
+21. **The surface inventory: what ships to a user and has no automated reader.** Requested as an
+    inventory, not as work. Nothing below is fixed, and nothing below should be fixed before
+    Phase 2.
+
+    The reason for the list is the sixth defect. It was found by a linter in one second because no
+    linter had ever run — so the useful question stopped being *what bugs are left* and became
+    *what surface has never been checked at all*. This enumerates that surface once.
+
+    | # | Surface | What holds it today | What nothing checks |
+    | --- | --- | --- | --- |
+    | 1 | `action.yml` — 15 inputs, 10 outputs, ~11KB of consumer-facing text | Review | Nothing validates it at all. `actionlint` reads workflows, **not composite action definitions**, so the file every consumer configures against has no schema check, and no test asserts that a declared input is read or a declared output emitted. Hand-checked 2026-08-30: all 15 inputs referenced, all 10 outputs wired, two of them as documented aliases. **Consistent today, held by nothing tomorrow.** |
+    | 2 | The deprecated-input and alias plumbing in `action/certify.sh` | Review, and now shellcheck | `action-selftest.yml` asserts `grade`, `gate-status` and `findings-count` over two fixtures. It never sets a deprecated input, so the alias precedence, the "both names set" errors, and the deprecation warnings are all untested. **This is where the sixth defect lived.** |
+    | 3 | `Dockerfile` | Review | No `hadolint`, no lint of any kind. `publish-image.yml` proves the *image* classifies SQL and that a no-argument run is non-zero — real assertions about the artifact, none about the file that produces it. |
+    | 4 | The certificate JSON shape | Go structs, `docs/RULES.md` cross-checks, golden files | **There is no schema artifact.** `schemaVersion` is a string constant; the shape lives in structs plus prose. Consumers parse this, and nothing validates a real certificate against a declared schema — nothing but review would catch a field added without a version bump. |
+    | 5 | Markdown links — 97 relative, 26 external, across README/SPEC/RULES/CHANGELOG | Review | Internal `.md` *file* targets all resolve (checked 2026-08-30). **Anchors (`#section`) and every external URL are unchecked.** The README is the onboarding surface and runs to 1,225 lines. |
+    | 6 | README worked examples — flags, commands, output blocks | Review | Nothing executes them. Documented *numbers* and rule-ID ranges are derived by test (`TestDocumentedNumbersAreDerivedFromTheirAuthority`, `TestDocumentedRuleIDRangesMatchTheTables`); documented *invocations* are not. A renamed flag leaves the README wrong and CI green. |
+    | 7 | `restore-image-tag.yml` | Review | Never covered by the §16.19 audit. It holds `packages: write`, mutates a registry alias, and **does not call the CI gate**. It has no direction check either, so it can repoint an alias backwards — the fifth defect's shape, in the registry rather than in git. §16.20 is the evidence that a repair existing is not the same as a repair having run. |
+    | 8 | `signatures/cla.json` | `cla.yml` at runtime | Malformed content surfaces as a failed check on somebody else's pull request, not as a test failure here. |
+    | 9 | Commitment-bearing prose — `SECURITY.md` disclosure timelines, `COMMERCIAL.md`, `CLA.md`, `NOTICE` | Review | Nothing checks these against reality, and nothing checks that a new file carries the SPDX header every existing file has. |
+    | 10 | `workflow_dispatch` on `release.yml` and `publish-image.yml` | The new event assertion | Both still declare the trigger, and the assertion added in §16.18 now makes the guard refuse every dispatch run. Loud rather than silent, so not a fail-open — but it is a declared path that can no longer succeed, and `release.yml` has one historical dispatch run (2026-08-26, green). Left as-is deliberately: the ruling preferred a loud refusal over support for an unexercised path. |
+
+    **What is already held**, recorded so the next audit does not re-derive it: the nine `*.sh`
+    files and every workflow `run:` block (shellcheck + actionlint, §16.19), `internal/domain`'s
+    import set (architecture job), the Terraform resource catalog (`catalog_test.go`), the rule
+    tables against the classifier (`TestEveryClassificationHasATableRow`), documented numbers and
+    rule-ID ranges, all three renderers (golden files across eight scenarios), and the release
+    path's refusal to publish over a red CI (proven, §16.18).
     first.
 
 ## 17. Fixture conventions

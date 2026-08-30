@@ -26,6 +26,27 @@ fail() { printf '::error::%s\n' "$*" >&2; exit 1; }
 SHA="${1:?usage: require-green-ci.sh <sha>}"
 WORKFLOW="${CI_WORKFLOW:-ci.yml}"
 
+# THE ASSUMPTION, ASSERTED RATHER THAN ASSUMED.
+#
+# Everything below rests on one thing: that `runs?head_sha=<sha>` returns CI's verdict on the
+# commit being released. That is exact for a `push` event, which is what a release tag produces
+# and the only event this gate has ever been exercised under.
+#
+# It is not obviously exact for anything else, and the failure would be quiet: the query returns
+# *a* run, the script reads *a* conclusion, and a wrong-but-green answer looks identical to a
+# right one. That is the fail-open shape this whole release path keeps producing, so the script
+# refuses rather than guesses.
+#
+# This is deliberately not support for other events. Adding a pull_request branch would mean
+# shipping a code path nobody has run, in a gate whose entire job is to be trusted -- a guard
+# that looks like a guard and is not. If a release flow ever needs another event, work out what
+# head_sha means for it, prove the gate still refuses a red CI under it, and then widen this
+# check. Not before.
+EVENT="${GITHUB_EVENT_NAME:-}"
+if [ "$EVENT" != 'push' ]; then
+    fail "This gate is only proven for 'push' events and this run is '${EVENT:-unset}'. It resolves CI by head_sha, and what head_sha means for a '${EVENT:-unset}' event is an untested assumption -- so it refuses rather than return an answer nobody has checked. A release is cut by pushing a tag; do that. To use this script under another event, establish what head_sha resolves to there and prove the gate still refuses a red CI before widening this check."
+fi
+
 printf 'Requiring a successful %s run for %s\n' "$WORKFLOW" "$SHA"
 
 # The most recent run of the CI workflow for this exact commit. head_sha rather than a branch:
