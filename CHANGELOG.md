@@ -16,26 +16,52 @@ move:
 
 ## [Unreleased]
 
-### Security — `:v1` in GHCR still serves the image from the original incident
+### Security — `@v1.0.0` – `@v1.0.2` ran a gate that analyzed nothing. Repaired 2026-08-30.
 
-> **If your workflow pins `VIKOIT/reversibility-engine@v1.0.0`, `@v1.0.1` or `@v1.0.2`, your gate
-> is passing without analyzing anything, and has been since the v1.1.0 image was published.**
-> Those three tags are a *Docker* action that runs `ghcr.io/vikoit/reversibility-engine:v1` with
-> no entrypoint and no args. That tag currently resolves to the 1.1.0 image, whose `ENTRYPOINT` is
-> `revctl`, and `revctl` with no arguments prints help and exits 0. There is no wrong grade —
-> there is no grade, and no grade reads as success. **Upgrade to `@v1`**, which resolves to
-> v1.2.2 and is a composite action that does not pull the image at all.
+> **If you pin `VIKOIT/reversibility-engine@v1.0.0`, `@v1.0.1` or `@v1.0.2`, those runs were
+> passing without analyzing anything.** Every green check they produced between the publication of
+> the `1.1.0` image and 2026-08-30 was a check over no analysis. **Move your pin to `@v1`.**
+>
+> ```diff
+> - uses: VIKOIT/reversibility-engine@v1.0.2
+> + uses: VIKOIT/reversibility-engine@v1
+> ```
 
-Measured against the registry on 2026-08-30: `:v1` and `:1.1.0` are the same digest
-(`sha256:6176139a…`), while `:1.0.2` — the manifest `:v1` was supposed to be restored to — is
-`sha256:a9c16f85…`. `restore-image-tag.yml` was written for exactly this repair and appears never
-to have been run. **A repair that exists is not a repair that ran**, which is the sixth defect's
-shape one level up.
+**What happened.** At `v1.0.x` this action is a *Docker* action. It runs
+`ghcr.io/vikoit/reversibility-engine:v1` with no `entrypoint:` and no `args:` of its own, so it
+executes whatever that image declares as its `ENTRYPOINT`. At image `1.0.2` that was
+`entrypoint.sh`, which performed the analysis. The `1.1.0` image replaced it with `revctl`, and
+**`revctl` with no arguments prints help and exits 0.** Publishing that image as `:v1` turned those
+consumers' gate into a green check over nothing.
 
-Not yet resolved, and deliberately not decided unilaterally: GHCR deletes *versions*, not tags, so
-deleting `:v1` also unpublishes the immutable `:1.1.0`. The options and their trade-offs are laid
-out in `docs/SPECIFICATION.md` §16.20.
+**There was never a wrong grade — there was no grade**, and a run that produced no grade exited
+zero, which every branch protection rule reads as success.
 
+**Repaired on 2026-08-30.** `:v1` was repointed at the `1.0.2` manifest, verified by reading the
+registry directly rather than the repair workflow's own output:
+
+| | |
+| --- | --- |
+| `:v1` resolves to | `sha256:2e812824…`, an OCI image index |
+| which references | `sha256:a9c16f85…` — identical to `:1.0.2` |
+| whose config declares | `Entrypoint: ["/usr/local/bin/entrypoint.sh"]` |
+
+The frozen action analyzes again. **Moving the pin is still the fix**: `v1.0.x` receives nothing
+else, and the repair restores a tag that should never have moved rather than making that line
+supported.
+
+**What to audit.** Any pull request merged through `@v1.0.x` while the `1.1.0` image was serving
+`:v1` was not assessed by this engine, whatever its check said. Re-run those changes against `@v1`.
+
+**Who was never affected.** `@v1`, and every pinned release from `v1.1.0` onward — all *composite*
+actions that download a verified binary and never pull the image. Anyone invoking `revctl`
+directly is unaffected. The engine itself was never wrong here; nothing reached it.
+
+**Why it lasted.** `restore-image-tag.yml` was written to perform exactly this repair, and it could
+never have worked: it built `ghcr.io/${{ github.repository }}` without lowercasing, and this owner
+is `VIKOIT`, so every registry call failed on `invalid reference format`. The repair existed, read
+as done, and had never once run to completion. See `docs/SPECIFICATION.md` §2, *a repair that
+exists is not a repair that ran*, and §16.20.
 ### Changed — the release gate asserts its own assumption
 
 `require-green-ci.sh` resolves CI by `head_sha`, which is only proven to mean what the gate needs

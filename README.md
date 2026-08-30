@@ -1,7 +1,7 @@
 # Reversibility Engine
 ![Go 1.22+](https://img.shields.io/badge/go-1.22%2B-00ADD8?logo=go&logoColor=white)
 ![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-663366)
-![Status](https://img.shields.io/badge/status-v1.2.1-brightgreen)
+![Status](https://img.shields.io/badge/status-v1.2.2-brightgreen)
 ![Policy](https://img.shields.io/badge/policy-fail--closed-critical)
 ![Rules](https://img.shields.io/badge/rules-59%20PG%20%C2%B7%2015%20K8S%20%C2%B7%209%20TF-blue)
 
@@ -9,8 +9,33 @@
 [![Release](https://img.shields.io/github/v/release/VIKOIT/reversibility-engine)](https://github.com/VIKOIT/reversibility-engine/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/VIKOIT/reversibility-engine)](https://goreportcard.com/report/github.com/VIKOIT/reversibility-engine)
 
-
-
+> ### ⚠️ Security notice — `@v1.0.0`, `@v1.0.1`, `@v1.0.2` were passing without analyzing anything
+>
+> **Repaired 2026-08-30.** If you pin one of those three tags, move your pin:
+>
+> ```diff
+> - uses: VIKOIT/reversibility-engine@v1.0.2
+> + uses: VIKOIT/reversibility-engine@v1
+> ```
+>
+> At `v1.0.x` this action is a **Docker** action: it runs
+> `ghcr.io/vikoit/reversibility-engine:v1` with no entrypoint and no arguments, so it executes
+> whatever that image declares as its `ENTRYPOINT`. At image `1.0.2` that was `entrypoint.sh`,
+> which analyzed. The `1.1.0` image replaced it with `revctl`, and `revctl` with no arguments
+> prints help and **exits 0** — so those consumers' gate became a green check over no analysis.
+> There was never a wrong grade; there was **no grade**, and no grade read as success.
+>
+> `:v1` has been repointed at the `1.0.2` manifest and verified by reading the registry directly,
+> so the frozen action analyzes again. **Moving the pin is still the fix** — `v1.0.x` receives
+> nothing else.
+>
+> **Audit:** any pull request merged through `@v1.0.x` while `1.1.0` served `:v1` was not assessed,
+> whatever its check said. Re-run it against `@v1`.
+>
+> **Not affected:** `@v1` and every release from `v1.1.0` on — all composite actions that download
+> a checksum-verified binary and never pull the image — and anyone running `revctl` directly.
+>
+> Full detail in [CHANGELOG.md](CHANGELOG.md) and `docs/SPECIFICATION.md` §16.20.
 
 **"We can always roll back" is an assumption. This measures it.**
 
