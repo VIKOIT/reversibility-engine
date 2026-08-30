@@ -61,13 +61,50 @@ jobs:
     timeout-minutes: 15
 
     env:
-      IMAGE: ghcr.io/${{ github.repository }}
+      # IMAGE is set by the normalisation step below, not here: it needs lowercasing and
+      # GitHub expressions cannot do it.
       SOURCE: ${{ inputs.source }}
       ALIAS: ${{ inputs.alias }}
       EXPECT_ENTRYPOINT: ${{ inputs.expect-entrypoint }}
 
     steps:
       - uses: actions/checkout@v4
+
+      # THE IMAGE REFERENCE MUST BE LOWERCASE, AND github.repository IS NOT.
+      #
+      # This owner is `VIKOIT`, so `ghcr.io/${{ github.repository }}` expands to
+      # `ghcr.io/VIKOIT/reversibility-engine`, and a Docker repository name may not contain
+      # uppercase. Every `imagetools` call in this workflow therefore failed on the first one:
+      #
+      #     ERROR: invalid reference format: repository name (VIKOIT/reversibility-engine)
+      #            must be lowercase
+      #
+      # **This workflow had never once run to completion.** That is why the incident it was
+      # written to repair was still live: not because nobody dispatched it, but because it could
+      # not succeed if they did. A repair that exists is not a repair that ran -- and this one
+      # could not run. See docs/SPECIFICATION.md §2 and §16.20.
+      #
+      # publish-image.yml is unaffected and always was, which is exactly why this went unseen:
+      # docker/metadata-action lowercases the image name for you. A raw imagetools call does not,
+      # and the two sat in the same repository looking equally correct.
+      #
+      # GitHub's expression language has no lower(), so this is a step rather than an `env:`.
+      - name: Normalise the image reference to lowercase
+        run: |
+          set -euo pipefail
+          image="ghcr.io/$(printf '%s' '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+
+          # Asserted rather than assumed: if this is ever not lowercase, every later step fails
+          # with a registry error that reads as a broken tag rather than a broken workflow.
+          case "$image" in
+            *[A-Z]*)
+              echo "::error::image reference '$image' still contains uppercase after normalisation."
+              exit 1
+              ;;
+          esac
+
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "Image reference: $image"
 
       # This workflow can point a production tag at anything, and until now it did so with less
       # protection than the release path it exists to repair: `packages: write`, no CI gate, and
