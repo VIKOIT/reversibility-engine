@@ -181,9 +181,18 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Repoint the alias
+        id: repoint
         if: steps.before.outputs.digest != steps.source.outputs.digest
         run: |
           set -euo pipefail
+
+          # Recorded BEFORE the mutation, so that a failure anywhere after this point cannot be
+          # summarised as "nothing was changed". The first version of this workflow's summary
+          # inferred that from the absence of a verified digest, and said "Nothing in the
+          # registry was changed" on a run that had already moved the tag. A report that is
+          # wrong in the reassuring direction is the defect this repository exists to remove.
+          echo 'attempted=true' >> "$GITHUB_OUTPUT"
+
           docker buildx imagetools create --tag "$IMAGE:$ALIAS" "$IMAGE:$SOURCE"
 
       # Read back rather than assumed. A tag that quietly did not move is the same failure this
@@ -197,12 +206,36 @@ jobs:
           want='${{ steps.source.outputs.digest }}'
           got="$(docker buildx imagetools inspect "$IMAGE:$ALIAS" --format '{{.Manifest.Digest}}')"
 
-          if [ "$got" != "$want" ]; then
-            echo "::error::$IMAGE:$ALIAS is $got, expected $want."
-            exit 1
+          # A DIGEST COMPARISON ALONE IS THE WRONG CHECK, AND IT FAILED A CORRECT REPAIR.
+          #
+          # `imagetools create` does not copy a manifest byte-for-byte. Given a single source it
+          # builds an OCI image *index* that references it, so the alias's top-level digest is a
+          # new digest by construction and can never equal a plain manifest's. This check
+          # therefore could not pass for any source published as a plain manifest -- which is
+          # every image this repository publishes, since publish-image.yml sets provenance:false
+          # precisely to keep them plain.
+          #
+          # It is a guard that always fails, which is the mirror of a guard that never fails and
+          # no better: the first restore it was asked to confirm had in fact succeeded, and this
+          # step reported it as broken while the ENTRYPOINT assertion below -- the check that
+          # actually matters -- was skipped as a consequence.
+          #
+          # What must hold is that the alias *serves* the source manifest: either it resolves
+          # straight to it, or it resolves to an index that references it.
+          if [ "$got" = "$want" ]; then
+            echo "$IMAGE:$ALIAS resolves directly to $got."
+          else
+            raw="$(docker buildx imagetools inspect "$IMAGE:$ALIAS" --raw)"
+
+            if printf '%s' "$raw" | grep -qF "$want"; then
+              echo "$IMAGE:$ALIAS is index $got, which references the source manifest $want."
+            else
+              echo "::error::$IMAGE:$ALIAS is $got, and it neither is nor references $want."
+              printf '%s\n' "$raw"
+              exit 1
+            fi
           fi
 
-          echo "$IMAGE:$ALIAS resolves to $got."
           echo "digest=$got" >> "$GITHUB_OUTPUT"
 
       # The digest match proves the alias points at the right bytes. This proves those bytes
@@ -227,25 +260,30 @@ jobs:
               ;;
           esac
 
-      # A SUMMARY MUST NOT RENDER A BLANK WHERE IT NEVER LOOKED.
+      # A SUMMARY MUST NOT RENDER A BLANK WHERE IT NEVER LOOKED, AND MUST NOT SAY "NOTHING
+      # CHANGED" WHEN IT DOES NOT KNOW THAT.
       #
-      # This ran on the failed restore and printed a table with three empty digest cells. An empty
-      # cell reads as "we looked and there was nothing there"; the truth was "we never got that
-      # far", and those are opposite facts about a registry. The step that actually failed --
-      # resolving the source digest -- did abort immediately and did name both the tag and the
-      # registry's error, which is correct and stays. The defect is here, in the report.
+      # Two failures, both of them here, both of them in the report rather than in the work.
       #
-      # `if: always()` is kept, because a failed repair needs a summary more than a successful one
-      # does. What changes is that every cell says which of the three things it means: a digest,
-      # `(absent)` from a lookup that ran and found nothing, or `(not reached)` from a step that
-      # never ran. And the heading states the outcome, so nobody reads a table of blanks as a
-      # completed repair.
+      # First: it printed a table of empty digest cells on a run that aborted before reading
+      # anything. An empty cell says "we looked and found nothing"; the truth was "we never got
+      # that far", and about a registry those are opposite claims.
+      #
+      # Second, and worse, the fix for the first inferred "nothing was changed" from the absence
+      # of a *verified* digest. On the very next run the repoint succeeded and the verification
+      # failed -- so the tag had moved and this step would have reported that the registry was
+      # untouched. Wrong in the reassuring direction, which is the one that costs something.
+      #
+      # So the mutation reports itself, from before it happens (steps.repoint.outputs.attempted),
+      # rather than being inferred from a downstream success. Three outcomes, never conflated:
+      # verified, changed-but-unverified, and untouched.
       - name: Summarise
         if: always()
         env:
           BEFORE: ${{ steps.before.outputs.digest }}
           RESOLVED: ${{ steps.source.outputs.digest }}
           AFTER: ${{ steps.verify.outputs.digest }}
+          ATTEMPTED: ${{ steps.repoint.outputs.attempted }}
           OUTCOME: ${{ job.status }}
         run: |
           set -euo pipefail
@@ -253,14 +291,22 @@ jobs:
           cell() { if [ -z "$1" ]; then printf "(not reached)"; else printf "\`%s\`" "$1"; fi; }
 
           {
-            if [ -z "$AFTER" ]; then
+            if [ -n "$AFTER" ]; then
+              echo "### ✅ \`$ALIAS\` → \`$SOURCE\`"
+              echo
+              echo "Repointed and verified."
+            elif [ "$ATTEMPTED" = 'true' ]; then
+              echo "### ⚠️ \`$ALIAS\` WAS CHANGED, AND NOT VERIFIED — job status \`$OUTCOME\`"
+              echo
+              echo "**The tag was repointed and the verification did not pass.** Do not read this"
+              echo "as a no-op: the registry was mutated. Establish the current state by reading"
+              echo "the registry directly, using the command below, before doing anything else."
+            else
               echo "### ❌ \`$ALIAS\` was NOT repointed — job status \`$OUTCOME\`"
               echo
-              echo "**Nothing in the registry was changed.** \`$ALIAS\` still resolves to whatever it"
-              echo "did before this run. A cell reading \`(not reached)\` means the step never ran, not"
-              echo "that the tag is absent."
-            else
-              echo "### ✅ \`$ALIAS\` → \`$SOURCE\`"
+              echo "The run stopped before the tag was touched, so \`$ALIAS\` still resolves to"
+              echo "whatever it did before. A cell reading \`(not reached)\` means the step never"
+              echo "ran, not that the tag is absent."
             fi
 
             echo
@@ -270,8 +316,12 @@ jobs:
             printf "| \`%s\` | %s |\n" "$SOURCE" "$(cell "$RESOLVED")"
             printf "| \`%s\` after | %s |\n" "$ALIAS" "$(cell "$AFTER")"
             echo
+            echo "\`imagetools create\` wraps a plain manifest in an OCI index, so a repointed alias"
+            echo "normally shows a *different* digest from its source while referencing it. Compare"
+            echo "what it references, not the top-level digest."
+            echo
             echo "Confirm from the registry rather than from this table:"
             echo '```'
-            echo "docker buildx imagetools inspect $IMAGE:$ALIAS --format '{{.Manifest.Digest}}'"
+            echo "docker buildx imagetools inspect $IMAGE:$ALIAS --raw"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
