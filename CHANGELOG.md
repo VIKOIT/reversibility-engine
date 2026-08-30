@@ -62,6 +62,38 @@ never have worked: it built `ghcr.io/${{ github.repository }}` without lowercasi
 is `VIKOIT`, so every registry call failed on `invalid reference format`. The repair existed, read
 as done, and had never once run to completion. See `docs/SPECIFICATION.md` §2, *a repair that
 exists is not a repair that ran*, and §16.20.
+
+### Added — the v1.0.x exposure is now asserted end to end
+
+`action-selftest.yml` gains two jobs, and **neither gates the other**, because they express
+different requirements at different strengths:
+
+- `v1-image-is-not-a-no-op` runs on every event. It pulls `ghcr.io/vikoit/reversibility-engine:v1`
+  and asserts the image declares the analyzing `ENTRYPOINT` and does not exit 0 on a bare run.
+  That single assertion separates the repaired state from the incident state exactly, because a
+  bare `ENTRYPOINT` invocation *is* what the frozen Docker action does.
+- `v1-0-2-action-fails-a-grade-f-change` runs the real `@v1.0.2` action against a `DROP TABLE`
+  fixture and asserts it fails **and** grades `F`. Failure alone would be satisfied by the action
+  being broken in some new way. It is `pull_request`-only because the frozen entrypoint reads
+  `.pull_request.base.sha` and refuses any other event outright.
+
+### Fixed — a check that could suppress a stronger check
+
+`restore-image-tag.yml` compared a restored tag's digest with its source's and exited before the
+`ENTRYPOINT` assertion. `imagetools create` wraps a plain manifest in an OCI index, so that
+comparison could never match for any image this project publishes — a guard that always fails,
+which is the mirror of one that never fails and no better. It marked a correct repair as broken
+and suppressed the check that expressed the real requirement.
+
+New rule in `docs/SPECIFICATION.md` §13, with an audit of the shape:
+
+> A check that can prevent a stronger check from running must be provably weaker in scope, not
+> merely earlier. Where two assertions express different requirements, neither may gate the other
+> — run both and report both.
+
+The repair summary also now names its own source: the digests it prints come from that run's own
+`imagetools` calls, which is a weaker claim than an independent read of the registry. A workflow
+reporting on itself agrees with itself, and that gap is how this incident stayed invisible.
 ### Changed — the release gate asserts its own assumption
 
 `require-green-ci.sh` resolves CI by `head_sha`, which is only proven to mean what the gate needs

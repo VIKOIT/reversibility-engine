@@ -1401,6 +1401,38 @@ what stand between a new user and an immediate failing gate.
   where most of the release path lives. Set at `--severity=warning`, because `SC2050` is a
   warning and an error-only gate would have missed the defect that motivated the gate.
 
+- **A check that can prevent a stronger check from running must be provably weaker in scope, not
+  merely earlier.** Where two assertions express different requirements, neither may gate the
+  other — run both and report both.
+
+  This cost a correct repair. `restore-image-tag.yml` compared the restored tag's digest against
+  its source's and, on a mismatch, exited before the `ENTRYPOINT` assertion ran. The digest
+  comparison was the weaker check *and* the wrong one — `imagetools create` wraps a plain manifest
+  in an index, so it could never match — while the assertion it suppressed was the one expressing
+  the actual requirement. The repair had worked. The run was red, the substantive check never
+  executed, and for twenty minutes the evidence said the opposite of the truth.
+
+  **Earlier is not weaker.** A preliminary check earns the right to abort only when its failure
+  implies the later one cannot be satisfied either. Otherwise it is not a precondition, it is a
+  second opinion that happens to be first.
+
+  The shape to grep for: `set -e`, an early `return`, or a sequential workflow step sitting
+  between two assertions that test *different things*. The fix is an accumulator —
+  `action-selftest.yml`'s `check()` helper is the pattern, running all three comparisons and
+  exiting on the total.
+
+  | Site | Verdict |
+  | --- | --- |
+  | `restore-image-tag.yml` — digest comparison gating the `ENTRYPOINT` assertion | **Was the defect.** The comparison is now correct *and* accepts an index that references the source, so it no longer aborts a working repair. |
+  | `release.yml` — *every asset is checksummed*, then *the checksums match the files* | **The shape, benign today.** Neither implies the other, and the first aborts the second. No fail-open — both block the release — but a run reports one failure when it could report both. |
+  | `publish-image.yml` — *the image still classifies SQL*, then *a no-argument run is not a pass* | **The shape, benign today.** Same structure, same reasoning: both block the push, so nothing ships wrongly; the cost is diagnostic. |
+  | `action/certify.sh` — the `NO_CANDIDATES` early exit before the `PARTIAL` coverage warning | **Provably weaker, correctly ordered.** A changeset with no candidates has nothing whose coverage could be partial, so the suppressed branch cannot apply. |
+  | `domain.Grade.Gate` — `GradeNotApplicable` returns before coverage and policy are read | **Provably weaker, and must stay.** The early return yields `NOT_APPLICABLE`, which blocks an agent exactly as `FAIL` does, so it cannot mask a stronger blocking condition. Recorded here so a future reader does not "fix" it into a bug. |
+
+  The two benign rows are left as they are. Restructuring a gate that already fails closed, to
+  improve a message nobody has yet needed, is the kind of change that introduces the defect it was
+  tidying up after — which is exactly how the digest comparison got written.
+
 - **Before implementing an analyzer, write its fixtures and failing tests first.**
 - **One fixture pair per rule ID** — all 59 Postgres rules, all 15 Kubernetes rules, and all
   9 active Terraform rules. **A rule with no fixture does not exist.**
@@ -2293,61 +2325,71 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
     depends entirely on GitHub's cache scoping, and if that ever changes this becomes an
     unverified binary deciding whether changes merge. If the cache is ever shared more widely, or
     if a self-hosted runner with a shared cache volume enters the picture, this must be fixed
+    first.
 
-20. **OPEN, AND LIVE IN PRODUCTION RIGHT NOW: `ghcr.io/vikoit/reversibility-engine:v1` still
-    serves the incident image.** Found while acting on the ruling to delete that tag. It is not a
-    stale alias pointing at an unknown old digest — it is pointing at *the* defective one.
+20. ~~**`ghcr.io/vikoit/reversibility-engine:v1` serves the incident image.**~~ **RESOLVED
+    2026-08-30 by restoring the tag, not deleting it.** The exposure ran from the publication of
+    the `1.1.0` image until that date.
 
-    Measured on 2026-08-30 against the registry:
-
-    | Tag | Digest |
-    | --- | --- |
-    | `:v1` | `sha256:6176139a…` |
-    | `:1.1.0` | `sha256:6176139a…` — **the same image** |
-    | `:1.0.2` | `sha256:a9c16f85…` — what `:v1` was supposed to be restored to |
-
-    `restore-image-tag.yml` exists for exactly one purpose, stated in its own header: put `:v1`
-    back on the 1.0.2 manifest after the v1.1.0 image replaced `entrypoint.sh` with `revctl`.
-    **It appears never to have been run, or not to have taken.** The repair was written, reviewed,
-    committed — and the thing it was written to repair stayed broken. That is the same shape as
-    the sixth defect one level up: the mechanism existed and nobody checked that it fired.
-
-    **Who is exposed, exactly.** `action.yml` is a Docker action at git tags `v1.0.0`, `v1.0.1`
-    and `v1.0.2`, and composite from `v1.1.0` onward. The Docker one pulls
+    **The exposure.** `action.yml` is a Docker action at git tags `v1.0.0`, `v1.0.1` and `v1.0.2`,
+    and composite from `v1.1.0` onward. The Docker one pulls
     `docker://ghcr.io/vikoit/reversibility-engine:v1` and sets neither `entrypoint:` nor `args:`,
     so it runs the image's `ENTRYPOINT` bare. In the 1.1.0 image that is `revctl`, and `revctl`
     with no arguments prints help and exits 0.
 
-    > A consumer pinned at `@v1.0.0`, `@v1.0.1` or `@v1.0.2` today gets a **passing gate that
-    > analyzed nothing.** Not a wrong grade — no grade, read as success.
+    > A consumer pinned at `@v1.0.0`, `@v1.0.1` or `@v1.0.2` had a **passing gate that analyzed
+    > nothing.** Not a wrong grade — no grade, read as success.
 
-    `@v1` itself is *not* exposed: the `v1` git tag resolves to v1.2.2, which is composite and
-    never pulls the image. The exposed population is precisely the people who pinned early and
-    never upgraded.
+    `@v1` was never exposed: the `v1` git tag resolves to the current release, which is composite
+    and never pulls the image.
 
-    **The ruling is to delete `:v1`, and it cannot be executed as written.** Two blockers, both
-    established rather than assumed:
+    **Why it lasted, which is the finding worth keeping.** `restore-image-tag.yml` was written for
+    exactly this repair, and it could not have worked. It built `ghcr.io/${{ github.repository }}`
+    without lowercasing, and this owner is `VIKOIT`, so the first registry call died on
+    `invalid reference format` and every step after it skipped. The repair existed, read as done,
+    and had never once run to completion — §2, *a repair that exists is not a repair that ran*.
+    `publish-image.yml` was unaffected only because `docker/metadata-action` lowercases for you:
+    two producers of one value, one of them silently correct, which is §13's rule and is now fixed
+    by `.github/scripts/image-ref.sh` being the only producer.
 
-    - **GHCR deletes versions, not tags.** A version *is* a manifest digest, and its tags are
-      attributes of it; there is no per-tag delete in the REST API, in the registry API, or in the
-      web UI. `:v1` and `:1.1.0` are one version, so deleting it unpublishes the immutable
-      `1.1.0` tag as collateral. No sequence of copies avoids this — a moving alias is always a
-      copy of some version's digest, so it never has a digest of its own to delete.
-    - **Credentials.** The token available to this session carries `gist, repo, workflow`. Package
-      operations need `read:packages` / `delete:packages`, which it does not have.
+    **Restore, not delete, and the evidence changed the ruling.** Deleting was ruled first, on the
+    grounds that a pullable tag at an unknown digest fails silently while a missing one fails
+    loudly. Two facts moved it:
 
-    **The choice, which belongs to the owner and is not assumed here.** Deleting the version makes
-    `:v1` return not found — the loud failure the ruling wants — and makes `:1.1.0` return not
-    found too. `1.1.0` is itself the defective image, so losing it is arguably correct rather than
-    collateral; but it is an *immutable* version tag, and unpublishing one breaks the promise that
-    a pinned version stays pullable. The alternative is to run `restore-image-tag.yml` and put
-    `:v1` back on 1.0.2, which **repairs** those consumers instead of failing them. That is
-    restore, not delete, and the ruling rejected *freezing* on the grounds that it relies on
-    nobody pulling — restoring does not rely on that. It is a third option the ruling did not have
-    this evidence for, recorded so the decision is made on the full set.
+    - GHCR deletes **versions, not tags**. `:v1` and `:1.1.0` were one version, so deleting it
+      would have unpublished an *immutable* version tag to fix a mutable alias — the wrong trade
+      in a project whose thesis is that immutable things stay immutable.
+    - Restoring does not rely on nobody pulling, which was the objection to freezing. It repairs
+      those consumers instead of breaking them.
 
-    **Not done unilaterally**, because all three outcomes mutate a registry that decides whether
-    other people's gates work, and they differ in who breaks.
+    **The result, read from the registry rather than from the workflow that produced it:**
+
+    | | |
+    | --- | --- |
+    | `:v1` resolves to | `sha256:2e812824…`, an OCI image index |
+    | which references | `sha256:a9c16f85…` — identical to `:1.0.2` |
+    | whose config declares | `Entrypoint: ["/usr/local/bin/entrypoint.sh"]` |
+
+    **The index shape is kept deliberately.** `imagetools create` wraps a plain manifest in an
+    index, so the restored alias has a digest of its own. Adding `crane` or `regctl` to make the
+    shape uniform would be a new dependency bought for tidiness. **The requirement was never
+    "plain manifest" — it is that the reference a Docker action pulls resolves to a config whose
+    entrypoint analyzes**, and that is verified directly. `publish-image.yml`'s comment used to
+    assert the manifest-shape version of this and has been corrected to state the real one.
+
+    **Held now by `action-selftest.yml`, in two jobs that do not gate each other** (§13):
+    `v1-image-is-not-a-no-op` runs on every event and asserts the `:v1` image declares the
+    analyzing entrypoint and does not exit 0 on a bare run — the single assertion that separates
+    the repaired state from the incident state. `v1-0-2-action-fails-a-grade-f-change` runs the
+    real frozen action against a `DROP TABLE` fixture and asserts it both fails **and** grades F,
+    because a failure with no grade is a broken run rather than a working gate. It is
+    `pull_request`-only because the frozen entrypoint reads `.pull_request.base.sha` and refuses
+    any other event — on a push it would fail for that reason and satisfy a bare outcome check
+    while proving nothing.
+
+    **`v1.0.x` is repaired, not supported.** The README and CHANGELOG tell those users to move to
+    `@v1` regardless, and say what to audit: anything merged through `@v1.0.x` while `1.1.0`
+    served `:v1` was not assessed, whatever its check reported.
 
 21. **The surface inventory: what ships to a user and has no automated reader.** Requested as an
     inventory, not as work. Nothing below is fixed, and nothing below should be fixed before

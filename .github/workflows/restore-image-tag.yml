@@ -316,6 +316,11 @@ jobs:
             printf "| \`%s\` | %s |\n" "$SOURCE" "$(cell "$RESOLVED")"
             printf "| \`%s\` after | %s |\n" "$ALIAS" "$(cell "$AFTER")"
             echo
+            echo "**Source of these numbers: this run's own imagetools calls.** That is a weaker"
+            echo "claim than an independent read of the registry, and the gap between the two is"
+            echo "how the :v1 incident stayed invisible -- a workflow reporting on itself agrees"
+            echo "with itself. Confirm anything you act on with the command below."
+            echo
             echo "\`imagetools create\` wraps a plain manifest in an OCI index, so a repointed alias"
             echo "normally shows a *different* digest from its source while referencing it. Compare"
             echo "what it references, not the top-level digest."

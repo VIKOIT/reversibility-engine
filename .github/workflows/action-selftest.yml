@@ -291,3 +291,126 @@ jobs:
             exit 1
           fi
           echo 'Image classifies SQL correctly.'
+
+  # ------------------------------------------------------------------------------------------
+  # The v1.0.x exposure, asserted in the form a user experiences it.
+  #
+  # v1.0.0, v1.0.1 and v1.0.2 are Docker actions that run ghcr.io/vikoit/reversibility-engine:v1
+  # with no entrypoint and no arguments. When the 1.1.0 image replaced entrypoint.sh with revctl
+  # -- which exits 0 with no arguments -- every gate on those tags became a green check over no
+  # analysis. `:v1` was repointed at the 1.0.2 manifest on 2026-08-30.
+  #
+  # TWO JOBS, AND NEITHER GATES THE OTHER. They assert different requirements at different
+  # strengths, so ordering them would let the weaker one suppress the stronger. See
+  # docs/SPECIFICATION.md §13.
+  # ------------------------------------------------------------------------------------------
+
+  # Runs on every event, and is therefore the one that actually stands guard.
+  #
+  # It needs no pull request because it asserts a property of the image itself: the frozen action
+  # invokes the ENTRYPOINT bare, so what that invocation does IS the exposure. entrypoint.sh with
+  # no pull request refuses and exits non-zero; revctl with no arguments prints help and exits 0.
+  # A single assertion separates the repaired state from the incident state exactly.
+  v1-image-is-not-a-no-op:
+    name: the :v1 image does not exit 0 on a bare run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Pull what the frozen action pulls
+        run: docker pull --quiet ghcr.io/vikoit/reversibility-engine:v1
+
+      # Named explicitly rather than inferred from behaviour, because "which entrypoint is this"
+      # is the fact the incident turned on and a digest does not express it to a reader.
+      - name: The ENTRYPOINT must be the one that analyzes
+        run: |
+          set -euo pipefail
+          got="$(docker image inspect ghcr.io/vikoit/reversibility-engine:v1 --format '{{json .Config.Entrypoint}}')"
+          echo "ENTRYPOINT: $got"
+
+          case "$got" in
+            *"/usr/local/bin/entrypoint.sh"*) echo 'Analyzing entrypoint present.' ;;
+            *)
+              echo "::error::ghcr.io/vikoit/reversibility-engine:v1 declares ENTRYPOINT $got, not entrypoint.sh. The frozen v1.0.x Docker action runs this with no arguments; if it is revctl, every @v1.0.x consumer's gate is a green check over no analysis. This is the incident, returned."
+              exit 1
+              ;;
+          esac
+
+      - name: A bare run must not exit 0
+        run: |
+          set -euo pipefail
+
+          set +e
+          docker run --rm ghcr.io/vikoit/reversibility-engine:v1 > out.txt 2>&1
+          rc=$?
+          set -e
+
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::The :v1 image exits 0 when run with no arguments. That is exactly what the frozen v1.0.x action does, so every consumer on those tags has a gate that passes having analyzed nothing."
+            cat out.txt
+            exit 1
+          fi
+
+          echo "Bare run exits $rc, as it must."
+          cat out.txt
+
+  # The end-to-end proof, in the shape a consumer actually writes.
+  #
+  # pull_request only, and that is a property of the thing under test rather than a convenience:
+  # the v1.0.2 entrypoint reads .pull_request.base.sha from the event payload and refuses any
+  # other event outright. Running it on a push would fail for that reason instead of the gate's,
+  # and an assertion that cannot tell those apart asserts nothing -- which is the failure mode
+  # this whole workflow exists to catch.
+  #
+  # So this job proves the action gates, and the job above proves the image is not a no-op on
+  # every push. Together they cover it; separately, each says something true.
+  v1-0-2-action-fails-a-grade-f-change:
+    name: the frozen v1.0.2 action fails a grade F change
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Stage a destructive migration
+        run: |
+          set -euo pipefail
+          git config user.name 'Action Self Test'
+          git config user.email 'selftest@example.invalid'
+          mkdir -p .selftest-v1
+          cp testdata/fixtures/postgres/PG001_drop_table/migrations/*.sql .selftest-v1/
+          git add .selftest-v1
+          git commit --quiet --message 'test: stage a destructive fixture for the frozen action'
+
+      # continue-on-error, because a grade F is expected to fail this step and the assertion
+      # below is what the job is actually for.
+      - id: frozen
+        continue-on-error: true
+        uses: VIKOIT/reversibility-engine@v1.0.2
+        with:
+          min-grade: 'A'
+          include: '.selftest-v1/*.sql'
+          comment: 'false'
+
+      - name: Assert the frozen action refused the change
+        run: |
+          set -euo pipefail
+
+          if [ '${{ steps.frozen.outcome }}' != 'failure' ]; then
+            echo "::error::The v1.0.2 action reported '${{ steps.frozen.outcome }}' for a DROP TABLE change that must grade F. If it passed, :v1 is serving an image whose entrypoint analyzes nothing -- the incident repaired on 2026-08-30 has returned."
+            exit 1
+          fi
+
+          # Failure alone is not the assertion. The entrypoint exits non-zero for a broken run
+          # too, and "it failed" would then be satisfied by the action being broken in a new way.
+          # The grade is what distinguishes a working gate from a broken one.
+          got='${{ steps.frozen.outputs.grade }}'
+          if [ "$got" != 'F' ]; then
+            echo "::error::The step failed, but grade was '${got:-<empty>}' rather than F. A failure with no grade is a broken run, not a gate: it would satisfy a bare outcome check while analyzing nothing."
+            exit 1
+          fi
+
+          echo 'The frozen v1.0.2 action graded the change F and failed the job, as it must.'

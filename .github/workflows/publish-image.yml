@@ -134,9 +134,21 @@ jobs:
           # when someone actually needs it, not before.
           platforms: linux/amd64
 
-          # A Docker action pulls this reference directly. Provenance would turn it into a
-          # manifest list carrying an attestation entry, which is a shape the plain image
-          # reference does not need and some registry tooling mis-reports.
+          # THE REQUIREMENT IS THE ENTRYPOINT, NOT THE MANIFEST SHAPE.
+          #
+          # This comment used to say that a Docker action needs a plain image reference and that
+          # a manifest list is a shape to avoid. That was wrong as stated, and `:v1` proved it:
+          # repointing it with `imagetools create` wrapped the 1.0.2 manifest in an OCI index, so
+          # the tag a frozen Docker action pulls *is* an index now — and it resolves and runs
+          # correctly, because Docker resolves a single-platform index like any other reference.
+          #
+          # What actually has to hold is one thing: **the reference a Docker action pulls must
+          # resolve to a config whose ENTRYPOINT analyzes.** That is the property the v1.1.0
+          # incident violated, and manifest shape is an implementation detail of whichever tool
+          # last wrote the tag. Asserted end to end by action-selftest.yml.
+          #
+          # provenance stays false for its own reason: an attestation entry adds a manifest this
+          # image has no consumer for, and the build is single-platform. Not a correctness claim.
           provenance: false
 
       # The image is the product now, so it is checked the way the build stage checks itself:
