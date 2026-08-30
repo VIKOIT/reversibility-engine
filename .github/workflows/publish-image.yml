@@ -29,8 +29,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+
     steps:
       - uses: actions/checkout@v4
+
+      # The same gate the release workflow uses, for the same reason: this workflow publishes,
+      # and nothing is published over a red CI. It runs before the build because a 45-minute
+      # cgo image build over a failing test suite is 45 minutes spent to produce something that
+      # must not ship.
+      - name: Require a successful CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/require-green-ci.sh "${{ github.sha }}"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -65,12 +79,26 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern=v{{major}}.{{minor}}
 
-      - name: Build and push
-        id: build
+      # BUILT AND LOADED, NOT PUSHED. The push is the last step in this job, after both
+      # verifications below have passed.
+      #
+      # This used to push here, and the two checks below ran against an image that was already
+      # in the registry. They are the checks written specifically to prevent the `:v1` incident
+      # — has the image lost its cgo parser, does its no-argument run exit 0 — and they could
+      # not prevent anything, because a failing check turned the workflow red and left the
+      # broken image published. A red workflow is not visible to somebody running `docker pull`.
+      #
+      # **Nothing reaches "published" without proving what it published.** An artifact that is
+      # visible before it is verified has been published; the verification is then a report, not
+      # a gate. See docs/SPECIFICATION.md §2.
+      - name: Build and load
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          push: false
+          # Single-platform, so the image can be loaded into the runner's daemon and actually
+          # executed. Verifying a manifest list would mean verifying nothing you can run.
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -88,14 +116,15 @@ jobs:
           provenance: false
 
       # The image is the product now, so it is checked the way the build stage checks itself:
-      # if the published artifact cannot classify a DROP TABLE, it lost its cgo parser and
-      # would grade every migration as unanalyzed.
+      # if the artifact cannot classify a DROP TABLE, it lost its cgo parser and would grade
+      # every migration as unanalyzed. It is checked here, loaded and not yet pushed, so a
+      # failure means nothing was published rather than something broken was.
       #
       # --entrypoint is passed explicitly. The image declares one, but relying on it is what
       # broke v1.1.0: a consumer that inherits an entrypoint inherits whatever the entrypoint
       # became, and the change from entrypoint.sh to revctl was invisible at every call site
       # that did not name it. Nothing in this repository invokes this image implicitly again.
-      - name: Verify the published image still classifies SQL
+      - name: Verify the image still classifies SQL, before it is published
         run: |
           set -euo pipefail
           image="$(printf '%s' '${{ steps.meta.outputs.tags }}' | head -n 1)"
@@ -108,7 +137,7 @@ jobs:
             "$image" check probe.sql --format json > probe.json
 
           if ! grep -q '"PG001"' probe.json; then
-            echo "::error::the published image did not classify DROP TABLE as PG001 — it has lost its cgo parser"
+            echo "::error::the image did not classify DROP TABLE as PG001 — it has lost its cgo parser. Nothing was pushed."
             cat probe.json
             exit 1
           fi
@@ -122,7 +151,8 @@ jobs:
       # simply no grade, and no grade read as success.
       #
       # An image whose default invocation exits 0 is therefore an image that can silently
-      # replace a gate with a green check, and it does not get published.
+      # replace a gate with a green check, and it does not get published -- which is now true
+      # in the literal sense, because the push happens after this step rather than before it.
       - name: Verify that running the image with no arguments is not a pass
         run: |
           set -euo pipefail
@@ -140,6 +170,24 @@ jobs:
           fi
 
           echo "No-argument invocation exits $rc, as it must."
+
+      # Only now. Every tag is pushed from the image that just passed both checks, and the
+      # build is a cache hit — it is the same layers, re-resolved and uploaded.
+      #
+      # A partial failure here can still leave one tag pushed and another not, which is why the
+      # version tag is pushed before the minor alias: a consumer pinning the exact version gets
+      # a complete image or nothing, and the alias only ever points at something already up.
+      - name: Push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          platforms: linux/amd64
+          provenance: false
 
       - name: Summarise
         run: |

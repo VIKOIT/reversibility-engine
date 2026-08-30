@@ -306,6 +306,9 @@ rather than the principles living only where they were first needed.
 | Any number in documentation duplicating the specification is derived by test | §2 below | The rules badge, catalog counts, schema version, rule ID ranges |
 | All diagnostics go to stderr; stdout carries the certificate | §2 above | Deprecations, warnings, gate reasons — and what `--help` is not |
 | A refusal must name the way forward | §2 below | `UNSUPPORTED_CONTENT`, coverage-`PARTIAL`, and the ORM rendering path |
+| The release path is production code | §3 | The workflows, the action, the image — everything that reaches a consumer |
+| A shared type unifies nothing if the producers are separate | §13 | `ResolveRoot` vs `QualifyPath`, and any pair that must agree |
+| A test that only holds on its author's platform holds nothing | §13 | Path behaviour, and why a green local run is not a release |
 | The overwrite principle | [`RULES.md` §1](RULES.md#the-overwrite-principle) | PG012, PG013, PG028, PG043, PG050, PG054, PG057 |
 | `CONCURRENTLY` changes the lock, never the verdict | [`RULES.md` §1](RULES.md#concurrently-changes-the-lock-and-never-the-verdict) | Four rule pairs, and which encoding to use next |
 | Creation and destruction are not mirrors | [`RULES.md` §1](RULES.md#creation-and-destruction-are-not-mirrors) | Five pairs where symmetry reads as safety |
@@ -428,6 +431,34 @@ Adding a documented number means adding a row to that table. Anything a reader c
 is stated twice — a count, a version, a range, a supported-platform list — belongs in it.
 
 ## 3. Scope
+
+> **The release path is production code. Every invariant that governs the engine governs the
+> workflows, the action, and the image: fail-closed, no silent success, no path that reaches
+> "published" without proving what it published.**
+
+This is scope rather than a note, and it is here because the evidence is now three incidents deep.
+The engine is exhaustively defended and its delivery path was not:
+
+| # | The fail-open | Where |
+| --- | --- | --- |
+| 1 | The GHCR `:v1` image ran an entrypoint that analyzed nothing and exited 0 | `publish-image.yml` tag pattern |
+| 2 | `--require-full-coverage` became a no-op flag that still produced exit 0 | the CLI's compatibility surface |
+| 3 | `v1.2.0` published over a failing CI, carrying a namespace fail-open | `release.yml` had no gate |
+
+**Three is a pattern and a pattern is a scope error.** Every one of them was found in the part of
+the system nobody thought of as the product — and every one of them reached a consumer as a green
+check, which is the exact failure the analyzer is built to prevent. A rule table that cannot ship
+correctly is not a safety property.
+
+What follows from it, and what the audit in §16.18 applies:
+
+- **A workflow that publishes is a gate**, and gates exit non-zero on doubt. Pending, cancelled,
+  skipped and absent are all "no".
+- **Verification precedes visibility.** An artifact that exists in a registry before it is checked
+  has been published; the check afterwards is a report, not a gate.
+- **Nothing a consumer resolves may move without proving it moved forwards.** `@v1` means the
+  newest `v1.x`, so a workflow that can move it backwards has a fail-open regardless of whether
+  anyone has triggered it.
 
 **In:** static analysis only. PostgreSQL `.sql` migrations. Rendered Kubernetes manifests
 (`.yaml`). Terraform plan JSON (`*.tfplan.json`), added in S12 — **plans only, never
@@ -1283,6 +1314,18 @@ what stand between a new user and an immediate failing gate.
   a quick one, a commit for anything longer, and the revert is then `git stash pop` or
   `git restore --source=HEAD --staged --worktree` against a tree that has nothing to lose.
 
+- **A shared type unifies nothing if the values entering it are computed twice. Unify the
+  producers, not just the consumers.**
+
+  `domain.Located` was introduced so that every path-keyed *decision* used one namespace, and it
+  worked: the compiler found the call sites. It did not stop `ResolveRoot` and `QualifyPath` from
+  computing that namespace differently, because a type constrains what a value *is* and says
+  nothing about where it came from. Two producers feeding one type is two namespaces with a
+  shared label — which reads, in review, as the problem already solved.
+
+  The test for it: for any pair of functions that must agree, assert **that they agree**, not what
+  either returns. `TestTheTwoSidesOfTheComparisonAgree` is the shape.
+
 - **A test that only holds on the platform its author uses is not holding anything.** Where a
   behaviour differs between POSIX and Windows — and every path behaviour does — assert the part
   that is the same everywhere, or write the platform's inputs out literally.
@@ -1294,6 +1337,12 @@ what stand between a new user and an immediate failing gate.
   than asserting either value, because agreement is checkable on any platform; the others are unit
   tests over the path logic with `/tmp/...` written out as a literal, so the host OS cannot
   change the answer.
+
+  **This has teeth beyond that bug.** Development happens on Windows; the corpus, the runners, and
+  almost every user are on Linux. CI caught a defect the local suite structurally could not, so
+  **"passes on my machine" is unverified by default** — a green local run is a reason to push, not
+  a reason to declare something done. Nothing is tagged before CI has gone green on the commit
+  being tagged, and `release.yml` now enforces that rather than trusting it (§16.18).
 
 - **Before implementing an analyzer, write its fixtures and failing tests first.**
 - **One fixture pair per rule ID** — all 59 Postgres rules, all 15 Kubernetes rules, and all
@@ -1987,15 +2036,85 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
       opens with a drive letter and has no empty leading segment. Nothing in the test suite could
       have failed locally, which is now a testing rule in §13: assert what is the same on every
       platform, or write the other platform's inputs out literally.
-    - **`release.yml` does not run the test suite**, so a tag can publish over a failure `ci.yml`
-      would catch. That is deliberate — the release builds and smoke-tests each native binary, and
-      duplicating the suite per target would triple the release time — but it means **a green CI
-      run is a precondition for tagging and nothing enforces it.** Recorded as an open question
-      rather than fixed, because the answer is a workflow change and the owner scopes those.
+    - **`release.yml` did not run the test suite**, so a tag could publish over a failure `ci.yml`
+      would catch — which is exactly what happened. **RULED and fixed: gate the release on CI,
+      do not duplicate the suite per target.** `.github/scripts/require-green-ci.sh` requires the
+      tagged commit to have a *completed success* conclusion from the CI workflow. Not "not
+      failed": pending, cancelled, skipped and no-run-at-all all mean no, because every one of
+      them is absence of evidence. **There is no override flag** — if a release must go out over
+      a red CI, that is a human deciding to make CI green first. One API call, no build time.
+
+      It is called twice, from one script: a `guard` job before the matrix, so a red CI costs
+      seconds rather than thirty minutes of cgo builds, and again as the release job's first
+      step, which is the check that matters — the freshest possible reading immediately before
+      anything becomes visible. `publish-image.yml` calls the same script for the same reason.
 
     The two functions are now one: both call `locate`, and there is no second implementation left
     to disagree with. `TestTheTwoSidesOfTheComparisonAgree` asserts they return the same string
     rather than asserting either value.
+
+19. ~~**The release path has never been audited the way the engine has.**~~ **AUDITED. Two more
+    fail-opens found and fixed, one recorded as accepted, one proposed.**
+
+    §3 now says the release path is production code and holds it to the engine's invariants. This
+    is that sentence applied to `release.yml`, `publish-image.yml`, `action/` and the action
+    itself, the way §16.13 was applied to path comparisons — the whole surface enumerated, so the
+    next contributor extends the table rather than repeating the search.
+
+    **The fourth fail-open: `publish-image.yml` pushed before it verified.**
+
+    `docker/build-push-action` ran with `push: true`, and the two verification steps — *has the
+    image lost its cgo parser*, *does its no-argument run exit 0* — ran afterwards, against an
+    image that was already in the registry. Those are the two checks written specifically to
+    prevent the `:v1` incident, and **they could not prevent anything**: a failure turned the
+    workflow red and left the broken image published, and a red workflow is not visible to
+    somebody running `docker pull`.
+
+    > **An artifact that is visible before it is verified has been published. The verification is
+    > then a report, not a gate.**
+
+    Now: build with `load: true`, verify against the loaded image, and push last. The push is a
+    cache hit, so it costs upload time and no rebuild.
+
+    **The fifth: the major tag could move backwards.**
+
+    §11e documents `v1` as "the newest non-prerelease `v1.x`" and nothing enforced it — the
+    `major-tag` job force-updated the ref to whatever was being released. Tagging a backport, or
+    re-cutting an older version, would have moved every `@v1` consumer **down** to an engine
+    without whatever they had upgraded for, silently, on a green run. The same shape as the other
+    four: a successful publish and consumers quietly worse off.
+
+    It now compares against the newest published release with `sort -V` and refuses to go
+    backwards. Equal is allowed, because re-running a release must be idempotent rather than an
+    error. A deliberate rollback is a human moving the tag by hand and saying so in the notes.
+
+    **The complete audit.** Everything in the release path, and what holds it:
+
+    | Surface | Verdict |
+    | --- | --- |
+    | `release.yml` — no CI gate | **Fixed.** §16.18. |
+    | `publish-image.yml` — pushed before verifying | **Fixed.** The fourth. |
+    | `release.yml` — `major-tag` could move `v1` backwards | **Fixed.** The fifth. |
+    | `publish-image.yml` — no CI gate | **Fixed.** Same script. |
+    | `release.yml` — a failed matrix leg reaching publish | **Already closed**, by three things together: `needs: build` blocks on any failed leg, `if-no-files-found: error` blocks a leg that built nothing, and every asset must carry a `checksums.txt` line. The documented target count is derived from the matrix by test, so silently dropping a target fails too. |
+    | `action/install.sh` — download integrity | **Already closed.** Fails on a failed download, a missing checksum line, a mismatch, and an archive that did not contain the binary. |
+    | `action/certify.sh` — `|| true` on the analysis runs | **Correct, not a gap.** The exit code is read separately and the verdict comes from the JSON; the certificate is written even when the gate fails, which is the documented contract. |
+    | `action-selftest.yml` — `continue-on-error: true` | **Correct.** It is how the selftest asserts that a grade F *failed* the step. |
+    | `action/install.sh` — a cached binary is run without re-verifying its checksum | **ACCEPTED, with the reasoning recorded below.** |
+
+    **The cached binary, and why it is accepted rather than fixed.** `install.sh` returns early
+    when `$REVCTL` is already executable, so a restored cache is run without a checksum. That is
+    the one place the action runs a binary it did not verify. It is accepted because the Actions
+    cache is scoped — a branch cannot read another branch's cache, and a fork's cache is not
+    visible to the base repository — so poisoning it requires write access to the repository,
+    which is a larger compromise than the binary. Re-verifying would also need `checksums.txt`
+    downloaded on every run, which is most of what the cache saves.
+
+    **It is written down rather than dismissed**, because the reasoning has a shelf life: it
+    depends entirely on GitHub's cache scoping, and if that ever changes this becomes an
+    unverified binary deciding whether changes merge. If the cache is ever shared more widely, or
+    if a self-hosted runner with a shared cache volume enters the picture, this must be fixed
+    first.
 
 ## 17. Fixture conventions
 

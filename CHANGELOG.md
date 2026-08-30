@@ -16,9 +16,53 @@ move:
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed — the release path is production code
+
+**Three fail-opens have now reached consumers through the delivery path rather than the engine**:
+the GHCR `:v1` image that analyzed nothing and exited 0, `--require-full-coverage` becoming a
+no-op that still exited 0, and `v1.2.0` publishing over a failing CI. Three is a pattern, and the
+pattern is that the engine was exhaustively defended and the thing that ships it was not.
+
+`docs/SPECIFICATION.md` §3 now says so as scope:
+
+> The release path is production code. Every invariant that governs the engine governs the
+> workflows, the action, and the image: fail-closed, no silent success, no path that reaches
+> "published" without proving what it published.
+
+**Nothing is published over a red CI.** `release.yml` and `publish-image.yml` both require the
+tagged commit to have a *completed success* conclusion from the CI workflow. Not "not failed" —
+pending, cancelled, skipped and no-run-at-all all mean no, because each is absence of evidence.
+**There is no override flag**: a release that must go out over a red CI is a human deciding to
+make CI green first. It costs one API call and no build time, and it runs both before the build
+matrix — so a red CI costs seconds, not thirty minutes — and again immediately before publishing.
+
+### Fixed
+
+**The image was pushed before it was verified.** `publish-image.yml` published to GHCR and *then*
+checked whether the image still classified SQL and whether its no-argument run exits non-zero.
+Those are the two checks written specifically to prevent the `:v1` incident, and they could not
+prevent anything: a failure turned the workflow red and left the broken image published, and a red
+workflow is not visible to somebody running `docker pull`.
+
+> An artifact that is visible before it is verified has been published. The verification is then a
+> report, not a gate.
+
+The image is now built, loaded, verified, and only then pushed.
+
+**The major tag could move backwards.** `@v1` is documented as the newest non-prerelease `v1.x`,
+and nothing enforced it — the job force-updated the ref to whatever was being released. Tagging a
+backport, or re-cutting an older version, would have moved every `@v1` consumer **down** to an
+engine without whatever they upgraded for, silently, on a green run. It now refuses to go
+backwards; equal is still allowed, so re-running a release stays idempotent.
+
+Nobody triggered either of these. They are fixed because a fail-open that needs a particular tag
+to be pushed is still a fail-open, and this project has now shipped three of them.
 
 ## [v1.2.1] - 2026-08-29
+
+> **If you ran `v1.2.0` with `--terraform-plan` on Linux or macOS outside a checkout, the flag
+> never matched: the plan you named went unanalyzed, and the run could report success without
+> assessing anything. Those green builds were not assessments. Re-run them on `v1.2.1`.**
 
 **A fail-open in `v1.2.0`, on POSIX only, found by CI twenty minutes after the tag.**
 

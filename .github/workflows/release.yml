@@ -31,7 +31,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Nothing is built, and nothing is published, over a red CI.
+  #
+  # v1.2.0 was tagged over a failing run and shipped a fail-open. This workflow deliberately
+  # does not run the test suite -- four native targets, and duplicating it per target would
+  # triple release time for no new information -- so it consults the run that does. The check
+  # is one API call and it runs before the matrix, so a red CI costs seconds rather than
+  # thirty minutes of build.
+  #
+  # The release job repeats it as its own first step. That is not duplication: it is one script
+  # called twice, and the second call is the one the ruling asks for -- the freshest possible
+  # check immediately before anything is published.
+  guard:
+    name: CI must be green for this commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require a successful CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/require-green-ci.sh "${{ github.sha }}"
+
   build:
+    needs: guard
     name: ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -175,14 +204,28 @@ jobs:
 
   release:
     name: Publish the release
-    needs: build
+    needs: [guard, build]
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     permissions:
       contents: write
+      actions: read
 
     steps:
+      - uses: actions/checkout@v4
+
+      # The first thing this job does, before it has looked at a single artifact.
+      #
+      # `needs: guard` already blocks a red CI, and this is the same check taken again roughly
+      # thirty minutes later — immediately before anything becomes visible to a consumer. The
+      # window matters: a CI re-run can turn green into red while the matrix is building, and
+      # the job that publishes is the one that has to be sure.
+      - name: Require a successful CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/require-green-ci.sh "${{ github.sha }}"
+
       - uses: actions/download-artifact@v4
         with:
           pattern: dist-*
@@ -280,6 +323,32 @@ jobs:
           if [ "$major" = "$TAG" ]; then
             echo "::error::Tag '$TAG' is not in vMAJOR.MINOR.PATCH form; refusing to guess a major tag."
             exit 1
+          fi
+
+          # THE MAJOR TAG NEVER MOVES BACKWARDS.
+          #
+          # §11e documents `v1` as "the newest non-prerelease v1.x", and until this check
+          # existed nothing enforced it: the job force-updated the tag to whatever was being
+          # released. Tagging a backport, or re-cutting an older version, would have moved every
+          # `@v1` consumer *down* — silently, to an engine without whatever they had upgraded
+          # for. That is the fail-open shape this release path keeps producing: a green run, a
+          # successful publish, and consumers quietly worse off.
+          #
+          # Sorted with `sort -V` rather than parsed, because the comparison is the whole point
+          # and a hand-rolled semver parse is one more thing to get wrong. Equal is allowed: a
+          # re-run of the same release must be idempotent, not an error.
+          current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$major" --jq '.object.sha' 2> /dev/null || true)"
+          if [ -n "$current" ]; then
+            currentTag="$(gh api "repos/$GITHUB_REPOSITORY/releases" \
+              --jq "[.[] | select(.draft==false and .prerelease==false) | .tag_name] | first" 2> /dev/null || true)"
+
+            if [ -n "$currentTag" ] && [ "$currentTag" != "$TAG" ]; then
+              newest="$(printf '%s\n%s\n' "${TAG#v}" "${currentTag#v}" | sort -V | tail -n 1)"
+              if [ "$newest" != "${TAG#v}" ]; then
+                echo "::error::Refusing to move $major from $currentTag to $TAG: that is backwards. Consumers who write @$major would be downgraded to an older engine without being told. If this is a deliberate rollback, move the tag by hand and say so in the release notes."
+                exit 1
+              fi
+            fi
           fi
 
           echo "Moving $major to $SHA (released as $TAG)"
