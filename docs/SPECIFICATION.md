@@ -283,6 +283,40 @@ CONFLICT DO UPDATE` is an `InsertStmt` that overwrites rows, and a `SELECT` call
 function can do anything the function does. A future contributor will try to simplify these
 cases into one. The rationale on each finding says why they are separate.
 
+### A repair that exists is not a repair that ran
+
+**Capability is not enforcement.** A workflow that *can* fix something, a flag that *can* be set,
+a warning that *would* fire — none of them are the thing they describe until something has made
+them happen. The gap between the two is invisible in review, because the code review reads is the
+capability, and the capability is correct.
+
+This is the same family as *a guard that looks like a guard and is not*, and it has now produced
+the two most durable defects in this repository:
+
+- **`restore-image-tag.yml`** was written to put `:v1` back on the 1.0.2 manifest after the
+  v1.1.0 image turned every frozen-action consumer's gate into a green check over nothing. The
+  workflow is careful: it resolves the source digest first, records the prior state, reads the
+  tag back afterwards, and asserts the restored `ENTRYPOINT`. It was committed, and **it was
+  never dispatched.** For the entire time it existed, the incident it repairs stayed live in the
+  registry, and the repository read as though the incident were closed. See §16.20.
+- **`require-full-coverage`'s deprecation warning** was unreachable in two independent layers.
+  The condition inside `certify.sh` was corrupted into a constant (§16.19), and `action.yml`
+  never passed the input to the script at all. Fixing the first in `v1.2.2` changed nothing a
+  consumer could observe, because the second was still there — one layer further out, in the file
+  nothing validated.
+
+The rule that follows, and it is a scope rule rather than a style note:
+
+> **Anywhere this project depends on a human dispatching a workflow, either automate the trigger
+> or record, at the workflow, why a human is the trigger and what makes it observable that they
+> did.** A manual step with neither is an open incident wearing the shape of a closed one.
+
+And its mechanical half, because a principle that depends on remembering is the thing this section
+exists to distrust: **the end of a repair is a reading taken from the system being repaired, not
+from the tool doing the repairing.** `:v1` was confirmed restored by querying the registry
+directly, not by the workflow's own summary — the two disagreeing is exactly how this went
+unnoticed for as long as it did.
+
 ### The named principles, and why naming them is the work
 
 **A named principle stops the next twenty questions before they are asked; a rule answers one.**
@@ -306,6 +340,7 @@ rather than the principles living only where they were first needed.
 | Any number in documentation duplicating the specification is derived by test | §2 below | The rules badge, catalog counts, schema version, rule ID ranges |
 | All diagnostics go to stderr; stdout carries the certificate | §2 above | Deprecations, warnings, gate reasons — and what `--help` is not |
 | A refusal must name the way forward | §2 below | `UNSUPPORTED_CONTENT`, coverage-`PARTIAL`, and the ORM rendering path |
+| A repair that exists is not a repair that ran | §2 above | Manual workflows, dead flags, warnings nothing can reach |
 | The release path is production code | §3 | The workflows, the action, the image — everything that reaches a consumer |
 | A shared type unifies nothing if the producers are separate | §13 | `ResolveRoot` vs `QualifyPath`, and any pair that must agree |
 | A test that only holds on its author's platform holds nothing | §13 | Path behaviour, and why a green local run is not a release |
@@ -2324,7 +2359,7 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
 
     | # | Surface | What holds it today | What nothing checks |
     | --- | --- | --- | --- |
-    | 1 | `action.yml` — 15 inputs, 10 outputs, ~11KB of consumer-facing text | Review | Nothing validates it at all. `actionlint` reads workflows, **not composite action definitions**, so the file every consumer configures against has no schema check, and no test asserts that a declared input is read or a declared output emitted. Hand-checked 2026-08-30: all 15 inputs referenced, all 10 outputs wired, two of them as documented aliases. **Consistent today, held by nothing tomorrow.** |
+    | 1 | `action.yml` — 15 inputs, 10 outputs, ~11KB of consumer-facing text | **CLOSED.** `TestActionInputsAreWiredAndRead` and `TestActionOutputsAreEmitted` | Was: nothing validated it at all — `actionlint` reads workflows, **not composite action definitions**. Closing it found a live defect the hand-check had missed: **`require-full-coverage` was declared and passed to nothing**, so `certify.sh`'s deprecation warning could not fire even after `v1.2.2` repaired the corrupted condition inside the script. Two layers of one silence. The tests assert that every declared input reaches the steps and that every `INPUT_` mapping is read by a script, and that every declared output resolves to a step key some script emits — the alias outputs `certificate` and `gate` included, by reading the key out of the expression rather than assuming it matches the output's name. Both mutation-tested. |
     | 2 | The deprecated-input and alias plumbing in `action/certify.sh` | Review, and now shellcheck | `action-selftest.yml` asserts `grade`, `gate-status` and `findings-count` over two fixtures. It never sets a deprecated input, so the alias precedence, the "both names set" errors, and the deprecation warnings are all untested. **This is where the sixth defect lived.** |
     | 3 | `Dockerfile` | Review | No `hadolint`, no lint of any kind. `publish-image.yml` proves the *image* classifies SQL and that a no-argument run is non-zero — real assertions about the artifact, none about the file that produces it. |
     | 4 | The certificate JSON shape | Go structs, `docs/RULES.md` cross-checks, golden files | **There is no schema artifact.** `schemaVersion` is a string constant; the shape lives in structs plus prose. Consumers parse this, and nothing validates a real certificate against a declared schema — nothing but review would catch a field added without a version bump. |

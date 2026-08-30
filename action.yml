@@ -245,6 +245,12 @@ runs:
         INPUT_INCLUDE: ${{ inputs.include }}
         INPUT_EXCLUDE: ${{ inputs.exclude }}
         INPUT_FAIL_ON_GATE: ${{ inputs.fail-on-gate }}
+        # Deprecated and ignored, and passed through anyway. certify.sh warns when it is set,
+        # and a warning it cannot receive is the same silence the deprecation exists to break.
+        # That is not hypothetical: v1.2.2 repaired the corrupted condition inside certify.sh
+        # while this line was still missing, so the warning stayed unreachable one layer
+        # further out. Held now by TestActionInputsAreWiredAndRead.
+        INPUT_REQUIRE_FULL_COVERAGE: ${{ inputs.require-full-coverage }}
       run: bash "$GITHUB_ACTION_PATH/action/certify.sh"
 
     # always(): a failed gate must still post its explanation. A pull request with no

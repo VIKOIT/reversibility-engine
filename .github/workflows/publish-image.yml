@@ -13,7 +13,17 @@ on:
     # and there would be nothing to build anyway: the release that moved v1 already published
     # the image, including its own moving v1 image tag.
     tags: ['v*.*.*']
-  workflow_dispatch:
+
+# NO workflow_dispatch. There is one way to publish and it is pushing a tag.
+#
+# The manual trigger was removed rather than left to fail. `require-green-ci.sh` is permitted for
+# `push` alone, so a dispatch run would have died at the guard with a message about head_sha --
+# a true message, and a confusing one, discovered by somebody who had already decided to publish
+# by hand. A trigger that is present but cannot succeed is a documented path that isn't one.
+#
+# It also removes the shape this workflow exists to prevent. A manual publish is the moment
+# somebody is working around a process, which is exactly the moment the process was protecting
+# them. If a release must go out, the way to do it is to make CI green and push a tag.
 
 permissions:
   contents: read

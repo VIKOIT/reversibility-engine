@@ -37,14 +37,32 @@ WORKFLOW="${CI_WORKFLOW:-ci.yml}"
 # right one. That is the fail-open shape this whole release path keeps producing, so the script
 # refuses rather than guesses.
 #
-# This is deliberately not support for other events. Adding a pull_request branch would mean
-# shipping a code path nobody has run, in a gate whose entire job is to be trusted -- a guard
-# that looks like a guard and is not. If a release flow ever needs another event, work out what
-# head_sha means for it, prove the gate still refuses a red CI under it, and then widen this
-# check. Not before.
+# This is deliberately not open support for other events. A branch for an event nobody runs is an
+# unrun code path inside the one component whose entire job is to be trusted -- a guard that looks
+# like a guard and is not.
+#
+# So the permitted set is an explicit allowlist, defaulting to `push` alone, and a caller that
+# needs another event has to name it at the call site where a reader will see it. There is no
+# wildcard and no "any event" value.
+#
+# `workflow_dispatch` is permitted by exactly one caller: restore-image-tag.yml, which is a manual
+# repair tool and cannot be anything but a dispatch. Its dispatch runs against a branch, so
+# `github.sha` is that branch's head commit -- the same thing a push gives, resolved the same way
+# by the same query. That reasoning is why it is allowed; it is not why it is trusted. What makes
+# it exercised rather than assumed is that the restore itself runs through this gate.
 EVENT="${GITHUB_EVENT_NAME:-}"
-if [ "$EVENT" != 'push' ]; then
-    fail "This gate is only proven for 'push' events and this run is '${EVENT:-unset}'. It resolves CI by head_sha, and what head_sha means for a '${EVENT:-unset}' event is an untested assumption -- so it refuses rather than return an answer nobody has checked. A release is cut by pushing a tag; do that. To use this script under another event, establish what head_sha resolves to there and prove the gate still refuses a red CI before widening this check."
+ALLOWED_EVENTS="${CI_GATE_EVENTS:-push}"
+
+permitted=0
+for allowed in $ALLOWED_EVENTS; do
+    if [ "$EVENT" = "$allowed" ]; then
+        permitted=1
+        break
+    fi
+done
+
+if [ "$permitted" -ne 1 ]; then
+    fail "This gate is permitted for event(s) '${ALLOWED_EVENTS}' and this run is '${EVENT:-unset}'. It resolves CI by head_sha, and what head_sha means for a '${EVENT:-unset}' event here is an untested assumption -- so it refuses rather than return an answer nobody has checked. A release is cut by pushing a tag; do that. To permit another event, establish what head_sha resolves to under it, prove this gate still refuses a red CI under it, and then name it in CI_GATE_EVENTS at the call site."
 fi
 
 printf 'Requiring a successful %s run for %s\n' "$WORKFLOW" "$SHA"

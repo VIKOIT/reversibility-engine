@@ -45,6 +45,8 @@ on:
 permissions:
   contents: read
   packages: write
+  # The CI gate reads workflow runs.
+  actions: read
 
 # Two of these running at once would race to define what the alias means, and the loser would
 # win. Never cancel a run in progress: a half-applied tag move is worse than a late one.
@@ -65,6 +67,65 @@ jobs:
       EXPECT_ENTRYPOINT: ${{ inputs.expect-entrypoint }}
 
     steps:
+      - uses: actions/checkout@v4
+
+      # This workflow can point a production tag at anything, and until now it did so with less
+      # protection than the release path it exists to repair: `packages: write`, no CI gate, and
+      # no constraint on either input. A repair tool that can cause the damage it repairs is not
+      # a repair tool.
+      #
+      # CI_GATE_EVENTS names `workflow_dispatch` explicitly, because that is the only thing this
+      # workflow can ever be. The gate's default is `push` alone and the allowlist is the
+      # documented way to widen it at a call site -- see .github/scripts/require-green-ci.sh.
+      - name: Require a successful CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_GATE_EVENTS: workflow_dispatch
+        run: bash .github/scripts/require-green-ci.sh "${{ github.sha }}"
+
+      # THE SOURCE MUST BE AN IMMUTABLE VERSION TAG, AND THE ALIAS MUST NOT BE ONE.
+      #
+      # `imagetools create` will happily copy any tag onto any other. Without this, one typo in a
+      # dispatch form could point `v1` at another moving alias -- so the alias would inherit
+      # whatever that one later became, silently, which is the entire class of defect this
+      # repository has spent six investigations removing. Worse, the inputs are free text on a
+      # form, filled in by a person who is mid-incident.
+      #
+      # Immutable means MAJOR.MINOR.PATCH with no `v` and no suffix, which is exactly what
+      # publish-image.yml emits for `type=semver,pattern={{version}}`. Anything else -- `v1`,
+      # `v1.2`, `latest`, a digest, a prerelease -- is refused as a source.
+      - name: The source must be immutable and the alias must not be
+        run: |
+          set -euo pipefail
+
+          case "$SOURCE" in
+            *[!0-9.]*|''|*..*|.*|*.)
+              echo "::error::source '$SOURCE' is not an immutable version tag. It must be MAJOR.MINOR.PATCH exactly -- no 'v' prefix, no suffix, no moving alias. Copying from a moving tag would make '$ALIAS' inherit whatever that tag later becomes, which is the fail-open this workflow exists to repair."
+              exit 1
+              ;;
+          esac
+
+          # Three dot-separated numeric fields, checked by counting rather than by a regex, so the
+          # rule stays readable: 1.0.2 passes, 1.0 and 1.0.2.3 do not.
+          fields="$(printf '%s' "$SOURCE" | tr '.' ' ' | wc -w | tr -d ' ')"
+          if [ "$fields" != '3' ]; then
+            echo "::error::source '$SOURCE' has $fields dot-separated field(s); an immutable version tag has exactly 3 (MAJOR.MINOR.PATCH)."
+            exit 1
+          fi
+
+          # And the alias must be a moving one. Repointing an immutable tag would break the single
+          # promise this project makes about published artifacts: a pinned version stays the bytes
+          # it was.
+          case "$ALIAS" in
+            *[!0-9.]*) ;;
+            *)
+              echo "::error::alias '$ALIAS' looks like an immutable version tag. Immutable tags are never repointed -- that is the promise a pinned version rests on. The alias is a moving tag such as 'v1' or 'v1.2'."
+              exit 1
+              ;;
+          esac
+
+          echo "source '$SOURCE' is immutable; alias '$ALIAS' is a moving tag."
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
