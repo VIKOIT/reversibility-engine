@@ -298,6 +298,15 @@ fi
 #
 # 'fail-on-gate: false' is deliberately not consulted — nothing is being failed. This branch only
 # changes what the log says about a job that is passing either way.
+#
+# THIS EARLY EXIT SITS BEFORE THE PARTIAL-COVERAGE WARNING, AND THAT ORDER IS CORRECT. LEAVE IT.
+#
+# §13 forbids a check that can suppress a stronger one unless it is provably weaker in scope.
+# This one is: NO_CANDIDATES means no file in the changeset is analyzed by this engine, so there
+# is nothing whose coverage could be PARTIAL. The branch it skips cannot apply.
+#
+# It is written here because a reader auditing for that shape will find this exit, recognise the
+# pattern, and reach for it. The proof is the reason not to — see docs/SPECIFICATION.md §13.
 if [ "$OUTCOME" = 'NO_CANDIDATES' ]; then
     log "Nothing in this change is analyzed by this engine, so no reversibility grade was produced. This is not a pass."
     exit 0

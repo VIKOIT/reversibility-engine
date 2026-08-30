@@ -293,6 +293,18 @@ type GateConditions struct {
 func (g Grade) Gate(c GateConditions) GateStatus {
 	switch {
 	case g == GradeNotApplicable:
+		// THIS RETURN PRECEDES THE COVERAGE AND POLICY CHECKS, AND THAT ORDER IS CORRECT. LEAVE IT.
+		//
+		// docs/SPECIFICATION.md §13 forbids a check that can suppress a stronger one unless it is
+		// provably weaker in scope. This one is, and the proof is one line: NOT_APPLICABLE blocks
+		// an autonomous agent exactly as FAIL does, because an agent merges on PASS and on
+		// nothing else. Returning here can therefore never turn a block into a pass — there is no
+		// stronger verdict below for it to mask.
+		//
+		// Written at the code because someone auditing for "an early return before a later guard"
+		// will land on this line and reach for it. It is the correct instance of that shape, not
+		// an instance of the defect.
+		//
 		// Nothing was assessed. That is neither a pass nor an accusation, whatever the coverage
 		// of the nothing turned out to be.
 		return GateNotApplicable

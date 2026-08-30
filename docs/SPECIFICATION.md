@@ -1355,6 +1355,33 @@ what stand between a new user and an immediate failing gate.
   a quick one, a commit for anything longer, and the revert is then `git stash pop` or
   `git restore --source=HEAD --staged --worktree` against a tree that has nothing to lose.
 
+- **Commit or stash before any edit sequence you cannot reverse by hand.** A scripted
+  substitution, a mutation test, anything touching several files at once. This is a working
+  practice, not an aspiration: it goes in the workflow because it has already failed twice as an
+  intention.
+
+  The generalisation of the mutation-test rule above, and it was earned the same way. Two files
+  were corrupted in two sessions — once by a `git checkout` that discarded an hour of uncommitted
+  work while reverting a mutation, once by a `grep` whose pattern matched far more broadly than
+  intended feeding a `sed` that then wrote to every match. Both were cheap to recover from, and
+  **both were cheap only because the committed state happened to be clean.** That is luck. It is
+  not a property of the process, and a process that depends on it will eventually meet the
+  session where it is not true.
+
+  The asymmetry is the whole argument. The cost of the habit is a `git stash`. The cost of
+  skipping it is silent loss of work, in a project whose entire subject is not silently losing
+  things.
+
+  Two specifics worth naming, because they are how it happened rather than how it is imagined to
+  happen:
+
+  - **A `grep` used to locate an edit site is part of the edit.** Check what it matches *before*
+    piping it into anything that writes. A pattern that returns six lines when you expected one
+    is the warning, and it is only visible if you look.
+  - **Prefer an exact line number, or a tool that fails on ambiguity, over a pattern that will
+    silently apply everywhere it matches.** `sed -i` with an address range does one thing; the
+    same expression without one does as many things as it can find.
+
 - **A shared type unifies nothing if the values entering it are computed twice. Unify the
   producers, not just the consumers.**
 
