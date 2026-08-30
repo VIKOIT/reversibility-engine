@@ -70,41 +70,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # THE IMAGE REFERENCE MUST BE LOWERCASE, AND github.repository IS NOT.
+      # ONE PRODUCER. Both this workflow and publish-image.yml derive the image reference from
+      # .github/scripts/image-ref.sh, which lowercases it and validates it against the registry's
+      # own naming rules before anything uses it.
       #
-      # This owner is `VIKOIT`, so `ghcr.io/${{ github.repository }}` expands to
-      # `ghcr.io/VIKOIT/reversibility-engine`, and a Docker repository name may not contain
-      # uppercase. Every `imagetools` call in this workflow therefore failed on the first one:
-      #
-      #     ERROR: invalid reference format: repository name (VIKOIT/reversibility-engine)
-      #            must be lowercase
-      #
-      # **This workflow had never once run to completion.** That is why the incident it was
-      # written to repair was still live: not because nobody dispatched it, but because it could
-      # not succeed if they did. A repair that exists is not a repair that ran -- and this one
-      # could not run. See docs/SPECIFICATION.md §2 and §16.20.
-      #
-      # publish-image.yml is unaffected and always was, which is exactly why this went unseen:
-      # docker/metadata-action lowercases the image name for you. A raw imagetools call does not,
-      # and the two sat in the same repository looking equally correct.
-      #
-      # GitHub's expression language has no lower(), so this is a step rather than an `env:`.
-      - name: Normalise the image reference to lowercase
-        run: |
-          set -euo pipefail
-          image="ghcr.io/$(printf '%s' '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
-
-          # Asserted rather than assumed: if this is ever not lowercase, every later step fails
-          # with a registry error that reads as a broken tag rather than a broken workflow.
-          case "$image" in
-            *[A-Z]*)
-              echo "::error::image reference '$image' still contains uppercase after normalisation."
-              exit 1
-              ;;
-          esac
-
-          echo "IMAGE=$image" >> "$GITHUB_ENV"
-          echo "Image reference: $image"
+      # They used to derive it separately: publish-image.yml handed the raw expression to
+      # docker/metadata-action, which lowercases internally, and this workflow built the string by
+      # hand and handed it to imagetools, which does not. Same input, same intended value, two
+      # producers -- §13's rule, and the reason this workflow had never run to completion.
+      - name: Derive the image reference
+        run: bash .github/scripts/image-ref.sh
 
       # This workflow can point a production tag at anything, and until now it did so with less
       # protection than the release path it exists to repair: `packages: write`, no CI gate, and
@@ -252,15 +227,51 @@ jobs:
               ;;
           esac
 
+      # A SUMMARY MUST NOT RENDER A BLANK WHERE IT NEVER LOOKED.
+      #
+      # This ran on the failed restore and printed a table with three empty digest cells. An empty
+      # cell reads as "we looked and there was nothing there"; the truth was "we never got that
+      # far", and those are opposite facts about a registry. The step that actually failed --
+      # resolving the source digest -- did abort immediately and did name both the tag and the
+      # registry's error, which is correct and stays. The defect is here, in the report.
+      #
+      # `if: always()` is kept, because a failed repair needs a summary more than a successful one
+      # does. What changes is that every cell says which of the three things it means: a digest,
+      # `(absent)` from a lookup that ran and found nothing, or `(not reached)` from a step that
+      # never ran. And the heading states the outcome, so nobody reads a table of blanks as a
+      # completed repair.
       - name: Summarise
         if: always()
+        env:
+          BEFORE: ${{ steps.before.outputs.digest }}
+          RESOLVED: ${{ steps.source.outputs.digest }}
+          AFTER: ${{ steps.verify.outputs.digest }}
+          OUTCOME: ${{ job.status }}
         run: |
+          set -euo pipefail
+
+          cell() { if [ -z "$1" ]; then printf "(not reached)"; else printf "\`%s\`" "$1"; fi; }
+
           {
-            echo "### \`$ALIAS\` → \`$SOURCE\`"
+            if [ -z "$AFTER" ]; then
+              echo "### ❌ \`$ALIAS\` was NOT repointed — job status \`$OUTCOME\`"
+              echo
+              echo "**Nothing in the registry was changed.** \`$ALIAS\` still resolves to whatever it"
+              echo "did before this run. A cell reading \`(not reached)\` means the step never ran, not"
+              echo "that the tag is absent."
+            else
+              echo "### ✅ \`$ALIAS\` → \`$SOURCE\`"
+            fi
+
             echo
             echo "| | Digest |"
             echo "| --- | --- |"
-            echo "| \`$ALIAS\` before | \`${{ steps.before.outputs.digest }}\` |"
-            echo "| \`$SOURCE\` | \`${{ steps.source.outputs.digest }}\` |"
-            echo "| \`$ALIAS\` after | \`${{ steps.verify.outputs.digest || '(not verified)' }}\` |"
+            printf "| \`%s\` before | %s |\n" "$ALIAS" "$(cell "$BEFORE")"
+            printf "| \`%s\` | %s |\n" "$SOURCE" "$(cell "$RESOLVED")"
+            printf "| \`%s\` after | %s |\n" "$ALIAS" "$(cell "$AFTER")"
+            echo
+            echo "Confirm from the registry rather than from this table:"
+            echo '```'
+            echo "docker buildx imagetools inspect $IMAGE:$ALIAS --format '{{.Manifest.Digest}}'"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

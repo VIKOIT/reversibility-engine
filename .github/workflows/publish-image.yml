@@ -56,6 +56,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/require-green-ci.sh "${{ github.sha }}"
 
+      # ONE PRODUCER. Both this workflow and publish-image.yml derive the image reference from
+      # .github/scripts/image-ref.sh, which lowercases it and validates it against the registry's
+      # own naming rules before anything uses it.
+      #
+      # They used to derive it separately: publish-image.yml handed the raw expression to
+      # docker/metadata-action, which lowercases internally, and this workflow built the string by
+      # hand and handed it to imagetools, which does not. Same input, same intended value, two
+      # producers -- §13's rule, and the reason this workflow had never run to completion.
+      - name: Derive the image reference
+        run: bash .github/scripts/image-ref.sh
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -72,7 +83,10 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          # From the shared producer above, not re-derived here. metadata-action would lowercase
+          # this for you, and that silent kindness is exactly what hid the defect: the workflow
+          # that did not get it was broken for its entire life and looked identical.
+          images: ${{ env.IMAGE }}
           # NO MOVING MAJOR TAG. `:v1` is not a convenience alias here — it is wired into the
           # frozen v1 Docker action, whose action.yml at the v1 git tag pulls
           # `docker://ghcr.io/vikoit/reversibility-engine:v1` and runs the image's ENTRYPOINT.
