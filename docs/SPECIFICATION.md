@@ -2071,6 +2071,45 @@ fixtures so they are cheap to reverse — correcting one is a data edit, not a c
       step, which is the check that matters — the freshest possible reading immediately before
       anything becomes visible. `publish-image.yml` calls the same script for the same reason.
 
+      **The gate was made to refuse before it was trusted to protect a release.** A gate that
+      has never said no is a gate nobody has tested, and "something in the release path that
+      looks like it works" is the exact defect class this audit kept finding — so the refusal
+      was observed rather than assumed.
+
+      Method, and why this shape: a throwaway `ci-gate-proof` branch carried a `t.Fatal` in
+      `internal/domain` and a one-line addition of that branch to `ci.yml`'s push trigger.
+      **Every CI run this repository has ever had is a `push` event**, and a release tag always
+      names a commit pushed to a branch CI runs on, so a pull-request-triggered run would have
+      exercised a path the release process never uses. The proof used the real one. The tag
+      `v0.0.1-cigate-proof` matches `v*.*.*`, so both publishing workflows fired; the prerelease
+      hyphen means `major-tag` skips it, so even a total failure of the gate could not have moved
+      `@v1` onto a deliberately broken commit.
+
+      Observed, on 2026-08-30:
+
+      | | |
+      | --- | --- |
+      | `ci.yml` on the commit | **failure** — [run 33284449990](https://github.com/VIKOIT/reversibility-engine/actions/runs/33284449990) |
+      | `release.yml` | **failure** at its first step — [run 33284764243](https://github.com/VIKOIT/reversibility-engine/actions/runs/33284764243) |
+      | `release.yml` — build matrix, *Publish the release*, *Move the major tag* | **skipped**, all three |
+      | `publish-image.yml` | **failure** at its first step — [run 33284764248](https://github.com/VIKOIT/reversibility-engine/actions/runs/33284764248) |
+      | `publish-image.yml` — buildx, GHCR login, build, verify, push | **skipped**, all five. It refused before authenticating to the registry. |
+      | Releases published | none. The list still ended at `v1.2.1`. |
+      | `@v1` | unmoved, still `ed63730`. |
+
+      The message it printed, which is the one a person will meet:
+
+      ```
+      Requiring a successful ci.yml run for 0829a1f...
+      Found run: status=completed conclusion=failure
+      ##[error]ci.yml for 0829a1f... concluded 'failure', not success. Nothing is published
+      over a red CI, and there is no override: make CI green and tag the commit that passed.
+      ```
+
+      The branch and tag were deleted afterwards. **Re-run this proof after any change to
+      `require-green-ci.sh` or to either workflow's first job** — it costs one branch, one tag
+      and about ten minutes, and it is the only evidence that the gate gates.
+
     The two functions are now one: both call `locate`, and there is no second implementation left
     to disagree with. `TestTheTwoSidesOfTheComparisonAgree` asserts they return the same string
     rather than asserting either value.

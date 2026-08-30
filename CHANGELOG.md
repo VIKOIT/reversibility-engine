@@ -48,6 +48,14 @@ pending, cancelled, skipped and no-run-at-all all mean no, because each is absen
 make CI green first. It costs one API call and no build time, and it runs both before the build
 matrix — so a red CI costs seconds, not thirty minutes — and again immediately before publishing.
 
+**The gate was made to refuse before it was trusted.** A gate that has never said no is a gate
+nobody has tested, so a throwaway branch was given a deliberately failing test, tagged, and
+watched: `release.yml` and `publish-image.yml` both failed at their first step, the build matrix
+and *Publish the release* and *Move the major tag* were all skipped, `publish-image.yml` refused
+before it even logged in to the registry, no release was created, and `@v1` did not move. The
+branch and tag were then deleted. This proof should be re-run after any change to
+`require-green-ci.sh` or to either workflow's first job.
+
 ### Fixed
 
 **The image was pushed before it was verified.** `publish-image.yml` published to GHCR and *then*
